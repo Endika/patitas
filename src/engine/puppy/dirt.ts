@@ -1,4 +1,4 @@
-import { soil, type Care } from '@/domain/care'
+import { messPenalty, soil, type Care } from '@/domain/care'
 import type { Vec3 } from '@/engine/math'
 import { inMud, type Spots } from '@/engine/room/furniture'
 import { vnoise } from './noise'
@@ -173,11 +173,12 @@ export function meanDirt(field: Float32Array): number {
 }
 
 /**
- * The care with its cleanliness at 1 − the mean dirt: the field is the truth while the room is
- * open, and its change lands on the care through `soil` like any other.
+ * The care with its cleanliness at 1 − the mean dirt, less what the waiting messes take: the field
+ * is the truth while the room is open, and its change lands on the care through `soil` like any
+ * other.
  */
 export const withDirt = (care: Care, field: Float32Array): Care =>
-  soil(care, care.cleanliness - (1 - meanDirt(field)))
+  soil(care, care.cleanliness - (1 - meanDirt(field) - messPenalty(care)))
 
 /**
  * Spreads a saved level of dirt (its mean) over the puppy by height, paws first, then belly,
@@ -231,4 +232,24 @@ export function mudDepth(
   let d = inMud(spots, body.x, body.z)
   for (const { pos } of legs) d = Math.max(d, inMud(spots, pos.x, pos.z))
   return d
+}
+
+/** A mess on the floor as the paws meet it, in world coordinates. */
+export interface Underfoot {
+  x: number
+  z: number
+  r: number
+}
+
+/** Deep enough for the paws and no further. */
+const MESS_DEPTH = 0.3
+
+/** Stepping in a mess: as deep as mud that only reaches the paws, while any paw is in one. */
+export function messDepth(
+  messes: readonly Underfoot[],
+  legs: readonly { pos: Pick<Vec3, 'x' | 'z'> }[],
+): number {
+  for (const m of messes)
+    for (const { pos } of legs) if (Math.hypot(pos.x - m.x, pos.z - m.z) < m.r) return MESS_DEPTH
+  return 0
 }

@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '../../src/domain/breeds'
 import {
+  addMess,
+  BLADDER_PER_HOUR,
   catchUp,
+  cleanMess,
   createCare,
+  fillBladder,
+  messKind,
+  MESS_CAP,
+  relieve,
+  sulk,
+  withCareDefaults,
   dry,
   ENERGY_MOVE_LOSS_PER_HOUR,
   exercise,
@@ -15,6 +24,7 @@ import {
   wash,
   weightStatus,
   type Care,
+  type Mess,
 } from '../../src/domain/care'
 
 const at = (d: number, h: number, min = 0) => new Date(2026, 9, d, h, min).getTime()
@@ -44,6 +54,9 @@ describe('createCare', () => {
       weightKg: 4.25,
       wet: 0,
       lastSeen: 42,
+      bladder: 0,
+      messes: [],
+      gloom: 0,
     })
   })
 })
@@ -174,5 +187,112 @@ describe('actions', () => {
   it('tire spends energy slowly while the puppy moves about', () => {
     expect(tire({ ...care, energy: 0.8 }, 3600).energy).toBeCloseTo(0.8 - ENERGY_MOVE_LOSS_PER_HOUR)
     expect(tire(care, 360000).energy).toBe(0)
+  })
+})
+
+describe('pee and poop', () => {
+  const care = createCare(breed, 0)
+  const mess = (kind: Mess['kind'] = 'pee', createdAt = 0): Mess => ({
+    kind,
+    x: 0,
+    z: 0,
+    createdAt,
+  })
+
+  it('fills the bladder by the hour and a little more after a meal, and empties it', () => {
+    expect(fillBladder(care, 3600).bladder).toBeCloseTo(BLADDER_PER_HOUR)
+    expect(fillBladder(care, 36000).bladder).toBe(1)
+    expect(feed(care, breed).bladder).toBeCloseTo(0.3)
+    expect(relieve({ ...care, bladder: 1 }).bladder).toBe(0)
+  })
+
+  it('is poop a third of the time, more often soon after a meal', () => {
+    expect(messKind(0.34, false)).toBe('poop')
+    expect(messKind(0.36, false)).toBe('pee')
+    expect(messKind(0.59, true)).toBe('poop')
+    expect(messKind(0.61, true)).toBe('pee')
+  })
+
+  it('each mess left lowers cleanliness a little, and cleaning it gives it back', () => {
+    const one = addMess(care, mess())
+    const two = addMess(one, mess('poop'))
+    expect(two.messes).toHaveLength(2)
+    expect(two.cleanliness).toBeCloseTo(0.94)
+    const cleaned = cleanMess(two, two.messes[0]!)
+    expect(cleaned.messes).toEqual([two.messes[1]])
+    expect(cleaned.cleanliness).toBeCloseTo(0.97)
+  })
+
+  it('keeps at most two per puppy', () => {
+    const full = addMess(addMess(care, mess()), mess())
+    expect(addMess(full, mess('poop'))).toBe(full)
+    expect(MESS_CAP).toBe(2)
+  })
+
+  it('while a mess waits, happiness drifts down by at most 0.1, and only while it waits', () => {
+    const messy = addMess({ ...care, happiness: 0.8 }, mess())
+    expect(sulk(messy, 60).happiness).toBeLessThan(0.8)
+    expect(sulk(messy, 60).happiness).toBeGreaterThan(0.7)
+    const long = sulk(sulk(messy, 3600), 3600)
+    expect(long.happiness).toBeCloseTo(0.7)
+    expect(sulk(care, 3600)).toBe(care)
+    // Cleaned up, a new mess can sadden it again, but never by more than 0.1 at a time
+    const again = sulk(addMess(cleanMess(long, long.messes[0]!), mess()), 3600)
+    expect(again.happiness).toBeCloseTo(0.6)
+  })
+
+  it('reads an older record without the new fields as empty', () => {
+    const { bladder: _b, messes: _m, gloom: _g, ...old } = care
+    expect(withCareDefaults(old)).toEqual(care)
+    expect(withCareDefaults(addMess(care, mess()))).toEqual(addMess(care, mess()))
+  })
+})
+
+describe('catchUp with accidents', () => {
+  const start = at(1, 12)
+  const spots = [0.1, 0.2, 0.3]
+  let n = 0
+  const place = () => ({ x: spots[n++ % spots.length]!, z: 0.5 })
+
+  it('leaves at most two messes after 8 h by day, placed where it is told', () => {
+    n = 0
+    const care = catchUp(createCare(breed, start), breed, start + 8 * HOUR, place, () => 0.9)
+    expect(care.messes).toHaveLength(2)
+    expect(care.messes.map((m) => [m.kind, m.x, m.z])).toEqual([
+      ['pee', 0.1, 0.5],
+      ['pee', 0.2, 0.5],
+    ])
+    expect(care.messes.every((m) => m.createdAt > start && m.createdAt <= start + 8 * HOUR)).toBe(
+      true,
+    )
+    expect(care.bladder).toBeLessThan(1)
+    expect(care.happiness).toBeGreaterThanOrEqual(0.4 - 1e-9)
+    expect(health(care, breed)).not.toBe('Necesita cuidados')
+  })
+
+  it('never more than two in all, counting those already there', () => {
+    n = 0
+    const before = addMess(createCare(breed, start), {
+      kind: 'poop',
+      x: 0,
+      z: 0,
+      createdAt: start,
+    })
+    const care = catchUp(before, breed, start + 30 * 24 * HOUR, place, () => 0.1)
+    expect(care.messes).toHaveLength(2)
+    expect(care.messes[1]!.kind).toBe('poop')
+  })
+
+  it('holds on overnight: asleep the bladder does not fill', () => {
+    const night = at(1, 21)
+    const care = catchUp(createCare(breed, night), breed, night + 12 * HOUR, place)
+    expect(care.messes).toEqual([])
+    expect(care.bladder).toBeCloseTo(BLADDER_PER_HOUR)
+  })
+
+  it('without anywhere to put them, it keeps the bladder full for the room', () => {
+    const care = catchUp(createCare(breed, start), breed, start + 8 * HOUR)
+    expect(care.messes).toEqual([])
+    expect(care.bladder).toBe(1)
   })
 })

@@ -19,7 +19,7 @@ export function createMemoryStorage(): GameStorage {
     },
     loadCare: async (id) => {
       const care = cares.get(id)
-      return care && { ...care }
+      return care && { ...care, messes: [...care.messes] }
     },
     saveCare: async (id, care) => {
       cares.set(id, { ...care })

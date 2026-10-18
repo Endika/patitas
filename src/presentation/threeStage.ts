@@ -1,5 +1,5 @@
 import { BREEDS } from '@/domain/breeds'
-import { createCare, isNight } from '@/domain/care'
+import { cleanMess, createCare, isNight } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
@@ -27,10 +27,12 @@ import {
   forgetRoute,
   goToMud,
   keepsEating,
+  relieveNow,
   touch,
   tuckIn,
 } from '@/engine/motion/routine'
 import { START_PLACES } from '@/engine/room/furniture'
+import { createMessLayer } from '@/engine/room/messes'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
 import { NO_3D, type PuppyNeeds, type RoomStage, type StageStatus } from './roomStage'
@@ -113,6 +115,7 @@ export function createThreeStage(
   }
 
   const ball = createBall()
+  const messes = createMessLayer(room.scene)
   const mounted = new Map<string, PuppyView>()
   /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
   const failed = new Set<string>()
@@ -239,23 +242,38 @@ export function createThreeStage(
         }
       else if (g.kind === 'puzzle') for (const v of views) puzzle(v.behaviour)
     },
+    // A tap on a mess cleans it up rather than calling the puppies there
+    tap(x, y, w, h) {
+      const mess = messes.hit(room.camera, x, y, w, h)
+      if (!mess) return false
+      for (const v of views) v.care = cleanMess(v.care, mess)
+      return true
+    },
   })
   // The beds move with the frame
   const offResize = room.onResize(() => {
     followBeds()
+    messes.relayout(room.cam)
     for (const v of views) keepInPlay(v.motion, room.cam, mood(v))
   })
 
   room.start((dt, t) => {
     stepBall(ball, room.cam, dt)
     syncBallMesh(room, ball)
-    tickPuppies(views, { room, ball, now: now(), petting: petView, clock: clock() }, dt, t).forEach(
-      (ev, i) => {
-        if (!ev.dropped) return
-        const at = headWorld(views[i]!)
-        for (let n = 0; n < 3; n++) room.emitHeart(at)
-      },
-    )
+    tickPuppies(
+      views,
+      { room, ball, now: now(), petting: petView, clock: clock(), underfoot: messes.underfoot },
+      dt,
+      t,
+    ).forEach((ev, i) => {
+      if (!ev.dropped) return
+      const at = headWorld(views[i]!)
+      for (let n = 0; n < 3; n++) room.emitHeart(at)
+    })
+    messes.begin()
+    for (const v of views) for (const m of v.care.messes) messes.show(m, room.cam)
+    messes.end()
+    messes.step(dt)
     syncBallMesh(room, ball)
     // The hint and the ball button follow whichever puppy is playing
     const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]
@@ -333,12 +351,18 @@ export function createThreeStage(
       if (!v || !spots || v.routine.routine !== 'none' || v.fetch.task !== 'free') return
       goToMud(v.routine, v.motion, spots, (x, z) => clampPlay(room.cam, x, z))
     },
+    relieve(kind) {
+      const v = views[0]
+      if (!v || v.routine.routine !== 'none' || v.fetch.task !== 'free') return
+      relieveNow(v.routine, v.motion, kind)
+    },
     onChange: hub.onChange,
     dispose() {
       disposed = true
       hub.clear()
       detach()
       offResize()
+      messes.dispose()
       for (const v of mounted.values()) v.dispose()
       mounted.clear()
       room.dispose()

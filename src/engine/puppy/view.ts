@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BREEDS, type Breed } from '@/domain/breeds'
-import { createCare, type Care } from '@/domain/care'
+import { addMess, createCare, messPenalty, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -31,6 +31,7 @@ import type { BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
+import { messLocal } from '@/engine/room/messes'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
 import type { Anatomy, Tuple3, ZoneId } from './anatomy'
@@ -49,12 +50,14 @@ import { RIM } from './coat'
 import {
   createDirt,
   dirtRest,
+  messDepth,
   mudDepth,
   redistributeDirt,
   stepDirt,
   withDirt,
   type Dirt,
   type DirtRest,
+  type Underfoot,
 } from './dirt'
 import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from './face'
 import type { PuppyGeometry } from './geometry'
@@ -241,7 +244,7 @@ export function mountPuppyView(
   const skeleton = new THREE.Skeleton(boneList)
   const ident = new THREE.Matrix4()
   const dirt = createDirt(restOf(geometry, A))
-  redistributeDirt(dirt.field, dirt.rest, 1 - care.cleanliness)
+  redistributeDirt(dirt.field, dirt.rest, 1 - care.cleanliness - messPenalty(care))
   const dirtAttr = new THREE.BufferAttribute(dirt.field, 1).setUsage(THREE.DynamicDrawUsage)
   const furGeometry = ownGeometry(geometry, dirtAttr)
   // Fewer shells re-space and hide layers instead of compiling new materials
@@ -446,7 +449,11 @@ export interface PuppyTickCtx {
   /** Wall-clock milliseconds for bedtime; without it, or without furniture, no routines run. */
   clock?: number
   random?: () => number
+  /** The messes on the floor, whoever left them. */
+  underfoot?: readonly Underfoot[]
 }
+
+const NOTHING_UNDERFOOT: readonly Underfoot[] = []
 
 export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
   view.bones.jaw!.localToWorld(out.copy(view.mouth))
@@ -512,6 +519,12 @@ export function tickPuppies(
       )
       view.care = r.care
       view.bowl = r.bowl
+      if (r.mess)
+        view.care = addMess(view.care, {
+          kind: r.mess.kind,
+          ...messLocal(room.cam, r.mess.x, r.mess.z),
+          createdAt: ctx.clock,
+        })
       if (r.fed) {
         view.behaviour.happy = Math.min(1, view.behaviour.happy + FED_HAPPY)
         view.behaviour.perk = 1
@@ -527,7 +540,13 @@ export function tickPuppies(
         })
       }
     }
-    if (spots && stepDirt(view.dirt, mudDepth(spots, M.pos, view.legs), dt)) {
+    const depth = spots
+      ? Math.max(
+          mudDepth(spots, M.pos, view.legs),
+          messDepth(ctx.underfoot ?? NOTHING_UNDERFOOT, view.legs),
+        )
+      : 0
+    if (stepDirt(view.dirt, depth, dt)) {
       view.dirtAttr.needsUpdate = true
       view.care = withDirt(view.care, view.dirt.field)
     }

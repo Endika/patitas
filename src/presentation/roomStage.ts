@@ -1,3 +1,4 @@
+import type { MessKind } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 
 /** Shown instead of a stage when the browser has no WebGL. */
@@ -39,6 +40,8 @@ export interface RoomStage {
   feed(): void
   /** Debug page only: sends the first puppy into the puddle, if it is awake and doing nothing else. */
   toMud?(): void
+  /** Debug page only: the first puppy squats where it stands, if it is awake and doing nothing else. */
+  relieve?(kind: MessKind): void
   /** Called at once with the current status and again whenever it changes. */
   onChange(listener: (s: StageStatus) => void): () => void
   dispose(): void
