@@ -220,7 +220,12 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
       if (!views.length) putBallAway(views, ball)
       mountReady()
       for (const p of wanted)
-        if (!mounted.has(p.id)) void loadPuppyGeometry(p.breedId).then(mountReady)
+        if (!mounted.has(p.id))
+          void loadPuppyGeometry(p.breedId).then(mountReady, () => {
+            // The cache forgets a failed build, so the next setPuppies tries again
+            if (!disposed && wanted.some((w) => w.id === p.id) && !mounted.has(p.id))
+              hub.set({ notice: `No se pudo preparar a ${p.name}.` })
+          })
     },
     takeBall() {
       if (views.length && ball.state !== 'hand' && free()) offerBall(views, ball)
