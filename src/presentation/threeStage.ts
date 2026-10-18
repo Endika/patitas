@@ -34,6 +34,7 @@ const PLACES = [
 ]
 
 const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
+const IDLE_HAPPINESS = 0.25
 
 function statusHub(initial: StageStatus) {
   let status = initial
@@ -66,7 +67,7 @@ function statusHub(initial: StageStatus) {
 export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
   const hub = statusHub({
     hint: HINTS.idle,
-    happiness: 0.25,
+    happiness: IDLE_HAPPINESS,
     ball: { inHand: false, disabled: false },
     notice: null,
   })
@@ -180,7 +181,12 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
     // The hint and the ball button follow whichever puppy is playing
     const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]
     if (!v) {
-      hub.set({ ball: { inHand: ball.state === 'hand', disabled: true } })
+      hintNow = 'idle'
+      hub.set({
+        hint: '',
+        happiness: IDLE_HAPPINESS,
+        ball: { inHand: ball.state === 'hand', disabled: true },
+      })
       return
     }
     const s = v.behaviour

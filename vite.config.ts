@@ -20,7 +20,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifestFilename: 'app.webmanifest',
-      includeAssets: ['favicon.svg', 'favicon.png', 'apple-touch-icon.png'],
+      // globPatterns already precaches every icon
+      includeManifestIcons: false,
       manifest: {
         name: 'Patitas',
         short_name: 'Patitas',
