@@ -226,10 +226,14 @@ function fpsOverlay(canvas: HTMLCanvasElement) {
   }
 }
 
-/** Throws when the browser has no WebGL. `coarse` is a touch screen. */
+/**
+ * Throws when the browser has no WebGL. `coarse` is a touch screen; `frame` places the camera
+ * for the canvas's aspect on every resize.
+ */
 export function createRoomScene(
   canvas: HTMLCanvasElement,
   coarse = matchMedia('(pointer: coarse)').matches,
+  frame: (cam: FixedCamera, aspect: number) => void = fitCamera,
 ): RoomScene {
   let quality = pickQuality(1, coarse)
   const renderer = new THREE.WebGLRenderer({
@@ -287,7 +291,7 @@ export function createRoomScene(
     if (!w || !h) return
     renderer.setSize(w, h, false)
     camera.aspect = w / h
-    fitCamera(cam, camera.aspect)
+    frame(cam, camera.aspect)
     camera.updateProjectionMatrix()
     cameraPosition(cam, camera.position)
     camera.lookAt(cam.target)

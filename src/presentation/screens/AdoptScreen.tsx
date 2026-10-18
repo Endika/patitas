@@ -42,8 +42,8 @@ export default function AdoptScreen({
   }
 
   return (
-    <main className="min-h-dvh bg-[radial-gradient(130%_85%_at_50%_28%,var(--color-ground),var(--color-ground-low))] px-4 pt-4 pb-8 text-ink">
-      <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+    <main className="flex min-h-dvh flex-col bg-[radial-gradient(130%_85%_at_50%_28%,var(--color-ground),var(--color-ground-low))] px-4 pt-4 pb-6 text-ink">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-4">
         {onBack && (
           <button
             type="button"
@@ -61,7 +61,7 @@ export default function AdoptScreen({
         {unsaved && (
           <UnsavedNotice className="rounded-2xl border border-brand bg-glass px-4 py-3 text-sm font-semibold" />
         )}
-        <form className="flex flex-col gap-6" noValidate onSubmit={(e) => void submit(e)}>
+        <form className="flex flex-col gap-5" noValidate onSubmit={(e) => void submit(e)}>
           <fieldset className="flex flex-col gap-3">
             <legend className="mb-3 text-sm font-bold tracking-wider text-ink-soft uppercase">
               Raza
@@ -70,7 +70,7 @@ export default function AdoptScreen({
               {BREED_IDS.map((id) => (
                 <label
                   key={id}
-                  className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-line bg-glass px-2 py-4 font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-on-ink has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand"
+                  className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-line bg-glass px-2 py-3 font-bold has-checked:border-ink has-checked:bg-ink has-checked:text-on-ink has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand"
                 >
                   <input
                     type="radio"

@@ -1,3 +1,4 @@
+import * as THREE from 'three'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import { endPet, movePet, startPet } from '@/engine/puppy/behaviour'
@@ -10,6 +11,7 @@ import {
   type PuppyView,
 } from '@/engine/puppy/view'
 import { createBall } from '@/engine/room/ball'
+import { fitCamera, frameBox } from '@/engine/room/camera'
 import { attachPointer } from '@/engine/room/input'
 import { createRoomScene, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { createBreedSwitch } from './breedSwitch'
@@ -62,9 +64,13 @@ function statusHub(initial: PreviewStatus) {
 /** The room's scene and petting with a single puppy that stays where it is. */
 export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage {
   const hub = statusHub({ loading: true, notice: null })
+  // The puppy's bounds once mounted: the camera closes in on it instead of the whole floor
+  let bounds: THREE.Box3 | null = null
   let room: RoomScene
   try {
-    room = createRoomScene(canvas)
+    room = createRoomScene(canvas, undefined, (cam, aspect) =>
+      bounds ? frameBox(cam, bounds, aspect) : fitCamera(cam, aspect),
+    )
   } catch {
     hub.set({ loading: false, notice: NO_3D })
     return { show() {}, onStatus: hub.onStatus, dispose: hub.clear }
@@ -81,6 +87,9 @@ export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage
     peek: peekPuppyGeometry,
     mount(id, built) {
       view = mountPuppyView(room, previewPuppy(id), built, room.quality)
+      view.group.updateMatrixWorld(true)
+      bounds = new THREE.Box3().setFromObject(view.group)
+      room.resize()
     },
     unmount() {
       view?.dispose()
@@ -118,6 +127,11 @@ export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage
     gesture() {},
   })
 
+  // The preview's height follows the layout, not only the window
+  const watchSize =
+    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => room.resize())
+  watchSize?.observe(canvas)
+
   room.start((dt, t) => {
     if (view) tickPuppies([view], { room, ball, now: now(), petting: petting ? view : null }, dt, t)
   })
@@ -128,6 +142,7 @@ export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage
     dispose() {
       breeds.stop()
       hub.clear()
+      watchSize?.disconnect()
       detach()
       view?.dispose()
       view = null
