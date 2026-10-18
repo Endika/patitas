@@ -69,8 +69,11 @@ export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage
   let bounds: THREE.Box3 | null = null
   let room: RoomScene
   try {
-    room = createRoomScene(canvas, undefined, (cam, aspect) =>
-      bounds ? frameBox(cam, bounds, aspect) : fitCamera(cam, aspect),
+    room = createRoomScene(
+      canvas,
+      undefined,
+      (cam, aspect) => (bounds ? frameBox(cam, bounds, aspect) : fitCamera(cam, aspect)),
+      { furniture: false },
     )
   } catch {
     hub.set({ loading: false, notice: NO_3D })
