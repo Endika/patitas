@@ -24,8 +24,11 @@ export interface Ear {
   tip?: string
 }
 
+/** Where a caress lands; `belly` only counts while the puppy lies down. */
+export type ZoneId = 'head' | 'ears' | 'muzzle' | 'chest' | 'back' | 'belly'
+
 export interface Zone {
-  zone: string
+  zone: ZoneId
   b: string
   c: Tuple3
   r: number
@@ -332,14 +335,14 @@ export function anatomy(breed: Breed): Anatomy {
   const mouthInfo: MouthInfo = { mY, mStart, mEnd, hinge }
 
   const zones: Zone[] = [
-    { zone: 'cabeza', b: 'head', c: [0, hY + 0.04, hZ], r: 0.2 },
-    { zone: 'hocico', b: 'head', c: [0, hY - 0.09 * hd, hZ + 0.17 * hd], r: 0.09 },
-    { zone: 'pecho', b: 'chest', c: [0, sy - 0.02, 0.22], r: 0.14 },
-    { zone: 'lomo', b: 'spine', c: [0, sy + 0.04, 0.0], r: 0.18 },
-    { zone: 'lomo', b: 'pelvis', c: [0, sy + 0.02, -0.16], r: 0.16 },
-    { zone: 'barriga', b: 'spine', c: [0, sy - 0.12, -0.01], r: 0.13 },
+    { zone: 'head', b: 'head', c: [0, hY + 0.04, hZ], r: 0.2 },
+    { zone: 'muzzle', b: 'head', c: [0, hY - 0.09 * hd, hZ + 0.17 * hd], r: 0.09 },
+    { zone: 'chest', b: 'chest', c: [0, sy - 0.02, 0.22], r: 0.14 },
+    { zone: 'back', b: 'spine', c: [0, sy + 0.04, 0.0], r: 0.18 },
+    { zone: 'back', b: 'pelvis', c: [0, sy + 0.02, -0.16], r: 0.16 },
+    { zone: 'belly', b: 'spine', c: [0, sy - 0.12, -0.01], r: 0.13 },
     ...ears.map((e): Zone => ({
-      zone: 'orejas',
+      zone: 'ears',
       b: e.nm,
       c:
         B.ear === 'floppy'
