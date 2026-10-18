@@ -1,3 +1,5 @@
+import { BREEDS } from '@/domain/breeds'
+import { createCare, isNight } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { ROOM_CAPACITY } from '@/domain/room'
 import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/engine/puppy/behaviour'
@@ -18,18 +20,11 @@ import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
+import { bedSlots, touch, tuckIn } from '@/engine/motion/routine'
+import { START_PLACES } from '@/engine/room/furniture'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
 import { NO_3D, type RoomStage, type StageStatus } from './roomStage'
-
-/** Where each puppy starts, for one or two. */
-const PLACES = [
-  [{ x: 0, z: 0 }],
-  [
-    { x: -0.32, z: 0, heading: 0.25 },
-    { x: 0.32, z: 0, heading: -0.25 },
-  ],
-]
 
 const IDLE_HAPPINESS = 0.25
 
@@ -60,8 +55,14 @@ function statusHub(initial: StageStatus) {
   }
 }
 
-/** The three.js room with the prototype's ball, petting, tricks and hints. */
-export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
+/**
+ * The three.js room with the prototype's ball, petting, tricks and hints, and the puppies' own
+ * routines on the wall `clock` (milliseconds): opened at night, they are already in bed.
+ */
+export function createThreeStage(
+  canvas: HTMLCanvasElement,
+  clock: () => number = Date.now,
+): RoomStage {
   const hub = statusHub({
     hint: HINTS.idle,
     happiness: IDLE_HAPPINESS,
@@ -107,14 +108,20 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
   /** Mounts every wanted puppy whose mesh is ready; a mesh for a puppy no longer wanted waits unused. */
   const mountReady = () => {
     if (disposed) return
-    const places = PLACES[wanted.length - 1] ?? []
+    const spots = room.furniture?.spots
+    const beds = spots && isNight(clock()) ? bedSlots(spots, wanted.length) : null
+    const places = beds ?? START_PLACES[wanted.length - 1] ?? []
     let added = false
     wanted.forEach((p, i) => {
       if (mounted.has(p.id)) return
       const built = peekPuppyGeometry(p.breedId)
       if (!built) return
       added = true
-      mounted.set(p.id, mountPuppyView(room, p, built, room.quality, places[i]))
+      const care = createCare(BREEDS[p.breedId], clock())
+      const view = mountPuppyView(room, p, built, room.quality, places[i], care)
+      const bed = beds?.[i]
+      if (bed) tuckIn(view.routine, view.motion, bed.side)
+      mounted.set(p.id, view)
     })
     order()
     // A newcomer waits for the throw like the others
@@ -142,6 +149,7 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
     free,
     petStart(hit, t) {
       petView = hit.view
+      touch(hit.view.routine)
       startPet(hit.view.behaviour, hit.zone, hit.point, t)
       if (hit.view.fetch.task === 'free') hit.view.motion.goal = null
     },
@@ -167,24 +175,49 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
       } else if (g.kind === 'takeBall') offerBall(views, ball)
       else if (g.kind === 'goTo')
         for (const v of views) {
+          if (touch(v.routine)) continue
           goTo(v.motion, g.x, g.z, mood(v))
           v.behaviour.perk = 1
         }
       else if (g.kind === 'puzzle') for (const v of views) puzzle(v.behaviour)
     },
   })
+  // The bed moves with the frame: whoever is in it or on the way moves along
+  const bedAt = room.furniture?.spots.bed.center.clone()
   const offResize = room.onResize(() => {
+    const bed = room.furniture?.spots.bed.center
+    if (bed && bedAt) {
+      const dx = bed.x - bedAt.x,
+        dz = bed.z - bedAt.z
+      bedAt.copy(bed)
+      for (const v of views) {
+        const r = v.routine
+        if (r.routine !== 'toBed' && r.routine !== 'sleeping') continue
+        r.target.x += dx
+        r.target.z += dz
+        if (r.routine !== 'sleeping') continue
+        for (const p of [
+          v.motion.pos,
+          ...v.legs.flatMap((L) => [L.planted, L.from, L.land, L.pos]),
+        ]) {
+          p.x += dx
+          p.z += dz
+        }
+      }
+    }
     for (const v of views) keepInPlay(v.motion, room.cam, mood(v))
   })
 
   room.start((dt, t) => {
     stepBall(ball, room.cam, dt)
     syncBallMesh(room, ball)
-    tickPuppies(views, { room, ball, now: now(), petting: petView }, dt, t).forEach((ev, i) => {
-      if (!ev.dropped) return
-      const at = headWorld(views[i]!)
-      for (let n = 0; n < 3; n++) room.emitHeart(at)
-    })
+    tickPuppies(views, { room, ball, now: now(), petting: petView, clock: clock() }, dt, t).forEach(
+      (ev, i) => {
+        if (!ev.dropped) return
+        const at = headWorld(views[i]!)
+        for (let n = 0; n < 3; n++) room.emitHeart(at)
+      },
+    )
     syncBallMesh(room, ball)
     // The hint and the ball button follow whichever puppy is playing
     const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]

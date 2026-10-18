@@ -7,6 +7,7 @@ import {
   formatKg,
   furnitureObstacles,
   inMud,
+  START_PLACES,
   type Spot,
   type Spots,
 } from '@/engine/room/furniture'
@@ -107,10 +108,7 @@ describe('computeSpots', () => {
       const { cam, camera } = view(aspect)
       const { mud } = computeSpots(cam)
       // The two start places: a body 0.26 wide, 0.6 long and 0.55 tall, turned to `heading`
-      const screens = [
-        { x: -0.32, heading: 0.25 },
-        { x: 0.32, heading: -0.25 },
-      ].map(({ x, heading }) => {
+      const screens = START_PLACES[1]!.map(({ x, z: z0, heading = 0 }) => {
         const box = new THREE.Box2()
         for (const w of [-0.13, 0.13])
           for (const l of [-0.3, 0.3])
@@ -118,7 +116,7 @@ describe('computeSpots', () => {
               const p = new THREE.Vector3(
                 x + w * Math.cos(heading) + l * Math.sin(heading),
                 y,
-                -w * Math.sin(heading) + l * Math.cos(heading),
+                z0 - w * Math.sin(heading) + l * Math.cos(heading),
               ).project(camera)
               box.expandByPoint(new THREE.Vector2(p.x, p.y))
             }
@@ -133,7 +131,7 @@ describe('computeSpots', () => {
           all++
           if (!screens.some((b) => b.containsPoint(new THREE.Vector2(p.x, p.y)))) seen++
         }
-      expect(seen / all).toBeGreaterThanOrEqual(0.5)
+      expect(seen / all).toBeGreaterThanOrEqual(0.9)
     },
   )
 
@@ -191,6 +189,24 @@ describe('inMud', () => {
       last = v
     }
   })
+})
+
+describe('START_PLACES', () => {
+  it.each(ASPECTS)(
+    'starts one or two puppies in the play area, clear of the furniture and the puddle, at aspect %f',
+    (aspect) => {
+      const { cam } = view(aspect)
+      const spots = computeSpots(cam)
+      for (const places of START_PLACES)
+        for (const p of places) {
+          const [x, z] = clampPlay(cam, p.x, p.z)
+          expect(Math.hypot(x - p.x, z - p.z)).toBeLessThan(1e-9)
+          for (const c of furnitureObstacles(spots))
+            expect(Math.hypot(p.x - c.x, p.z - c.z)).toBeGreaterThan(c.r + 0.3)
+          expect(inMud(spots, p.x, p.z)).toBe(0)
+        }
+    },
+  )
 })
 
 describe('furnitureObstacles', () => {

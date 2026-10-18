@@ -19,6 +19,13 @@ const POINTER_ATTENTION = 1.6
 const SCRATCH_AFTER = 0.7
 const BLINK = 0.14
 const YAWN = 1.8
+/** Asleep: the head turns onto the front paws and the tail wraps round the body. */
+const SLEEP = {
+  neck: [0.35, 0.25],
+  head: [0.25, 0.3],
+  tail: [1, 1, 0.75, 0.55],
+  breath: 0.7,
+} as const
 
 /** What behaviour needs to know about a puppy besides its state. */
 export interface BehaviourRig {
@@ -174,6 +181,10 @@ export function endPet(s: BehaviourState): void {
   s.zone = null
 }
 
+export function yawn(s: BehaviourState): void {
+  s.yawnT = YAWN
+}
+
 /** A tap the puppy cannot act on: it tilts its head, curious. */
 export function puzzle(s: BehaviourState, random: () => number = Math.random): void {
   s.tilt = random() < 0.5 ? 0.38 : -0.38
@@ -241,6 +252,8 @@ export function stepBehaviour(
   const zone = petting ? s.zone : null
   const petHead = zone === 'head' || zone === 'ears'
   const task = fetch.task
+  const asleep = M.pose === 'sleep',
+    sw = M.sleepW
 
   if ((zone === 'belly' || zone === 'back') && M.pose === 'lie' && s.happy > 0.4)
     setPose(M, 'belly')
@@ -256,7 +269,7 @@ export function stepBehaviour(
   else if (now - s.pointerAt < POINTER_ATTENTION) target.copy(s.pointerLook)
   else {
     s.idleT -= dt
-    if (s.idleT <= 0) {
+    if (s.idleT <= 0 && !asleep) {
       const r = random()
       s.idleT = 1.8 + random() * 2.8
       s.idleCam = r < 0.5
@@ -313,8 +326,8 @@ export function stepBehaviour(
 
   // Happiness, breathing and panting
   s.happy = Math.max(0.12, s.happy - dt * (petting || task !== 'free' ? 0 : 0.012))
-  s.pant = damp(s.pant, s.happy > 0.62 || body.k > 0.5 ? 1 : 0, 2, dt)
-  s.breath += dt * (1.6 + s.pant * 6.5)
+  s.pant = damp(s.pant, !asleep && (s.happy > 0.62 || body.k > 0.5) ? 1 : 0, 2, dt)
+  s.breath += dt * (1.6 + s.pant * 6.5 + (SLEEP.breath - 1.6 - s.pant * 6.5) * sw)
   const br = Math.sin(s.breath)
   s.wag += dt * (4.5 + 11 * s.happy) * (0.7 + 0.5 * P.energy)
   const amp = 0.1 + 0.62 * s.happy
@@ -334,22 +347,23 @@ export function stepBehaviour(
     s.saccT = 0.4 + random() * 1.2
     s.sacc = { x: (random() - 0.5) * 0.06, y: (random() - 0.5) * 0.04 }
   }
-  const lid = LID_OPEN + (LID_SHUT - LID_OPEN) * Math.max(shut, s.yawnEyes)
+  const lid = LID_OPEN + (LID_SHUT - LID_OPEN) * Math.max(shut, s.yawnEyes, sw)
   const lowLid = LOW_LID - 0.14 * s.bliss
 
   // Body, neck and head
   const sniffNod = s.sniffT > 0 && !M.active ? Math.sin(t * 15) * 0.025 : 0
   const bw = M.bellyW,
     fk = M.fk
+  const aw = 1 - sw
   const neck: Rot = [
-    s.pitch.x * 0.4 + br * 0.01 - body.pitch * 0.4 + 1.05 * bw,
-    s.yaw.x * 0.35 * (1 - bw),
-    s.roll.x * 0.3,
+    (s.pitch.x * 0.4 - body.pitch * 0.4) * aw + br * 0.01 + 1.05 * bw + SLEEP.neck[0] * sw,
+    s.yaw.x * 0.35 * (1 - bw) * aw + SLEEP.neck[1] * M.sleepSide * sw,
+    s.roll.x * 0.3 * aw,
   ]
   const head: Rot = [
-    s.pitch.x * 0.6 * (1 - bw) + sniffNod - body.pitch * 0.3,
-    s.yaw.x * 0.6 * (1 - bw) + 0.55 * bw,
-    s.roll.x * 0.7,
+    (s.pitch.x * 0.6 * (1 - bw) + sniffNod - body.pitch * 0.3) * aw + SLEEP.head[0] * sw,
+    (s.yaw.x * 0.6 * (1 - bw) + 0.55 * bw) * aw + SLEEP.head[1] * M.sleepSide * sw,
+    s.roll.x * 0.7 * aw,
   ]
   const spine: Rot = [
     body.pitch * (1 - fk),
@@ -372,14 +386,15 @@ export function stepBehaviour(
 
   // Tail: higher when running, resting on the floor when sitting
   const curl = rig.tail === 'curl' ? 0.45 : 1
+  const [tx, ty0, ty1, ty2] = SLEEP.tail
   const tail: [Rot, Rot, Rot] = [
     [
-      -0.1 * s.happy - 0.3 * body.k + 0.5 * (M.sit + 0.8 * fk) * curl,
-      amp * curl * Math.sin(s.wag),
+      (-0.1 * s.happy - 0.3 * body.k + 0.5 * (M.sit + 0.8 * fk) * curl) * aw + tx * sw,
+      amp * curl * Math.sin(s.wag) * aw + ty0 * sw,
       0,
     ],
-    [0, amp * curl * 0.7 * Math.sin(s.wag - 0.7), 0],
-    [0, amp * curl * 0.5 * Math.sin(s.wag - 1.4), 0],
+    [0, amp * curl * 0.7 * Math.sin(s.wag - 0.7) * aw + ty1 * sw, 0],
+    [0, amp * curl * 0.5 * Math.sin(s.wag - 1.4) * aw + ty2 * sw, 0],
   ]
 
   // Sprung ears: they swing when the head turns and bounce when running
@@ -447,7 +462,17 @@ export function stepBehaviour(
 }
 
 export type HintKey =
-  ZoneId | 'idle' | 'scratch' | 'sit' | 'lie' | 'belly-up' | 'wait' | 'chase' | 'bringing' | 'done'
+  | ZoneId
+  | 'idle'
+  | 'scratch'
+  | 'sit'
+  | 'lie'
+  | 'sleep'
+  | 'belly-up'
+  | 'wait'
+  | 'chase'
+  | 'bringing'
+  | 'done'
 
 /** The hint to show this frame; keeps `prev` when nothing new is going on. */
 export function pickHint(

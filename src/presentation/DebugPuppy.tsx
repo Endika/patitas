@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import Hud from './components/Hud'
+import { debugClock } from './debugClock'
 import { createThreeStage } from './threeStage'
 import { useRoomStage } from './useRoomStage'
 import './room.css'
@@ -23,16 +24,16 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 }
 
 /** One or two puppies in the room with the prototype's controls, for checking the render by eye. */
-export default function DebugPuppy({ breedIds }: { breedIds: BreedId[] }) {
+export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
   const name = debugNames(breedIds).join(' y ')
   const createStage = useCallback(
     (canvas: HTMLCanvasElement) => {
-      const stage = createThreeStage(canvas)
+      const stage = createThreeStage(canvas, debugClock(at, Date.now))
       stage.setPuppies(debugPuppies(key.split(',') as BreedId[]))
       return stage
     },
-    [key],
+    [key, at],
   )
   const { hostRef, stageRef, status } = useRoomStage(createStage)
 
@@ -51,7 +52,7 @@ export default function DebugPuppy({ breedIds }: { breedIds: BreedId[] }) {
             {(Object.keys(BREEDS) as BreedId[]).map((id) => (
               <a
                 key={id}
-                href={`?debug=puppy&breed=${id}${breedIds[1] ? `&breed2=${breedIds[1]}` : ''}`}
+                href={`?debug=puppy&breed=${id}${breedIds[1] ? `&breed2=${breedIds[1]}` : ''}${at ? `&now=${encodeURIComponent(at)}` : ''}`}
                 aria-current={id === breedIds[0] ? 'page' : undefined}
               >
                 {BREEDS[id].label}

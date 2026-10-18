@@ -23,7 +23,22 @@ describe('poses', () => {
 
   it('keeps the prototype values and drops the roll', () => {
     expect(POSE_TIME).toEqual({ sit: 5, lie: 7, belly: 6 })
-    expect(Object.keys(POSES).sort()).toEqual(['belly', 'lie'])
+    expect(Object.keys(POSES).sort()).toEqual(['belly', 'lie', 'sleep'])
+  })
+
+  it('curls up to sleep from the lying legs and keeps sleeping until stood up', () => {
+    expect(POSES.sleep.front).toEqual(POSES.lie.front)
+    expect(POSES.sleep.hind).toEqual(POSES.lie.hind)
+    const m = createMotionState()
+    setPose(m, 'sleep')
+    expect(m.poseDur).toBe(Infinity)
+    for (let n = 0; n < 60 * 60; n++) stepPoses(m, 1 / 60)
+    expect(m.pose).toBe('sleep')
+    expect(m.fk).toBeGreaterThan(0.98)
+    expect(m.sleepW).toBeGreaterThan(0.98)
+    setPose(m, 'stand')
+    for (let n = 0; n < 240; n++) stepPoses(m, 1 / 60)
+    expect(m.sleepW).toBeLessThan(0.02)
   })
 
   it('blends the leg pose in while lying and clears the goal', () => {
