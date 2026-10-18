@@ -53,9 +53,15 @@ const BED = { radius: 0.42, depth: 0.34 },
 
 /** The beds' depth in the play area. */
 const BED_D = 1.7
-/** Centre to centre for pieces side by side: a little over 0.1 between their rims. */
-const BED_STEP = 2 * BED.radius + 0.11,
-  BOWL_STEP = 2 * BOWL.radius + 0.11
+/** Centre to centre for beds side by side: a little over 0.1 between their rims. */
+const BED_STEP = 2 * BED.radius + 0.11
+/**
+ * Bowls sit wider apart than their rims need: two puppies eating side by side stay outside each
+ * other's personal space (0.45), so neither is pushed off its bowl.
+ */
+const BOWL_STEP = 0.47
+/** The scale's depth when there is no room for it beside the bowls. */
+const SCALE_BACK_D = 0.8
 /** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
 const SLEEPER = { reach: 0.45, ahead: 0.3 }
 /** The share of the screen's half width a sleeper may reach. */
@@ -102,8 +108,14 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const bowlD = -0.48,
     half = playHalf(cam, bowlD)
   const bowlSides = row(puppies, BOWL_STEP, -0.8 * half, 0.95 * half)
-  // The scale steps right when two bowls reach towards it
-  const scaleSide = Math.max(0.8 * half, bowlSides.at(-1)! + BOWL.radius + 0.125 + SCALE.radius)
+  // The scale steps right when two bowls reach towards it; when they leave it no room in front,
+  // as on a narrow screen, it goes further back on the right, across from the garden
+  const scaleOff = BOWL.radius + 0.125 + SCALE.radius
+  const nextTo = bowlSides.at(-1)! + scaleOff
+  const scaleAt =
+    nextTo <= 0.95 * half
+      ? { d: bowlD, side: Math.max(0.8 * half, nextTo) }
+      : { d: SCALE_BACK_D, side: 0.8 * playHalf(cam, SCALE_BACK_D) }
   const gd = 0.8,
     depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
   const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
@@ -125,7 +137,7 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   return {
     beds,
     bowls: bowlSides.map((side) => at(bowlD, side, BOWL)),
-    scale: at(bowlD, scaleSide, SCALE),
+    scale: at(scaleAt.d, scaleAt.side, SCALE),
     mud,
     garden,
   }
