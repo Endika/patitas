@@ -89,7 +89,11 @@ describe('attachPointer', () => {
     const e = Object.assign(new Event(type), { clientX: x, clientY: y, pointerId: 1 })
     canvas.dispatchEvent(e)
   }
-  const handlers = (tap: PointerHandlers['tap'], gestures: Gesture[]): PointerHandlers => ({
+  const handlers = (
+    tap: PointerHandlers['tap'],
+    gestures: Gesture[],
+    more: Partial<PointerHandlers> = {},
+  ): PointerHandlers => ({
     hit: () => null,
     ballInHand: () => false,
     onBall: () => false,
@@ -101,6 +105,7 @@ describe('attachPointer', () => {
     leave() {},
     gesture: (g) => void gestures.push(g),
     ...(tap && { tap }),
+    ...more,
   })
   const camera = new THREE.PerspectiveCamera(30, 0.5, 0.05, 60)
   camera.position.set(0, 2, 3)
@@ -145,5 +150,43 @@ describe('attachPointer', () => {
     press(canvas, 'pointerdown', 210, 620)
     press(canvas, 'pointerup', 260, 621)
     expect(asked).toBe(1)
+  })
+
+  it('a tap that starts on the puppy still cleans the mess under the finger, without a pat', () => {
+    const canvas = fakeCanvas(),
+      events: string[] = []
+    const onPuppy = { zone: 'back' as const, point: new THREE.Vector3(), distance: 1 }
+    let mess = true
+    attachPointer(
+      canvas,
+      camera,
+      handlers(
+        () => {
+          events.push('tap')
+          return mess
+        },
+        [],
+        {
+          hit: () => onPuppy,
+          petStart: () => void events.push('petStart'),
+          petMove: () => void events.push('petMove'),
+          petEnd: () => void events.push('petEnd'),
+        },
+      ),
+    )
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointerup', 211, 621)
+    expect(events).toEqual(['petStart', 'tap', 'petEnd'])
+    // A slide is a pat and never asks; a tap with no mess there is left to the puppy
+    events.length = 0
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointermove', 240, 620)
+    press(canvas, 'pointerup', 260, 620)
+    expect(events).toEqual(['petStart', 'petMove', 'petEnd'])
+    events.length = 0
+    mess = false
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointerup', 211, 621)
+    expect(events).toEqual(['petStart', 'tap', 'petEnd'])
   })
 })

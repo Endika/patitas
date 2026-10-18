@@ -153,6 +153,9 @@ const GARDEN_CHANCE = 0.3
 const FED_RECENTLY = 30 * 60
 /** Behind its hind paws, so it does not stand in what it leaves. */
 const MESS_BEHIND = 0.33
+/** How far it walks on once done, and how far it turns off its heading for that. */
+const STEP_AWAY = 0.45,
+  STEP_TURN = 0.9
 /** Squatting: hind end down for a pee, hunched lower for a poop. */
 const PEE_SIT = 0.5,
   POOP_SIT = 0.75,
@@ -196,12 +199,13 @@ function enter(r: RoutineState, next: Routine) {
 }
 
 /**
- * A touch: the idle count starts again and a sleeping puppy wakes with a stretch. Returns true
+ * A touch or a call: the idle count starts again, a walk to the bed, the garden or the mud is
+ * dropped, and a sleeping puppy wakes with a stretch. Returns true
  * when it was asleep, so the touch does nothing else.
  */
 export function touch(r: RoutineState): boolean {
   r.idle = 0
-  if (r.routine === 'toBed') enter(r, 'none')
+  if (r.routine === 'toBed' || r.routine === 'toGarden' || r.routine === 'toMud') enter(r, 'none')
   if (r.routine !== 'sleeping') return false
   enter(r, 'stretch')
   return true
@@ -477,9 +481,7 @@ const toGarden: Step = (r, m, ctx) => {
 const relieving: Step = (r, m, ctx, ev) => {
   if (!r.relieved) {
     r.relieved = true
-    m.goal = null
     m.face = null
-    if (m.pose !== 'stand') setPose(m, 'stand')
     ev.care = relieve(ev.care)
     if (!r.inGarden) {
       const [x, z] = ctx.clamp(
@@ -499,6 +501,14 @@ const relieving: Step = (r, m, ctx, ev) => {
   }
   m.sitGoal = m.bowGoal = 0
   enter(r, 'none')
+  // A few steps on, as dogs do, and to the side of the screen away from what it did, which leaves
+  // it in view (spots face the camera, so their facing gives the screen's sideways)
+  const away = m.heading + STEP_TURN * (Math.sin(m.heading - ctx.spots.garden.facing) > 0 ? 1 : -1)
+  const [x, z] = ctx.clamp(
+    m.pos.x + Math.sin(away) * STEP_AWAY,
+    m.pos.z + Math.cos(away) * STEP_AWAY,
+  )
+  goTo(m, x, z, { happy: 0.5, energy: 0, gait: 'walk', clamp: ctx.clamp })
 }
 
 /**
@@ -533,8 +543,8 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
 /**
  * What a puppy with nothing to do does next, first match wins (asleep or stretching it is never
  * asked):
- * 0. relieve itself, with a full bladder: where it is, or now and then (always with MESS_CAP
- *    messes waiting) in the garden;
+ * 0. relieve itself, with a full bladder, once standing with nowhere to go: where it is, or now
+ *    and then (always with MESS_CAP messes waiting) in the garden;
  * 1. eat, with food in its bowl and hunger from MEAL_HUNGER, even at bedtime;
  * 2. bed, after NIGHT_IDLE untouched at night or tired by day;
  * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds;
@@ -542,7 +552,11 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
  *    by chance, more often the more curious it is.
  */
 function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
-  if (ctx.care.bladder >= 1) return goRelieve(r, m, ctx)
+  if (ctx.care.bladder >= 1) {
+    // A trick or a call the player asked for comes first
+    if (!m.goal && m.pose === 'stand') goRelieve(r, m, ctx)
+    return
+  }
   if (hungryFor(ctx) && goToBowl(r, ctx, false)) return
   const slot = bedSlots(ctx.spots)[ctx.place]
   if (slot && r.idle >= NIGHT_IDLE && sleepy(r, ctx)) {

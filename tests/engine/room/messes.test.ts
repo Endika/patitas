@@ -93,6 +93,21 @@ describe('accidents while away', () => {
     },
   )
 
+  it('keeps clear of the messes already on the floor', () => {
+    const { cam } = view(1)
+    const spots = computeSpots(cam, 1)
+    const there = placeAccident(cam, spots, seeded(3))('pee', [])!
+    const old: Mess = { kind: 'pee', ...there, createdAt: 0 }
+    const at = messWorld(cam, old, new THREE.Vector3())
+    // A fresh placer, from a later visit, drawing the same spot first
+    const place = placeAccident(cam, spots, seeded(3))
+    for (let i = 0; i < 5; i++) {
+      const next = place('poop', [old])
+      expect(next).not.toBeNull()
+      expect(messWorld(cam, next!, new THREE.Vector3()).distanceTo(at)).toBeGreaterThan(0.25)
+    }
+  })
+
   it('gives up rather than piling onto the furniture when there is no room', () => {
     const { cam } = view(1)
     const spots = computeSpots(cam, 1)
