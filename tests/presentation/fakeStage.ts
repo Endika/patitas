@@ -15,6 +15,7 @@ export function createFakeStage() {
     happiness: 0.3,
     ball: { inHand: false, disabled: false },
     notice: null,
+    needs: [],
   }
   const stage: RoomStage = {
     setPuppies(puppies) {
@@ -23,6 +24,7 @@ export function createFakeStage() {
     takeBall: () => void calls.push('takeBall'),
     stowBall: () => void calls.push('stowBall'),
     trick: (pose) => void calls.push(`trick:${pose}`),
+    feed: () => void calls.push('feed'),
     onChange(listener) {
       listeners.add(listener)
       listener(status)

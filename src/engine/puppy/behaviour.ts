@@ -4,6 +4,7 @@ import { clamp, damp, type Vec3 } from '@/engine/math'
 import type { FetchState } from '@/engine/motion/fetch'
 import type { BodyPose, MotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
+import type { Routine } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
 import type { Anatomy, ZoneId } from './anatomy'
 import { sm } from './sdf'
@@ -19,6 +20,13 @@ const POINTER_ATTENTION = 1.6
 const SCRATCH_AFTER = 0.7
 const BLINK = 0.14
 const YAWN = 1.8
+/** Eating: head down over the bowl with a little bob, the jaw chewing 0 to CHEW at CHEW_HZ. */
+const EAT_PITCH = 0.9
+const EAT_BOB = { amp: 0.07, hz: 1.3 }
+const CHEW = 0.12,
+  CHEW_HZ = 3
+/** Asking for food: the head tips to one side, then the other. */
+const BEG_TILT = 0.24
 /** Asleep: the head turns onto the front paws and the tail wraps round the body. */
 const SLEEP = {
   neck: [0.35, 0.25],
@@ -204,6 +212,8 @@ export interface BehaviourInput {
   fetch: FetchState
   ball: BallState
   camera: Vec3
+  /** What its own routine has it doing: eating and asking for food move the head and jaw. */
+  routine?: Routine
   random?: () => number
 }
 
@@ -254,6 +264,8 @@ export function stepBehaviour(
   const task = fetch.task
   const asleep = M.pose === 'sleep',
     sw = M.sleepW
+  const eating = input.routine === 'eating',
+    begging = input.routine === 'begging'
 
   if ((zone === 'belly' || zone === 'back') && M.pose === 'lie' && s.happy > 0.4)
     setPose(M, 'belly')
@@ -261,7 +273,10 @@ export function stepBehaviour(
 
   // Where it looks
   const target = new THREE.Vector3()
-  if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
+  if (eating)
+    target.set(M.pos.x + Math.sin(M.heading) * 0.45, 0.05, M.pos.z + Math.cos(M.heading) * 0.45)
+  else if (begging) target.copy(input.camera)
+  else if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
   else if (task === 'present' || (petting && petHead)) target.copy(input.camera)
   else if (petting) target.copy(s.petPoint)
   else if (task === 'return' || (M.speed > 0.1 && now - s.pointerAt > POINTER_ATTENTION))
@@ -311,12 +326,21 @@ export function stepBehaviour(
     pitchT = 1.35
     yawT = 0
   }
+  if (eating) {
+    pitchT = EAT_PITCH + EAT_BOB.amp * Math.sin(t * 2 * Math.PI * EAT_BOB.hz)
+    yawT = 0
+  }
   spring(s.yaw, yawT, 55, 12, dt)
   spring(s.pitch, pitchT, 55, 12, dt)
   const yawAcc = (s.yaw.v - s.lastYawV) / Math.max(dt, 1e-3)
   s.lastYawV = s.yaw.v
 
   // Head tilt and leaning into the hand
+  if (begging) {
+    s.tilt = BEG_TILT * (Math.sin(t * 1.3) >= 0 ? 1 : -1)
+    s.tiltT = Math.max(s.tiltT, 0.2)
+    s.perk = Math.max(s.perk, 0.5)
+  }
   s.tiltT = Math.max(0, s.tiltT - dt)
   if (s.tiltT === 0) s.tilt = 0
   const leanT = petHead ? clamp(input.petHeadX * 4, -0.3, 0.3) : 0
@@ -429,17 +453,20 @@ export function stepBehaviour(
   })
 
   // Mouth and tongue: pants with the mouth open and closes it on the ball
-  const tongue = fetch.holding ? 0 : sm(0.3, 0.8, s.pant) * (0.88 + 0.12 * Math.sin(s.breath))
+  const tongue =
+    fetch.holding || eating ? 0 : sm(0.3, 0.8, s.pant) * (0.88 + 0.12 * Math.sin(s.breath))
   // Yawn: opens wide slowly, shuts the eyes and comes back; waiting for the ball it chatters
   s.yawnT = Math.max(0, s.yawnT - dt)
   const yawn = s.yawnT > 0 ? Math.sin((1 - s.yawnT / YAWN) * Math.PI) ** 2 : 0
   s.yawnEyes = yawn * 0.85
   const chatter = task === 'wait' ? 0.04 * Math.max(0, Math.sin(t * 7)) : 0
-  const jawT =
-    fetch.holding || task === 'grab'
+  const jawT = eating
+    ? (CHEW / 2) * (1 - Math.cos(t * 2 * Math.PI * CHEW_HZ))
+    : fetch.holding || task === 'grab'
       ? 0.12
       : Math.max(s.pant * (0.04 + 0.01 * br), yawn * 0.2, chatter)
-  s.jaw = damp(s.jaw, jawT, 10, dt)
+  // Chewing is quick: the jaw follows it closely
+  s.jaw = damp(s.jaw, jawT, eating ? 60 : 10, dt)
 
   return {
     target,

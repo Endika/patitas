@@ -5,6 +5,17 @@ export const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
 
 export type TrickPose = 'sit' | 'lie' | 'belly'
 
+/** One puppy's care as the room keeps it, rounded to hundredths, and how full its bowl is. */
+export interface PuppyNeeds {
+  name: string
+  hunger: number
+  energy: number
+  cleanliness: number
+  happiness: number
+  weightKg: number
+  bowl: number
+}
+
 /** What the room tells the screen: the hint, the happiness bar and the ball button. */
 export interface StageStatus {
   hint: string
@@ -13,6 +24,8 @@ export interface StageStatus {
   ball: { inHand: boolean; disabled: boolean }
   /** Shown over the room while it cannot be played: meshing, or no 3D at all. */
   notice: string | null
+  /** Each puppy in the room, in its order. */
+  needs: PuppyNeeds[]
 }
 
 /** The 3D room as the screens see it. */
@@ -22,6 +35,8 @@ export interface RoomStage {
   takeBall(): void
   stowBall(): void
   trick(pose: TrickPose): void
+  /** Fills the bowl of every puppy in the room. */
+  feed(): void
   /** Called at once with the current status and again whenever it changes. */
   onChange(listener: (s: StageStatus) => void): () => void
   dispose(): void

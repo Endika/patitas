@@ -23,7 +23,10 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
   }))
 }
 
-/** One or two puppies in the room with the prototype's controls, for checking the render by eye. */
+/**
+ * One or two puppies in the room with the prototype's controls, for checking the render by eye,
+ * plus a button that fills the bowls and each puppy's care as the room keeps it.
+ */
 export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
   const name = debugNames(breedIds).join(' y ')
@@ -59,6 +62,17 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
               </a>
             ))}
           </nav>
+        </div>
+        <div className="room-debug">
+          <button type="button" onClick={() => stageRef.current?.feed()}>
+            Comida
+          </button>
+          {status?.needs.map((n) => (
+            <span key={n.name}>
+              {n.name}: hambre {n.hunger.toFixed(2)} · cuenco {n.bowl.toFixed(2)} ·{' '}
+              {n.weightKg.toFixed(2)} kg
+            </span>
+          ))}
         </div>
       </header>
       {status && (
