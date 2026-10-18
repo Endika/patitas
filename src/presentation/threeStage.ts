@@ -85,6 +85,8 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
 
   const ball = createBall()
   const mounted = new Map<string, PuppyView>()
+  /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
+  const failed = new Set<string>()
   let wanted: Puppy[] = []
   let views: PuppyView[] = []
   let petView: PuppyView | null = null
@@ -117,9 +119,19 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
     order()
     // A newcomer waits for the throw like the others
     if (added && ball.state === 'hand') offerBall(views, ball)
-    const waiting = wanted.filter((p) => !mounted.has(p.id))
+    showNotice()
+  }
+
+  const names = (ps: Puppy[]) => ps.map((p) => p.name).join(' y ')
+  const showNotice = () => {
+    const lost = wanted.filter((p) => failed.has(p.id) && !mounted.has(p.id))
+    const waiting = wanted.filter((p) => !failed.has(p.id) && !mounted.has(p.id))
     hub.set({
-      notice: waiting.length ? `Preparando a ${waiting.map((p) => p.name).join(' y ')}…` : null,
+      notice: lost.length
+        ? `No se pudo preparar a ${names(lost)}.`
+        : waiting.length
+          ? `Preparando a ${names(waiting)}…`
+          : null,
     })
   }
 
@@ -207,6 +219,7 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
   return {
     setPuppies(puppies) {
       wanted = puppies.slice(0, ROOM_CAPACITY)
+      failed.clear()
       for (const [id, view] of mounted) {
         if (wanted.some((p) => p.id === id)) continue
         // A puppy leaving with the ball in its mouth takes it out of play
@@ -222,8 +235,9 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
         if (!mounted.has(p.id))
           void loadPuppyGeometry(p.breedId).then(mountReady, () => {
             // The cache forgets a failed build, so the next setPuppies tries again
-            if (!disposed && wanted.some((w) => w.id === p.id) && !mounted.has(p.id))
-              hub.set({ notice: `No se pudo preparar a ${p.name}.` })
+            if (disposed) return
+            failed.add(p.id)
+            showNotice()
           })
     },
     takeBall() {
