@@ -141,16 +141,16 @@ describe('actions', () => {
   const care = createCare(breed, 0)
 
   it('feed lowers hunger and adds 0.02 kg per meal', () => {
-    const fed = feed({ ...care, hunger: 0.8 }, 1, breed)
-    expect(fed.hunger).toBeCloseTo(0.3)
+    const fed = feed({ ...care, hunger: 0.8 }, breed)
+    expect(fed.hunger).toBeCloseTo(0.1)
     expect(fed.weightKg).toBeCloseTo(4.27)
-    expect(feed({ ...care, hunger: 0.1 }, 1, breed).hunger).toBe(0)
+    expect(feed({ ...care, hunger: 0.1 }, breed).hunger).toBe(0)
   })
 
   it('exercise removes 0.004 kg per minute and never goes below the floor', () => {
     expect(exercise(care, 600, breed).weightKg).toBeCloseTo(4.21)
     expect(exercise({ ...care, weightKg: 3 }, 6000, breed).weightKg).toBeCloseTo(2.975)
-    expect(feed({ ...care, weightKg: 5.7 }, 5, breed).weightKg).toBeCloseTo(5.75)
+    expect(feed({ ...care, weightKg: 5.7 }, breed, 5).weightKg).toBeCloseTo(5.75)
   })
 
   it('soil, wash and dry move cleanliness and wetness inside [0, 1]', () => {

@@ -16,12 +16,11 @@ export type WeightStatus = 'Un poco flaco' | 'En su peso' | 'Un poco gordito'
 export const HUNGER_PER_HOUR = 0.12
 export const CLEANLINESS_LOSS_PER_HOUR = 0.02
 export const ENERGY_REST_PER_HOUR = 0.25
-export const ENERGY_AWAKE_LOSS_PER_HOUR = 0.03
 export const HAPPINESS_DRIFT_PER_HOUR = 0.05
 export const WET_LOSS_PER_SECOND = 1 / 60
 export const MEAL_WEIGHT_KG = 0.02
 export const PLAY_WEIGHT_KG_PER_MINUTE = 0.004
-export const MEAL_HUNGER = 0.5
+export const MEAL_HUNGER = 0.7
 
 export const CATCH_UP_MAX_HUNGER = 0.85
 export const CATCH_UP_MIN_CLEANLINESS = 0.45
@@ -96,8 +95,7 @@ export function health(care: Care, breed: Breed): Health {
   return 'Bien'
 }
 
-function clampWeight(weightKg: number, breed?: Breed): number {
-  if (!breed) return Math.max(0, weightKg)
+function clampWeight(weightKg: number, breed: Breed): number {
   const { min, max } = breed.weightKg
   return Math.min(
     max * (1 + WEIGHT_CLAMP_MARGIN),
@@ -105,8 +103,7 @@ function clampWeight(weightKg: number, breed?: Breed): number {
   )
 }
 
-/** `breed` bounds the weight; without it the weight is only kept non-negative. */
-export function feed(care: Care, amount = 1, breed?: Breed): Care {
+export function feed(care: Care, breed: Breed, amount = 1): Care {
   return {
     ...care,
     hunger: unit(care.hunger - MEAL_HUNGER * amount),
@@ -114,7 +111,7 @@ export function feed(care: Care, amount = 1, breed?: Breed): Care {
   }
 }
 
-export function exercise(care: Care, seconds: number, breed?: Breed): Care {
+export function exercise(care: Care, seconds: number, breed: Breed): Care {
   return {
     ...care,
     weightKg: clampWeight(care.weightKg - (PLAY_WEIGHT_KG_PER_MINUTE * seconds) / 60, breed),
