@@ -18,7 +18,15 @@ describe('packPuppyGeometry', () => {
     const before = Object.fromEntries(
       ATTRIBUTES.map((n) => {
         const a = built.geometry.getAttribute(n)
-        return [n, { array: a.array.slice(), itemSize: a.itemSize, ctor: a.array.constructor }]
+        return [
+          n,
+          {
+            array: a.array.slice(),
+            itemSize: a.itemSize,
+            normalized: a.normalized,
+            ctor: a.array.constructor,
+          },
+        ]
       }),
     )
     const index = built.geometry.getIndex()!.array.slice()
@@ -30,6 +38,7 @@ describe('packPuppyGeometry', () => {
     for (const n of ATTRIBUTES) {
       const a = back.geometry.getAttribute(n)
       expect(a.itemSize, n).toBe(before[n]!.itemSize)
+      expect(a.normalized, n).toBe(before[n]!.normalized)
       expect(a.array.constructor, n).toBe(before[n]!.ctor)
       expect(a.array.length, n).toBe(before[n]!.array.length)
       expect(maxDiff(a.array, before[n]!.array), n).toBe(0)
