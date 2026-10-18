@@ -13,10 +13,13 @@ export interface Spot {
   facing: number
 }
 
-/** Where the furniture stands; `garden` is the grass around the `mud` puddle. */
+/**
+ * Where the furniture stands: a bed and a bowl for each puppy, left first, then the scale; `garden`
+ * is the grass around the `mud` puddle.
+ */
 export interface Spots {
-  bed: Spot
-  bowl: Spot
+  beds: Spot[]
+  bowls: Spot[]
   scale: Spot
   mud: Spot
   garden: Spot
@@ -40,15 +43,23 @@ export const START_PLACES: readonly (readonly { x: number; z: number; heading?: 
   ],
 ]
 
-/** The bed's ring is 0.6 across its long side, which faces the screen. */
-const BED = { radius: 0.6, depth: 0.47 },
+/**
+ * One bed holds one puppy, whether it is alone or not, so a bed keeps its size when a second puppy
+ * comes; its long side faces the screen.
+ */
+const BED = { radius: 0.42, depth: 0.34 },
   BOWL = { radius: 0.13, depth: 0.13 },
   SCALE = { radius: 0.2, depth: 0.16 }
 
-/** The bed's depth in the play area. */
-const BED_D = 1.6
-/** How far past the bed's rim two curled sleepers reach, plus a margin to the screen edge. */
-const BED_OVERHANG = 0.2
+/** The beds' depth in the play area. */
+const BED_D = 1.7
+/** Centre to centre for pieces side by side: a little over 0.1 between their rims. */
+const BED_STEP = 2 * BED.radius + 0.11,
+  BOWL_STEP = 2 * BOWL.radius + 0.11
+/** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
+const SLEEPER = { reach: 0.45, ahead: 0.3 }
+/** The share of the screen's half width a sleeper may reach. */
+const SLEEPER_EDGE = 0.93
 
 /** The garden as drawn, before `layout` stretches it to the frame. */
 const GARDEN = { radius: 0.315, depth: 0.45 }
@@ -58,11 +69,21 @@ const GARDEN_WIDTH = 0.7
 const MUD = { u: -0.12, v: 0.35, size: 0.55 }
 
 /**
- * Places each piece at a depth and a fraction of the play area's half width there, so it stays in
- * frame for every aspect. The bowl and scale sit ahead of where the puppies start, the bed at the
- * back, and the garden runs along the left edge with its puddle beside the puppies.
+ * Sides for `n` pieces `step` apart around `want`, the row kept within `limit` of the middle.
  */
-export function computeSpots(cam: FixedCamera): Spots {
+const row = (n: number, step: number, want: number, limit: number) => {
+  const ext = ((n - 1) * step) / 2
+  const mid = clamp(want, Math.min(0, ext - limit), Math.max(0, limit - ext))
+  return Array.from({ length: n }, (_, i) => mid - ext + i * step)
+}
+
+/**
+ * Places each piece at a depth and a fraction of the play area's half width there, so it stays in
+ * frame for every aspect. The bowls and scale sit ahead of where the puppies start, the beds at
+ * the back, and the garden runs along the left edge with its puddle beside the puppies. Each
+ * puppy has a bed and a bowl, side by side.
+ */
+export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const facing = cam.az
   const at = (d: number, side: number, size: { radius: number; depth: number }): Spot => {
     const [x, z] = playWorld(cam, d, side)
@@ -70,9 +91,19 @@ export function computeSpots(cam: FixedCamera): Spots {
   }
   const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot =>
     at(d, side * playHalf(cam, d), size)
-  // On a narrow screen the bed comes in from the edge so the sleepers in it stay in frame
-  const frustumHalf = (playAxes(cam).camD + BED_D) * cam.tanH
-  const bedSide = Math.min(0.55 * playHalf(cam, BED_D), frustumHalf - BED.radius - BED_OVERHANG)
+  // On a narrow screen the beds come in from the edge so the sleepers in them stay in frame
+  const frustumHalf = (playAxes(cam).camD + BED_D - SLEEPER.ahead) * cam.tanH
+  const beds = row(
+    puppies,
+    BED_STEP,
+    0.55 * playHalf(cam, BED_D),
+    SLEEPER_EDGE * frustumHalf - SLEEPER.reach,
+  ).map((side) => at(BED_D, side, BED))
+  const bowlD = -0.48,
+    half = playHalf(cam, bowlD)
+  const bowlSides = row(puppies, BOWL_STEP, -0.8 * half, 0.95 * half)
+  // The scale steps right when two bowls reach towards it
+  const scaleSide = Math.max(0.8 * half, bowlSides.at(-1)! + BOWL.radius + 0.125 + SCALE.radius)
   const gd = 0.8,
     depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
   const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
@@ -92,9 +123,9 @@ export function computeSpots(cam: FixedCamera): Spots {
     facing,
   }
   return {
-    bed: at(BED_D, bedSide, BED),
-    bowl: spot(-0.48, -0.8, BOWL),
-    scale: spot(-0.48, 0.8, SCALE),
+    beds,
+    bowls: bowlSides.map((side) => at(bowlD, side, BOWL)),
+    scale: at(bowlD, scaleSide, SCALE),
     mud,
     garden,
   }
@@ -120,7 +151,7 @@ export function inMud(spots: Spots, x: number, z: number): number {
 
 /** What puppies walk around, as circles that hold each oval: the garden is open ground. */
 export function furnitureObstacles(spots: Spots): Circle[] {
-  return [spots.bed, spots.bowl, spots.scale].map((s) => ({
+  return [...spots.beds, ...spots.bowls, spots.scale].map((s) => ({
     x: s.center.x,
     z: s.center.z,
     r: Math.max(s.radius, s.depth),
@@ -136,12 +167,14 @@ export function formatKg(kg: number | null): string {
 
 export interface Furniture {
   group: THREE.Group
+  /** How many puppies it is laid out for: one bed and one bowl each. */
+  puppies: 1 | 2
   /** Kept current: `layout` moves and resizes these in place. */
   spots: Spots
   /** Places every piece for the camera's current framing. */
   layout(cam: FixedCamera): void
-  /** How full the bowl is, 0 to 1. */
-  bowlFill(level: number): void
+  /** How full the puppy's bowl is, 0 to 1. */
+  bowlFill(place: number, level: number): void
   scaleReading(kg: number | null): void
   inMud(x: number, z: number): number
   dispose(): void
@@ -206,18 +239,18 @@ function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: numbe
 function bed(shade: THREE.Texture): THREE.Group {
   const g = new THREE.Group()
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.49, 0.11, 18, 64),
+    new THREE.TorusGeometry(BED.radius - 0.09, 0.09, 18, 64),
     new THREE.MeshStandardMaterial({ color: '#d77d69', roughness: 0.95 }),
   )
   ring.rotation.x = -Math.PI / 2
   ring.scale.set(1, 0.82, 0.78)
-  ring.position.y = 0.11 * 0.78
+  ring.position.y = 0.09 * 0.78
   ring.castShadow = ring.receiveShadow = true
   const pad = new THREE.Mesh(
     new THREE.SphereGeometry(1, 40, 12),
     new THREE.MeshStandardMaterial({ color: '#f3d9cb', roughness: 1 }),
   )
-  pad.scale.set(0.42, 0.04, 0.34)
+  pad.scale.set(BED.radius - 0.1, 0.04, 0.8 * (BED.radius - 0.1))
   pad.position.y = 0.025
   pad.receiveShadow = true
   g.add(ring, pad, contact(shade, BED.radius, BED.depth, 0.35))
@@ -494,33 +527,37 @@ function garden(): THREE.Group {
   return g
 }
 
-/** The bed, the bowl, the scale and the garden corner, laid out for `cam`. */
-export function addFurniture(scene: THREE.Scene, cam: FixedCamera): Furniture {
+/** A bed and a bowl for each of `puppies`, the scale and the garden corner, laid out for `cam`. */
+export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 2): Furniture {
   const group = new THREE.Group()
   const shade = contactTexture()
-  const bedG = bed(shade),
-    bowlParts = bowl(shade),
+  const spots = computeSpots(cam, puppies)
+  const beds = spots.beds.map(() => bed(shade)),
+    bowls = spots.bowls.map(() => bowl(shade)),
     scaleParts = scale(shade),
     gardenG = garden()
-  group.add(bedG, bowlParts.group, scaleParts.group, gardenG)
+  group.add(...beds, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
   scene.add(group)
-  const spots = computeSpots(cam)
 
   const placed: [THREE.Object3D, Spot][] = [
-    [bedG, spots.bed],
-    [bowlParts.group, spots.bowl],
+    ...beds.map((b, i): [THREE.Object3D, Spot] => [b, spots.beds[i]!]),
+    ...bowls.map((b, i): [THREE.Object3D, Spot] => [b.group, spots.bowls[i]!]),
     [scaleParts.group, spots.scale],
     [gardenG, spots.garden],
   ]
+  const update = (spot: Spot, fresh: Spot) => {
+    const { center, ...size } = fresh
+    Object.assign(spot, size).center.copy(center)
+  }
   const furniture: Furniture = {
     group,
+    puppies,
     spots,
     layout(next) {
-      const fresh = computeSpots(next)
-      for (const k of Object.keys(fresh) as (keyof Spots)[]) {
-        const { center, ...size } = fresh[k]
-        Object.assign(spots[k], size).center.copy(center)
-      }
+      const fresh = computeSpots(next, puppies)
+      fresh.beds.forEach((s, i) => update(spots.beds[i]!, s))
+      fresh.bowls.forEach((s, i) => update(spots.bowls[i]!, s))
+      for (const k of ['scale', 'mud', 'garden'] as const) update(spots[k], fresh[k])
       // Everything faces the camera, so the bed's long side and the scale's display face the screen
       for (const [o, s] of placed) {
         o.position.copy(s.center)
@@ -528,8 +565,9 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera): Furniture {
       }
       gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
     },
-    bowlFill(level) {
-      bowlParts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
+    bowlFill(place, level) {
+      const parts = bowls[place]
+      if (parts) parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
     },
     scaleReading(kg) {
       drawReading(scaleParts.screen, formatKg(kg))
@@ -544,12 +582,13 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera): Furniture {
         o.geometry.dispose()
         const mat = o.material as THREE.MeshStandardMaterial
         mat.map?.dispose()
+        mat.alphaMap?.dispose()
         mat.dispose()
       })
     },
   }
   furniture.layout(cam)
-  furniture.bowlFill(1)
+  bowls.forEach((_, i) => furniture.bowlFill(i, 1))
   furniture.scaleReading(null)
   return furniture
 }

@@ -62,8 +62,13 @@ export interface RoomScene {
   cam: FixedCamera
   quality: Quality
   ballMesh: THREE.Mesh
-  /** The bed, bowl, scale and garden; none in the adoption preview. */
+  /** A bed and a bowl per puppy, the scale and the garden; none in the adoption preview. */
   furniture: Furniture | null
+  /**
+   * Lays the furniture out again for this many puppies, the old pieces thrown away. Returns true
+   * when it changed.
+   */
+  furnish(puppies: 1 | 2): boolean
   add(view: SceneView): void
   remove(view: SceneView): void
   resize(): void
@@ -313,7 +318,6 @@ export function createRoomScene(
   scene.add(floorMesh())
   const ballMesh = tennisBall()
   scene.add(ballMesh)
-  const furniture = withFurniture ? addFurniture(scene, cam) : null
 
   const fpsReadout = fpsOverlay(canvas)
   const views = new Set<SceneView>()
@@ -351,11 +355,9 @@ export function createRoomScene(
     cameraPosition(cam, camera.position)
     camera.lookAt(cam.target)
     camera.updateMatrixWorld()
-    furniture?.layout(cam)
+    room.furniture?.layout(cam)
     for (const cb of resizeListeners) cb()
   }
-  addEventListener('resize', resize)
-  resize()
 
   const tickFloaters = (dt: number) => {
     for (let i = floaters.length - 1; i >= 0; i--) {
@@ -407,7 +409,13 @@ export function createRoomScene(
     cam,
     quality,
     ballMesh,
-    furniture,
+    furniture: withFurniture ? addFurniture(scene, cam, 1) : null,
+    furnish(puppies) {
+      if (!room.furniture || room.furniture.puppies === puppies) return false
+      room.furniture.dispose()
+      room.furniture = addFurniture(scene, cam, puppies)
+      return true
+    },
     add(view) {
       views.add(view)
       scene.add(view.group)
@@ -446,7 +454,7 @@ export function createRoomScene(
       // Puppy views own their resources and may share cached geometry
       for (const v of views) scene.remove(v.group)
       views.clear()
-      furniture?.dispose()
+      room.furniture?.dispose()
       for (const f of floaters) f.s.material.dispose()
       heartMap.dispose()
       zMap.dispose()
@@ -466,6 +474,8 @@ export function createRoomScene(
       renderer.forceContextLoss()
     },
   }
+  addEventListener('resize', resize)
+  resize()
   return room
 }
 
