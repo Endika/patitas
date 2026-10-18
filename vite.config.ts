@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { VitePWA } from 'vite-plugin-pwa'
 
-const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as {
+const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as {
   version: string
 }
 
@@ -24,6 +24,7 @@ export default defineConfig({
       manifest: {
         name: 'Patitas',
         short_name: 'Patitas',
+        lang: 'es',
         description: 'Adopta cachorros, juega con ellos y cuídalos.',
         theme_color: '#e6eeeb',
         background_color: '#e6eeeb',
@@ -49,6 +50,6 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
-  resolve: { alias: { '@': resolve(__dirname, 'src') } },
+  resolve: { alias: { '@': resolve(import.meta.dirname, 'src') } },
   build: { sourcemap: true, target: 'es2022' },
 })
