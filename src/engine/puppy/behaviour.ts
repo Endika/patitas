@@ -5,7 +5,7 @@ import type { FetchState } from '@/engine/motion/fetch'
 import type { BodyPose, MotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import type { BallState } from '@/engine/room/ball'
-import type { Tuple3, ZoneId } from './anatomy'
+import type { Anatomy, ZoneId } from './anatomy'
 import { sm } from './sdf'
 
 export const LID_OPEN = -0.62,
@@ -24,15 +24,22 @@ const YAWN = 1.8
 export interface BehaviourRig {
   persona: Persona
   ear: 'floppy' | 'erect'
+  /** Which side each ear is on (+1 left, −1 right), in the anatomy's order. */
+  earSides: readonly number[]
   tail: 'flag' | 'curl'
   /** Point the head aims from, in the puppy's frame. */
   look: Vec3
 }
 
-export function behaviourRig(breed: Breed, persona: Persona, look: Tuple3): BehaviourRig {
+export function behaviourRig(
+  breed: Breed,
+  persona: Persona,
+  { look, ears }: Pick<Anatomy, 'look' | 'ears'>,
+): BehaviourRig {
   return {
     persona,
     ear: breed.shape.ear,
+    earSides: ears.map((e) => e.s),
     tail: breed.shape.tail,
     look: new THREE.Vector3(...look),
   }
@@ -217,7 +224,6 @@ const spring = (s: Spring, target: number, k: number, c: number, dt: number) => 
   s.x += s.v * dt
 }
 
-const EAR_SIDES = [1, -1] as const
 const tmp = new THREE.Vector3()
 
 /** One frame of the puppy's character: gaze, mood, blinking, ears, tail, mouth and the scratch reflex. */
@@ -242,7 +248,7 @@ export function stepBehaviour(
 
   // Where it looks
   const target = new THREE.Vector3()
-  if (task === 'wait' || task === 'chase') target.copy(ball.pos)
+  if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
   else if (task === 'present' || (petting && petHead)) target.copy(input.camera)
   else if (petting) target.copy(s.petPoint)
   else if (task === 'return' || (M.speed > 0.1 && now - s.pointerAt > POINTER_ATTENTION))
@@ -384,7 +390,7 @@ export function stepBehaviour(
     s.twitchSide = random() < 0.5 ? 0 : 1
   }
   s.twitch = Math.max(0, s.twitch - dt)
-  const ears = EAR_SIDES.map((side, i) => {
+  const ears = rig.earSides.map((side, i) => {
     const st = s.ears[i]!
     const tw = s.twitch > 0 && s.twitchSide === i ? Math.sin((s.twitch / 0.25) * Math.PI) : 0
     if (rig.ear === 'floppy') {
@@ -408,15 +414,14 @@ export function stepBehaviour(
   })
 
   // Mouth and tongue: pants with the mouth open and closes it on the ball
-  const tongue =
-    ball.state === 'mouth' ? 0 : sm(0.3, 0.8, s.pant) * (0.88 + 0.12 * Math.sin(s.breath))
+  const tongue = fetch.holding ? 0 : sm(0.3, 0.8, s.pant) * (0.88 + 0.12 * Math.sin(s.breath))
   // Yawn: opens wide slowly, shuts the eyes and comes back; waiting for the ball it chatters
   s.yawnT = Math.max(0, s.yawnT - dt)
   const yawn = s.yawnT > 0 ? Math.sin((1 - s.yawnT / YAWN) * Math.PI) ** 2 : 0
   s.yawnEyes = yawn * 0.85
   const chatter = task === 'wait' ? 0.04 * Math.max(0, Math.sin(t * 7)) : 0
   const jawT =
-    ball.state === 'mouth' || task === 'grab'
+    fetch.holding || task === 'grab'
       ? 0.12
       : Math.max(s.pant * (0.04 + 0.01 * br), yawn * 0.2, chatter)
   s.jaw = damp(s.jaw, jawT, 10, dt)
@@ -450,7 +455,6 @@ export function pickHint(
   p: {
     fetch: FetchState
     motion: MotionState
-    ball: BallState
     zone: ZoneId | null
     scratch: number
     sincePet: number
@@ -461,7 +465,7 @@ export function pickHint(
   if (task === 'wait') return 'wait'
   if (pose !== 'stand' && !p.zone) return pose === 'belly' ? 'belly-up' : pose
   if (task === 'chase' || task === 'grab') return 'chase'
-  if (task === 'return' || (task === 'present' && p.ball.state === 'mouth')) return 'bringing'
+  if (task === 'return' || (task === 'present' && p.fetch.holding)) return 'bringing'
   if (task === 'present') return 'done'
   if (p.zone === 'back' && p.scratch > 0.5) return 'scratch'
   if (p.zone) return p.zone

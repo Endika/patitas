@@ -11,17 +11,46 @@ export interface Quality {
   shadowMap: number
 }
 
-/** Until pickQuality lands: the prototype's desktop and touch settings. */
-export function defaultQuality(): Quality {
-  const coarse = matchMedia('(pointer: coarse)').matches
-  return coarse
+/** The prototype's settings; a phone with two puppies gives up some fur and resolution. */
+export function pickQuality(dogs: 1 | 2, coarse: boolean): Quality {
+  if (!coarse) return { shells: 24, dpr: 2, shadowMap: 2048 }
+  return dogs === 1
     ? { shells: 16, dpr: 1.6, shadowMap: 2048 }
-    : { shells: 24, dpr: Math.min(devicePixelRatio, 2), shadowMap: 2048 }
+    : { shells: 12, dpr: 1.5, shadowMap: 1024 }
 }
 
 /** Anything the room shows: a puppy view or a prop. */
 export interface SceneView {
   group: THREE.Object3D
+  /** Puppies have one; the room's quality depends on how many there are. */
+  setQuality?(q: Quality): void
+}
+
+const SHADOW_HALF = 1.1,
+  SHADOW_MARGIN = 0.6
+
+/** Centre and half size of the sun's shadow box: the prototype's ±1.1, grown to cover every puppy. */
+export function shadowBox(at: readonly { x: number; z: number }[]): {
+  x: number
+  z: number
+  half: number
+} {
+  let x0 = Infinity,
+    x1 = -Infinity,
+    z0 = Infinity,
+    z1 = -Infinity
+  for (const p of at) {
+    x0 = Math.min(x0, p.x)
+    x1 = Math.max(x1, p.x)
+    z0 = Math.min(z0, p.z)
+    z1 = Math.max(z1, p.z)
+  }
+  const span = Math.hypot(x1 - x0, z1 - z0) / 2
+  return {
+    x: (x0 + x1) / 2,
+    z: (z0 + z1) / 2,
+    half: Math.max(SHADOW_HALF, span + SHADOW_MARGIN),
+  }
 }
 
 export interface RoomScene {
@@ -163,8 +192,12 @@ function heartTexture(): THREE.CanvasTexture {
 
 const HEART_LIFE = 1.3
 
-/** Throws when the browser has no WebGL. */
-export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): RoomScene {
+/** Throws when the browser has no WebGL. `coarse` is a touch screen. */
+export function createRoomScene(
+  canvas: HTMLCanvasElement,
+  coarse = matchMedia('(pointer: coarse)').matches,
+): RoomScene {
+  let quality = pickQuality(1, coarse)
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
@@ -188,14 +221,15 @@ export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): Ro
   sun.target.position.set(0, 0.3, 0)
   sun.castShadow = true
   sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap)
-  Object.assign(sun.shadow.camera, {
-    left: -1.1,
-    right: 1.1,
-    top: 1.1,
-    bottom: -1.1,
-    near: 0.5,
-    far: 8,
-  })
+  Object.assign(sun.shadow.camera, { near: 0.5, far: 8 })
+  let shadowHalf = 0
+  const fitShadow = (half: number) => {
+    if (half === shadowHalf) return
+    shadowHalf = half
+    Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half })
+    sun.shadow.camera.updateProjectionMatrix()
+  }
+  fitShadow(SHADOW_HALF)
   sun.shadow.bias = -0.0004
   sun.shadow.normalBias = 0.01
   scene.add(sun, sun.target)
@@ -246,19 +280,29 @@ export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): Ro
   // The sun's shadow box follows the puppies
   const follow = () => {
     if (!views.size) return
-    let x = 0,
-      z = 0
-    for (const v of views) {
-      x += v.group.position.x
-      z += v.group.position.z
-    }
-    x /= views.size
-    z /= views.size
-    sun.position.set(x + 1.6, 3.4, z + 2.4)
-    sun.target.position.set(x, 0.3, z)
+    const box = shadowBox([...views].map((v) => v.group.position))
+    sun.position.set(box.x + 1.6, 3.4, box.z + 2.4)
+    sun.target.position.set(box.x, 0.3, box.z)
+    fitShadow(box.half)
   }
 
-  return {
+  const requality = () => {
+    let dogs = 0
+    for (const v of views) if (v.setQuality) dogs++
+    const q = pickQuality(dogs > 1 ? 2 : 1, coarse)
+    if (q.shells === quality.shells && q.dpr === quality.dpr && q.shadowMap === quality.shadowMap)
+      return
+    quality = room.quality = q
+    renderer.setPixelRatio(Math.min(devicePixelRatio, q.dpr))
+    if (sun.shadow.mapSize.x !== q.shadowMap) {
+      sun.shadow.mapSize.set(q.shadowMap, q.shadowMap)
+      sun.shadow.map?.dispose()
+      sun.shadow.map = null
+    }
+    for (const v of views) v.setQuality?.(q)
+  }
+
+  const room: RoomScene = {
     renderer,
     scene,
     camera,
@@ -268,10 +312,13 @@ export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): Ro
     add(view) {
       views.add(view)
       scene.add(view.group)
+      view.setQuality?.(quality)
+      requality()
     },
     remove(view) {
       views.delete(view)
       scene.remove(view.group)
+      requality()
     },
     resize,
     onResize(cb) {
@@ -323,6 +370,7 @@ export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): Ro
       renderer.dispose()
     },
   }
+  return room
 }
 
 /** Puts the ball mesh where the ball is: in front of the camera when in hand. */

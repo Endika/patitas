@@ -19,7 +19,8 @@ import {
 } from '@/engine/motion/locomotion'
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import type { BallState } from '@/engine/room/ball'
-import { cameraPosition } from '@/engine/room/camera'
+import { cameraPosition, clampPlay } from '@/engine/room/camera'
+import { claimBall, separate } from '@/engine/room/crowd'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
 import type { Anatomy, Tuple3, ZoneId } from './anatomy'
@@ -38,10 +39,12 @@ import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from '
 import { buildPuppyGeometry } from './geometry'
 import {
   eyeMaterial,
-  furMaterials,
+  furMaterial,
+  furUniforms,
   glintMaterial,
   lidMaterial,
   noseMaterial,
+  setFurHeight,
   tongueMaterial,
 } from './materials'
 
@@ -103,6 +106,8 @@ export interface PuppyView extends BehaviourRig, SceneView {
   mouth: THREE.Vector3
   /** How far in front of the body the mouth picks up the ball. */
   reach: number
+  /** Shows `q.shells` fur layers. */
+  setQuality(q: Quality): void
   dispose(): void
 }
 
@@ -162,15 +167,26 @@ export function mountPuppyView(
   group.updateMatrixWorld(true)
   const skeleton = new THREE.Skeleton(boneList)
   const ident = new THREE.Matrix4()
-  const furMats = furMaterials(quality.shells, breed.fur)
-  furMats.forEach((mat, i) => {
-    const m = new THREE.SkinnedMesh(geometry, mat)
-    m.frustumCulled = false
-    m.castShadow = i === 0
-    m.renderOrder = i
-    group.add(m)
-    m.bind(skeleton, ident)
-  })
+  // Fewer shells re-space and hide layers instead of compiling new materials
+  const furU = furUniforms(breed.fur)
+  const shells: THREE.SkinnedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[] = []
+  const setShells = (n: number) => {
+    while (shells.length <= n) {
+      const i = shells.length
+      const m = new THREE.SkinnedMesh(geometry, furMaterial(0, furU))
+      m.frustumCulled = false
+      m.castShadow = i === 0
+      m.renderOrder = i
+      group.add(m)
+      m.bind(skeleton, ident)
+      shells.push(m)
+    }
+    shells.forEach((m, i) => {
+      m.visible = i <= n
+      if (m.visible) setFurHeight(m.material, i / n)
+    })
+  }
+  setShells(quality.shells)
 
   const head = bone('head'),
     headPos = bonePos('head')
@@ -242,7 +258,7 @@ export function mountPuppyView(
   group.rotation.y = motion.heading
 
   const view: PuppyView = {
-    ...behaviourRig(breed, puppy.persona, A.look),
+    ...behaviourRig(breed, puppy.persona, A),
     puppy,
     breed,
     anatomy: A,
@@ -259,9 +275,10 @@ export function mountPuppyView(
     behaviour: createBehaviourState(),
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
+    setQuality: (q) => setShells(q.shells),
     dispose() {
       room.remove(view)
-      for (const m of furMats) m.dispose()
+      for (const m of shells) m.material.dispose()
       for (const m of [eyeMat, lidMat, noseMat, tongueMat]) m.dispose()
       for (const g of [eyeGeo, upperLid, lowerLid, tongue.geometry]) g.dispose()
       for (const g of glints) {
@@ -282,7 +299,7 @@ const tmp = new THREE.Vector3()
  * otherwise a stroke under the body would land on the back.
  */
 export function hitZone(
-  view: PuppyView,
+  view: Pick<PuppyView, 'motion' | 'zones'>,
   ray: THREE.Ray,
 ): { zone: ZoneId; point: THREE.Vector3; distance: number } | null {
   const lying = view.motion.pose === 'lie' || view.motion.pose === 'belly'
@@ -329,62 +346,84 @@ export interface PuppyTickCtx {
   ball: BallState
   /** Seconds, on the pointer clock. */
   now: number
-  /** The finger is stroking this puppy. */
-  petting: boolean
+  /** The puppy the finger is stroking, if any. */
+  petting: PuppyView | null
   random?: () => number
 }
 
 export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
   view.bones.jaw!.localToWorld(out.copy(view.mouth))
 
+/** Smallest distance kept between two puppies' bodies. */
+const PERSONAL_SPACE = 0.45
+
 /**
- * One frame of a puppy: fetch, poses and steps, then character and bones. A ball in its mouth
- * is placed again after the bones move so it does not trail the jaw by a frame.
+ * One frame of the puppies in the room: fetch, poses and steps for each, then they are kept
+ * apart, then character and bones. A ball in a mouth is placed again after the bones move so it
+ * does not trail the jaw by a frame. Returns each puppy's fetch events, in order.
  */
-export function tickPuppy(view: PuppyView, ctx: PuppyTickCtx, dt: number, t: number): FetchEvents {
-  const { ball, room } = ctx,
-    s = view.behaviour,
-    M = view.motion
-  const ev = stepFetch(
-    view.fetch,
-    M,
-    ball,
-    {
-      reach: view.reach,
-      cam: room.cam,
-      mouthWorld: (out) => mouthWorld(view, out),
-      mood: s,
-      energy: view.persona.energy,
-      ...(ctx.random && { random: ctx.random }),
-    },
-    dt,
-  )
-  stepPoses(M, dt)
-  const body = stepLocomotion(M, view.legs, dt)
-  view.group.position.set(M.pos.x, 0, M.pos.z)
-  view.group.rotation.y = M.heading
-  view.group.updateMatrixWorld(true)
-  const pose = stepBehaviour(
-    view,
-    s,
-    {
-      now: ctx.now,
-      petting: ctx.petting,
-      petHeadX: view.bones.head!.worldToLocal(tmp.copy(s.petPoint)).x,
-      motion: M,
-      body,
-      fetch: view.fetch,
+export function tickPuppies(
+  views: PuppyView[],
+  ctx: PuppyTickCtx,
+  dt: number,
+  t: number,
+): FetchEvents[] {
+  const { ball, room } = ctx
+  const moved = views.map((view) => {
+    const M = view.motion
+    const ev = stepFetch(
+      view.fetch,
+      M,
       ball,
-      camera: cameraPosition(room.cam, camPos),
-      ...(ctx.random && { random: ctx.random }),
-    },
-    dt,
-    t,
-  )
-  applyPose(view, pose, body, dt, t)
-  view.group.updateMatrixWorld(true)
-  if (ball.state === 'mouth') mouthWorld(view, ball.pos)
-  return ev
+      {
+        reach: view.reach,
+        cam: room.cam,
+        mouthWorld: (out) => mouthWorld(view, out),
+        mood: view.behaviour,
+        energy: view.persona.energy,
+        ...(ctx.random && { random: ctx.random }),
+      },
+      dt,
+    )
+    stepPoses(M, dt)
+    return { ev, body: stepLocomotion(M, view.legs, dt) }
+  })
+  if (views.length > 1)
+    separate(
+      views.map((v) => v.motion),
+      PERSONAL_SPACE,
+      (x, z) => clampPlay(room.cam, x, z),
+    )
+  cameraPosition(room.cam, camPos)
+  views.forEach((view, i) => {
+    const s = view.behaviour,
+      M = view.motion,
+      { body } = moved[i]!
+    view.group.position.set(M.pos.x, 0, M.pos.z)
+    view.group.rotation.y = M.heading
+    view.group.updateMatrixWorld(true)
+    const pose = stepBehaviour(
+      view,
+      s,
+      {
+        now: ctx.now,
+        petting: ctx.petting === view,
+        petHeadX: view.bones.head!.worldToLocal(tmp.copy(s.petPoint)).x,
+        motion: M,
+        body,
+        fetch: view.fetch,
+        ball,
+        camera: camPos,
+        ...(ctx.random && { random: ctx.random }),
+      },
+      dt,
+      t,
+    )
+    applyPose(view, pose, body, dt, t)
+    view.group.updateMatrixWorld(true)
+    if (view.fetch.holding) mouthWorld(view, ball.pos)
+  })
+  return moved.map((m) => m.ev)
 }
 
 const camPos = new THREE.Vector3()
@@ -477,6 +516,7 @@ export function putBallAway(views: PuppyView[], ball: BallState): void {
   for (const v of views) if (v.fetch.task === 'wait') v.fetch.task = 'free'
 }
 
+/** Every puppy perks up at the throw; the one whose mouth is nearest goes for it. */
 export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void {
   ball.vel.copy(vel)
   ball.state = 'air'
@@ -486,6 +526,12 @@ export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void 
     v.behaviour.perk = 1
     setPose(v.motion, 'stand')
   }
+  claimBall(
+    views.map((v) => v.fetch),
+    views.map((v) => v.motion),
+    ball,
+    views.map((v) => mouthWorld(v, new THREE.Vector3())),
+  )
 }
 
 /** Asks for a trick; only while the puppy is not playing ball. */

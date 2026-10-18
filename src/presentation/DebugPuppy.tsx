@@ -13,20 +13,14 @@ import {
   puppyGeometry,
   putBallAway,
   throwBall,
-  tickPuppy,
+  tickPuppies,
   type PuppyView,
 } from '@/engine/puppy/view'
 import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
-import {
-  createRoomScene,
-  defaultQuality,
-  keepInPlay,
-  syncBallMesh,
-  type RoomScene,
-} from '@/engine/room/scene'
+import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
 import './debugPuppy.css'
 
@@ -44,17 +38,29 @@ interface Controls {
   trick(t: Trick): void
 }
 
-/** One puppy in the room with the prototype's controls, for checking the render by eye. */
-export default function DebugPuppy({ breedId }: { breedId: BreedId }) {
-  const breed = BREEDS[breedId],
-    name = NAMES[breedId]
+const debugNames = (ids: BreedId[]) =>
+  ids.map((id, i) => (i > 0 && id === ids[0] ? `${NAMES[id]} 2` : NAMES[id]))
+
+/** Where each puppy starts, for one or two. */
+const PLACES = [
+  [{ x: 0, z: 0 }],
+  [
+    { x: -0.32, z: 0, heading: 0.25 },
+    { x: 0.32, z: 0, heading: -0.25 },
+  ],
+]
+
+/** One or two puppies in the room with the prototype's controls, for checking the render by eye. */
+export default function DebugPuppy({ breedIds }: { breedIds: BreedId[] }) {
+  const key = breedIds.join(',')
+  const name = debugNames(breedIds).join(' y ')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const joyRef = useRef<HTMLElement>(null)
   const controls = useRef<Controls | null>(null)
   const [hint, setHint] = useState<HintKey>('idle')
   const [ballUi, setBallUi] = useState({ inHand: false, disabled: false })
   const [loading, setLoading] = useState<string | null>(
-    hasPuppyGeometry(breedId) ? null : `Preparando a ${name}…`,
+    breedIds.every(hasPuppyGeometry) ? null : `Preparando a ${name}…`,
   )
 
   useEffect(() => {
@@ -67,18 +73,20 @@ export default function DebugPuppy({ breedId }: { breedId: BreedId }) {
     const mount = (canvas: HTMLCanvasElement): (() => void) => {
       let room: RoomScene
       try {
-        room = createRoomScene(canvas, defaultQuality())
+        room = createRoomScene(canvas)
       } catch {
         setLoading('Este navegador no puede mostrar gráficos 3D.')
         return () => {}
       }
-      const puppy: Puppy = {
-        id: `debug-${breedId}`,
-        name,
+      const ids = key.split(',') as BreedId[],
+        names = debugNames(ids)
+      const puppies = ids.map((breedId, i): Puppy => ({
+        id: `debug-${i}-${breedId}`,
+        name: names[i]!,
         breedId,
-        persona: breed.defaultPersona,
+        persona: BREEDS[breedId].defaultPersona,
         adoptedAt: 0,
-      }
+      }))
       const ball = createBall()
       const views: PuppyView[] = []
       let petView: PuppyView | null = null
@@ -143,40 +151,41 @@ export default function DebugPuppy({ breedId }: { breedId: BreedId }) {
         for (const v of views) keepInPlay(v.motion, room.cam, mood(v))
       })
 
-      views.push(mountPuppyView(room, puppy, puppyGeometry(breed), room.quality))
+      const places = PLACES[puppies.length - 1]!
+      puppies.forEach((p, i) =>
+        views.push(
+          mountPuppyView(room, p, puppyGeometry(BREEDS[p.breedId]), room.quality, places[i]),
+        ),
+      )
       setLoading(null)
 
       room.start((dt, t) => {
         stepBall(ball, room.cam, dt)
         syncBallMesh(room, ball)
-        for (const v of views) {
-          const ev = tickPuppy(v, { room, ball, now: now(), petting: v === petView }, dt, t)
-          if (ev.dropped) {
-            const at = headWorld(v)
-            for (let i = 0; i < 3; i++) room.emitHeart(at)
-          }
-        }
+        tickPuppies(views, { room, ball, now: now(), petting: petView }, dt, t).forEach((ev, i) => {
+          if (!ev.dropped) return
+          const at = headWorld(views[i]!)
+          for (let n = 0; n < 3; n++) room.emitHeart(at)
+        })
         syncBallMesh(room, ball)
-        const v = views[0]
+        // The hint and the ball button follow whichever puppy is playing
+        const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]
         if (!v) return
         const s = v.behaviour
         const zone = v === petView && now() - s.petLast < 0.35 ? s.zone : null
         hintNow = pickHint(hintNow, {
           fetch: v.fetch,
           motion: v.motion,
-          ball,
           zone,
           scratch: s.scratch,
           sincePet: now() - s.petLast,
         })
         setHint(hintNow)
-        const ui = `${ball.state === 'hand'}|${v.fetch.task !== 'free' && v.fetch.task !== 'wait'}`
+        const busy = v.fetch.task !== 'free' && v.fetch.task !== 'wait'
+        const ui = `${ball.state === 'hand'}|${busy}`
         if (ui !== uiNow) {
           uiNow = ui
-          setBallUi({
-            inHand: ball.state === 'hand',
-            disabled: v.fetch.task !== 'free' && v.fetch.task !== 'wait',
-          })
+          setBallUi({ inHand: ball.state === 'hand', disabled: busy })
         }
         if (joyRef.current) joyRef.current.style.transform = `scaleX(${s.happy.toFixed(2)})`
       })
@@ -192,7 +201,7 @@ export default function DebugPuppy({ breedId }: { breedId: BreedId }) {
       clearTimeout(timer)
       cleanup()
     }
-  }, [breed, breedId, name])
+  }, [key])
 
   return (
     <div className="dbg">
@@ -203,14 +212,16 @@ export default function DebugPuppy({ breedId }: { breedId: BreedId }) {
       <header className="dbg-top">
         <div className="dbg-who">
           <span className="dbg-name">{name}</span>
-          <span className="dbg-breed">{breed.label} · 3 meses</span>
+          <span className="dbg-breed">
+            {breedIds.map((id) => BREEDS[id].label).join(' y ')} · 3 meses
+          </span>
         </div>
         <nav className="dbg-breeds" aria-label="Raza">
           {(Object.keys(BREEDS) as BreedId[]).map((id) => (
             <a
               key={id}
-              href={`?debug=puppy&breed=${id}`}
-              aria-current={id === breedId ? 'page' : undefined}
+              href={`?debug=puppy&breed=${id}${breedIds[1] ? `&breed2=${breedIds[1]}` : ''}`}
+              aria-current={id === breedIds[0] ? 'page' : undefined}
             >
               {BREEDS[id].label}
             </a>

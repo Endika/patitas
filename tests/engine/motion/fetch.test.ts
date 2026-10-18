@@ -99,3 +99,73 @@ describe('stepFetch', () => {
     expect([m.sitGoal, m.bowGoal]).toEqual([0, 0])
   })
 })
+
+describe('holding the ball', () => {
+  const cam = fitCamera(createCamera(), 1)
+  const ctx = (mouthWorld: (o: Vec3) => Vec3): FetchCtx => ({
+    reach: 0.2,
+    cam,
+    mouthWorld,
+    mood: { happy: 0.5 },
+    energy: 0,
+  })
+
+  it('only the puppy that grabbed the ball keeps it at its mouth', () => {
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const holder: FetchState = { ...createFetchState(), task: 'grab' }
+    const other = createFetchState()
+    stepFetch(
+      holder,
+      createMotionState(),
+      ball,
+      ctx((o) => o.set(1, 0.3, 1)),
+      0.5,
+    )
+    expect([ball.state, holder.holding]).toEqual(['mouth', true])
+
+    stepFetch(
+      other,
+      createMotionState(),
+      ball,
+      ctx((o) => o.set(-1, 0.3, -1)),
+      DT,
+    )
+    expect(other.holding).toBe(false)
+    expect(ball.pos.toArray()).toEqual([1, 0.3, 1])
+  })
+
+  it('a chaser beaten to the ball gives up and watches it until it rests', () => {
+    const ball: BallState = { ...createBall(), state: 'mouth' }
+    const f: FetchState = { ...createFetchState(), task: 'chase' }
+    const m = createMotionState()
+    stepFetch(
+      f,
+      m,
+      ball,
+      ctx((o) => o),
+      DT,
+    )
+    expect([f.task, f.watch]).toEqual(['free', true])
+
+    ball.state = 'air'
+    ball.vel.set(0.4, 0, 0)
+    stepFetch(
+      f,
+      m,
+      ball,
+      ctx((o) => o),
+      DT,
+    )
+    expect(f.watch).toBe(true)
+    ball.vel.set(0, 0, 0)
+    ball.pos.y = BALL_R
+    stepFetch(
+      f,
+      m,
+      ball,
+      ctx((o) => o),
+      DT,
+    )
+    expect(f.watch).toBe(false)
+  })
+})
