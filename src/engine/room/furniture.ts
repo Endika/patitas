@@ -2,10 +2,15 @@ import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
 import { playHalf, playWorld, type FixedCamera } from './camera'
 
-/** A round footprint on the floor. */
+/** An oval footprint on the floor, turned to face the camera. */
 export interface Spot {
   center: Vec3
+  /** Half size across the screen. */
   radius: number
+  /** Half size along the view, away from the camera. */
+  depth: number
+  /** The camera's azimuth: the oval's `depth` axis points at the camera. */
+  facing: number
 }
 
 /** Where the furniture stands; `garden` is the grass around the `mud` puddle. */
@@ -23,35 +28,53 @@ export interface Circle {
   r: number
 }
 
-const BED_R = 0.6,
-  BOWL_R = 0.13,
-  SCALE_R = 0.22,
-  MUD_R = 0.26,
-  GARDEN_R = 0.47
+/** The bed's ring is 0.6 across its long side, which faces the screen. */
+const BED = { radius: 0.6, depth: 0.47 },
+  BOWL = { radius: 0.13, depth: 0.13 },
+  SCALE = { radius: 0.2, depth: 0.16 }
+
+/** The garden as drawn, before `layout` stretches it to the frame. */
+const GARDEN = { radius: 0.315, depth: 0.45 }
+/** The garden's width over its depth. */
+const GARDEN_WIDTH = 0.7
+/** The puddle within the garden, in fractions of its half sizes: towards the front, a little to the left. */
+const MUD = { u: -0.12, v: 0.35, size: 0.55 }
 
 /**
- * Depth and side (a fraction of the play area's half width there) of each piece, so they stay in
- * frame for every aspect. The front pair sits ahead of where the puppies start.
+ * Places each piece at a depth and a fraction of the play area's half width there, so it stays in
+ * frame for every aspect. The bowl and scale sit ahead of where the puppies start, the bed at the
+ * back, and the garden runs along the left edge with its puddle beside the puppies.
  */
-const LAYOUT = {
-  bed: { d: 1.15, side: 0.55, r: BED_R },
-  bowl: { d: -0.48, side: -0.8, r: BOWL_R },
-  scale: { d: -0.48, side: 0.8, r: SCALE_R },
-  mud: { d: 1.25, side: -0.68, r: MUD_R },
-  garden: { d: 1.25, side: -0.68, r: GARDEN_R },
-} as const
-
 export function computeSpots(cam: FixedCamera): Spots {
-  const spot = ({ d, side, r }: { d: number; side: number; r: number }): Spot => {
+  const facing = cam.az
+  const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot => {
     const [x, z] = playWorld(cam, d, side * playHalf(cam, d))
-    return { center: new THREE.Vector3(x, 0, z), radius: r }
+    return { center: new THREE.Vector3(x, 0, z), ...size, facing }
+  }
+  const gd = 0.8,
+    depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
+  const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
+  // Across the screen is +x turned by the azimuth, towards the camera is +z turned by it
+  const cx = Math.cos(facing),
+    sz = Math.sin(facing),
+    u = MUD.u * garden.radius,
+    v = MUD.v * garden.depth
+  const mud: Spot = {
+    center: new THREE.Vector3(
+      garden.center.x + u * cx + v * sz,
+      0,
+      garden.center.z - u * sz + v * cx,
+    ),
+    radius: MUD.size * garden.radius,
+    depth: MUD.size * garden.depth,
+    facing,
   }
   return {
-    bed: spot(LAYOUT.bed),
-    bowl: spot(LAYOUT.bowl),
-    scale: spot(LAYOUT.scale),
-    mud: spot(LAYOUT.mud),
-    garden: spot(LAYOUT.garden),
+    bed: spot(1.4, 0.55, BED),
+    bowl: spot(-0.48, -0.8, BOWL),
+    scale: spot(-0.48, 0.8, SCALE),
+    mud,
+    garden,
   }
 }
 
@@ -60,18 +83,25 @@ const smoothstep = (a: number, b: number, v: number) => {
   return t * t * (3 - 2 * t)
 }
 
-/** How deep in the puddle a point is: 1 in the middle, easing to 0 at its edge. */
+/**
+ * How deep in the puddle a point is: 1 in the middle, easing to 0 at 0.9 of its size, inside the
+ * wobbly edge drawn around it.
+ */
 export function inMud(spots: Spots, x: number, z: number): number {
-  const { center, radius } = spots.mud
-  return 1 - smoothstep(0.3, 1, Math.hypot(x - center.x, z - center.z) / radius)
+  const { center, radius, depth, facing } = spots.mud
+  const rx = x - center.x,
+    rz = z - center.z
+  const u = (rx * Math.cos(facing) - rz * Math.sin(facing)) / radius,
+    v = (rx * Math.sin(facing) + rz * Math.cos(facing)) / depth
+  return 1 - smoothstep(0.3, 0.9, Math.hypot(u, v))
 }
 
-/** What puppies walk around: the garden is open ground. */
+/** What puppies walk around, as circles that hold each oval: the garden is open ground. */
 export function furnitureObstacles(spots: Spots): Circle[] {
   return [spots.bed, spots.bowl, spots.scale].map((s) => ({
     x: s.center.x,
     z: s.center.z,
-    r: s.radius,
+    r: Math.max(s.radius, s.depth),
   }))
 }
 
@@ -84,7 +114,7 @@ export function formatKg(kg: number | null): string {
 
 export interface Furniture {
   group: THREE.Group
-  /** Kept current: `layout` moves these in place. */
+  /** Kept current: `layout` moves and resizes these in place. */
   spots: Spots
   /** Places every piece for the camera's current framing. */
   layout(cam: FixedCamera): void
@@ -116,7 +146,42 @@ const wobble = (a: number, k: number, seed: number) =>
       0.3 * Math.sin(5 * a + seed * 1.7) +
       0.2 * Math.sin(9 * a + seed * 2.3))
 
-function bed(): THREE.Group {
+/** A soft dark round fading out to nothing, for the shade right under a piece. */
+function contactTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  gr.addColorStop(0, '#fff')
+  gr.addColorStop(0.55, '#aaa')
+  gr.addColorStop(1, '#000')
+  g.fillStyle = gr
+  g.fillRect(0, 0, 64, 64)
+  return new THREE.CanvasTexture(c)
+}
+
+/**
+ * Grounds a piece wherever the sun's shadow box, which follows the puppies, leaves it out: `rx`
+ * and `rz` are the piece's half sizes.
+ */
+function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: number): THREE.Mesh {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({
+      color: '#3b2a1c',
+      alphaMap,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    }),
+  )
+  m.rotation.x = -Math.PI / 2
+  m.scale.set(rx * 1.15, rz * 1.15, 1)
+  m.position.y = 0.001
+  return m
+}
+
+function bed(shade: THREE.Texture): THREE.Group {
   const g = new THREE.Group()
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.49, 0.11, 18, 64),
@@ -133,13 +198,13 @@ function bed(): THREE.Group {
   pad.scale.set(0.42, 0.04, 0.34)
   pad.position.y = 0.025
   pad.receiveShadow = true
-  g.add(ring, pad)
+  g.add(ring, pad, contact(shade, BED.radius, BED.depth, 0.35))
   return g
 }
 
 const KIBBLE = 110
 
-function bowl(): { group: THREE.Group; kibble: THREE.InstancedMesh } {
+function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.InstancedMesh } {
   const g = new THREE.Group()
   const profile = [
     [0, 0],
@@ -186,11 +251,15 @@ function bowl(): { group: THREE.Group; kibble: THREE.InstancedMesh } {
     kibble.setMatrixAt(i, m.compose(new THREE.Vector3(p.x, p.y, p.z), q.setFromEuler(e), sc))
     kibble.setColorAt(i, c.set('#8b5a32').offsetHSL(0, 0, (rand() - 0.5) * 0.12))
   })
-  g.add(dish, kibble)
+  g.add(dish, kibble, contact(shade, BOWL.radius, BOWL.depth, 0.45))
   return { group: g, kibble }
 }
 
-function scale(): { group: THREE.Group; screen: HTMLCanvasElement; map: THREE.CanvasTexture } {
+function scale(shade: THREE.Texture): {
+  group: THREE.Group
+  screen: HTMLCanvasElement
+  map: THREE.CanvasTexture
+} {
   const g = new THREE.Group()
   // An oval platform with a rounded edge, a soft mat on top and a pill for the display
   const edge = [
@@ -220,21 +289,21 @@ function scale(): { group: THREE.Group; screen: HTMLCanvasElement; map: THREE.Ca
     new THREE.SphereGeometry(1, 24, 12),
     new THREE.MeshStandardMaterial({ color: '#e6e1d4', roughness: 0.5 }),
   )
-  head.scale.set(0.11, 0.035, 0.03)
+  head.scale.set(0.12, 0.04, 0.03)
   head.position.set(0, 0.04, 0.12)
   head.castShadow = true
   const screen = document.createElement('canvas')
-  screen.width = 256
+  screen.width = 240
   screen.height = 80
   const map = new THREE.CanvasTexture(screen)
   map.colorSpace = THREE.SRGBColorSpace
   const display = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.15, 0.047),
+    new THREE.PlaneGeometry(0.18, 0.06),
     new THREE.MeshBasicMaterial({ map, toneMapped: false }),
   )
-  display.position.set(0, 0.048, 0.146)
+  display.position.set(0, 0.055, 0.157)
   display.rotation.x = -0.35
-  g.add(body, mat, head, display)
+  g.add(body, mat, head, display, contact(shade, SCALE.radius, SCALE.depth, 0.35))
   return { group: g, screen, map }
 }
 
@@ -244,15 +313,19 @@ function drawReading(screen: HTMLCanvasElement, text: string) {
   g.fillStyle = INK
   g.fillRect(0, 0, screen.width, screen.height)
   g.fillStyle = '#cdeedb'
-  g.font = '600 50px system-ui, sans-serif'
+  g.font = '700 62px system-ui, sans-serif'
   g.textAlign = 'center'
   g.textBaseline = 'middle'
   g.fillText(text, screen.width / 2, screen.height / 2 + 2)
 }
 
-/** An irregular disc with vertex colours, its rim `rim(a)` times `r` and height `y(t)` from the middle out. */
+/**
+ * An irregular oval with vertex colours: half sizes `rx` across and `rz` along the view, its rim
+ * `rim(a)` times those and its height `y(t)` from the middle out.
+ */
 function blob(
-  r: number,
+  rx: number,
+  rz: number,
   rim: (a: number) => number,
   y: (t: number) => number,
   color: (t: number, a: number, out: THREE.Color) => THREE.Color,
@@ -269,8 +342,8 @@ function blob(
     const t = i / rings
     for (let j = 0; j < segs; j++) {
       const a = (j / segs) * Math.PI * 2,
-        rr = r * t * rim(a)
-      pos.push(rr * Math.cos(a), y(t), -rr * Math.sin(a))
+        k = t * rim(a)
+      pos.push(k * rx * Math.cos(a), y(t), -k * rz * Math.sin(a))
       color(t, a, c)
       col.push(c.r, c.g, c.b, alpha(t))
     }
@@ -317,7 +390,8 @@ function garden(): THREE.Group {
     dark = new THREE.Color('#5f8a43')
   const grass = new THREE.Mesh(
     blob(
-      GARDEN_R,
+      GARDEN.radius,
+      GARDEN.depth,
       grassRim,
       () => 0.002,
       (t, a, out) => {
@@ -338,27 +412,31 @@ function garden(): THREE.Group {
   )
   grass.receiveShadow = true
   grass.renderOrder = 1
-  const wetEdge = new THREE.Color('#6e4b2e'),
-    deep = new THREE.Color('#452915')
+  const wetEdge = new THREE.Color('#5a3b22'),
+    deep = new THREE.Color('#3a2312')
+  const mudR = MUD.size * GARDEN.radius,
+    mudD = MUD.size * GARDEN.depth
   const mud = new THREE.Mesh(
     blob(
-      MUD_R,
+      mudR,
+      mudD,
       mudRim,
       (t) => -0.008 * (1 - t * t) + 0.004 * smoothstep(0.85, 1, t),
       (t, _a, out) => out.copy(deep).lerp(wetEdge, smoothstep(0.55, 1, t)),
       () => 1,
     ),
-    // Drawn after the see-through grass, which writes no depth, so the sunken middle shows
-    // Wet but not a mirror: seen this low it would reflect the pale room and the rim light
+    // Drawn after the see-through grass, which writes no depth, so the sunken middle shows.
+    // Damp rather than glossy: seen this low, the rim light glances off it from behind and any
+    // ordinary shine turns the puddle grey, so its specular is nearly off
     new THREE.MeshPhysicalMaterial({
       vertexColors: true,
-      roughness: 0.25,
-      specularIntensity: 0.07,
-      envMapIntensity: 0.4,
+      roughness: 0.6,
+      specularIntensity: 0.03,
+      envMapIntensity: 0.25,
       transparent: true,
     }),
   )
-  mud.position.y = 0.003
+  mud.position.set(MUD.u * GARDEN.radius, 0.003, MUD.v * GARDEN.depth)
   mud.receiveShadow = true
   mud.renderOrder = 2
   // Short blades on the grass, thinning towards its edge and none in the puddle
@@ -379,9 +457,11 @@ function garden(): THREE.Group {
     const a = rand() * Math.PI * 2,
       t = Math.sqrt(rand())
     if (t > 0.92 && rand() < 0.6) continue
-    const r = t * GARDEN_R * grassRim(a) * 0.95
-    if (r < MUD_R * mudRim(a) * 1.08) continue
-    p.set(r * Math.cos(a), 0, -r * Math.sin(a))
+    const k = t * grassRim(a) * 0.95
+    p.set(k * GARDEN.radius * Math.cos(a), 0, -k * GARDEN.depth * Math.sin(a))
+    const mu = (p.x - mud.position.x) / mudR,
+      mv = (p.z - mud.position.z) / mudD
+    if (Math.hypot(mu, mv) < mudRim(Math.atan2(-mv, mu)) * 1.08) continue
     e.set((rand() - 0.5) * 0.7, rand() * 6, (rand() - 0.5) * 0.7)
     s.set(1, 0.6 + rand() * 0.8 * (1 - 0.5 * t), 1)
     blades.setMatrixAt(n, m.compose(p, q.setFromEuler(e), s))
@@ -395,9 +475,10 @@ function garden(): THREE.Group {
 /** The bed, the bowl, the scale and the garden corner, laid out for `cam`. */
 export function addFurniture(scene: THREE.Scene, cam: FixedCamera): Furniture {
   const group = new THREE.Group()
-  const bedG = bed(),
-    bowlParts = bowl(),
-    scaleParts = scale(),
+  const shade = contactTexture()
+  const bedG = bed(shade),
+    bowlParts = bowl(shade),
+    scaleParts = scale(shade),
     gardenG = garden()
   group.add(bedG, bowlParts.group, scaleParts.group, gardenG)
   scene.add(group)
@@ -414,12 +495,16 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera): Furniture {
     spots,
     layout(next) {
       const fresh = computeSpots(next)
-      for (const k of Object.keys(fresh) as (keyof Spots)[]) spots[k].center.copy(fresh[k].center)
+      for (const k of Object.keys(fresh) as (keyof Spots)[]) {
+        const { center, ...size } = fresh[k]
+        Object.assign(spots[k], size).center.copy(center)
+      }
       // Everything faces the camera, so the bed's long side and the scale's display face the screen
       for (const [o, s] of placed) {
         o.position.copy(s.center)
         o.rotation.y = next.az
       }
+      gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
     },
     bowlFill(level) {
       bowlParts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)

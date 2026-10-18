@@ -55,6 +55,8 @@ export default defineConfig({
   build: {
     sourcemap: true,
     target: 'es2022',
+    // three is one vendor chunk, cached by the service worker; the warning is for app code
+    chunkSizeWarningLimit: 600,
     rolldownOptions: {
       output: {
         codeSplitting: { groups: [{ name: 'three', test: /node_modules[\\/]three[\\/]/ }] },
