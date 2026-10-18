@@ -476,6 +476,18 @@ describe('mud', () => {
     expect(playing.seen).toEqual(['none'])
   })
 
+  it('play stops the stamping without a stray turn', () => {
+    const p = pup(0.12, -0.12)
+    p.r.mudAgo = MUD_EVERY
+    for (let n = 0; n < 60 / DT && p.r.routine !== 'splashing'; n++)
+      run([p], DT, at(12), SPOTS, undefined, undefined, curious(1))
+    expect(p.r.routine).toBe('splashing')
+    run([p], 1, at(12), SPOTS, undefined, undefined, curious(1))
+    expect(p.m.face).not.toBeNull()
+    run([p], DT, at(12), SPOTS, undefined, undefined, { ...curious(1), busy: true })
+    expect([p.r.routine, p.m.face]).toEqual(['none', null])
+  })
+
   it('food and bed come first', () => {
     const hungry = pup(0.12, -0.12, 0.8, 0.8, 1)
     hungry.r.mudAgo = MUD_EVERY

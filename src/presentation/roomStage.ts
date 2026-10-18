@@ -37,7 +37,7 @@ export interface RoomStage {
   trick(pose: TrickPose): void
   /** Fills the bowl of every puppy in the room. */
   feed(): void
-  /** Debug page only: sends the first puppy into the puddle. */
+  /** Debug page only: sends the first puppy into the puddle, if it is awake and doing nothing else. */
   toMud?(): void
   /** Called at once with the current status and again whenever it changes. */
   onChange(listener: (s: StageStatus) => void): () => void

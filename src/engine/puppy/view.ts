@@ -30,7 +30,7 @@ import {
 import type { BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
-import { inMud, showBowls } from '@/engine/room/furniture'
+import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
 import type { Anatomy, Tuple3, ZoneId } from './anatomy'
@@ -151,6 +151,20 @@ const GLINTS: [Tuple3, number, number][] = [
 
 const Z = new THREE.Vector3(0, 0, 1)
 
+const noWade = () => null
+const wades = new WeakMap<Spots, (x: number, z: number) => Vec3 | null>()
+
+/** One `wade` per furniture layout: its spots are updated in place, so the closure keeps up. */
+function wadeIn(spots: Spots | undefined): (x: number, z: number) => Vec3 | null {
+  if (!spots) return noWade
+  let wade = wades.get(spots)
+  if (!wade) {
+    wade = (x, z) => (inMud(spots, x, z) > 0 ? spots.mud.center : null)
+    wades.set(spots, wade)
+  }
+  return wade
+}
+
 const dirtRests = new WeakMap<THREE.BufferGeometry, DirtRest>()
 
 /** Where mud reaches on a breed's mesh: worked out once for the geometry every view shares. */
@@ -171,7 +185,7 @@ function restOf(geometry: THREE.BufferGeometry, A: Anatomy): DirtRest {
  * A geometry of the puppy's own over the breed's shared one: the same attribute objects, so the
  * GPU keeps one copy of the mesh, plus this puppy's `dirt`.
  */
-function ownGeometry(shared: THREE.BufferGeometry, dirt: THREE.BufferAttribute) {
+export function ownGeometry(shared: THREE.BufferGeometry, dirt: THREE.BufferAttribute) {
   const g = new THREE.BufferGeometry()
   for (const [name, a] of Object.entries(shared.attributes)) g.setAttribute(name, a)
   g.setIndex(shared.index)
@@ -180,7 +194,7 @@ function ownGeometry(shared: THREE.BufferGeometry, dirt: THREE.BufferAttribute) 
 }
 
 /** Frees only what the puppy owns: disposing drops every GPU buffer the geometry still lists. */
-function disposeOwn(own: THREE.BufferGeometry, shared: THREE.BufferGeometry) {
+export function disposeOwn(own: THREE.BufferGeometry, shared: THREE.BufferGeometry) {
   for (const name of Object.keys(shared.attributes)) own.deleteAttribute(name)
   own.setIndex(null)
   own.dispose()
@@ -473,9 +487,7 @@ export function tickPuppies(
         mood: view.behaviour,
         energy: view.persona.energy,
         ...(ctx.random && { random: ctx.random }),
-        ...(spots && {
-          wade: (x: number, z: number) => (inMud(spots, x, z) > 0 ? spots.mud.center : null),
-        }),
+        wade: wadeIn(spots),
       },
       dt,
     )

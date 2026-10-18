@@ -330,7 +330,7 @@ export function createThreeStage(
     toMud() {
       const v = views[0],
         spots = room.furniture?.spots
-      if (!v || !spots || touch(v.routine) || v.fetch.task !== 'free') return
+      if (!v || !spots || v.routine.routine !== 'none' || v.fetch.task !== 'free') return
       goToMud(v.routine, v.motion, spots, (x, z) => clampPlay(room.cam, x, z))
     },
     onChange: hub.onChange,

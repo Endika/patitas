@@ -33,7 +33,7 @@ function body(): { rest: DirtRest; parts: Part[]; position: Float32Array } {
   }
   for (let i = 0; i < 40; i++) {
     const s = i / 39
-    add('paw', -0.15 + 0.3 * s, 0.02 + 0.08 * s, i % 2 ? 0.3 : -0.3, [0, -0.2, 0.98])
+    add('paw', -0.15 + 0.3 * s, 0.02 + 0.099 * s, i % 2 ? 0.3 : -0.3, [0, -0.2, 0.98])
     add('belly', -0.1 + 0.2 * s, 0.24, -0.25 + 0.5 * s, [0, -1, 0])
     add('back', -0.1 + 0.2 * s, 0.5, -0.3 + 0.6 * s, [0, 1, 0])
     add('muzzle', -0.03 + 0.06 * s, 0.66 + 0.02 * s, 0.6, [0, 0, 1])
@@ -160,6 +160,22 @@ describe('dirt', () => {
     expect(withDirt(saved, loaded).cleanliness).toBeCloseTo(saved.cleanliness, 3)
     // Spread by height: the paws carry it before the back
     expect(meanOf(loaded, parts, 'paw')).toBeGreaterThan(meanOf(loaded, parts, 'back'))
+  })
+
+  it('a loaded level settles on the paws, then the belly, then the muzzle, then the back', () => {
+    const { rest, parts } = body()
+    const at = (level: number) => {
+      const f = createDirtField(parts.length)
+      redistributeDirt(f, rest, level)
+      return (p: Part) => meanOf(f, parts, p)
+    }
+    const some = at(0.3)
+    expect(some('paw')).toBeGreaterThan(some('belly'))
+    expect(some('belly')).toBeGreaterThan(some('muzzle'))
+    expect(some('back')).toBe(0)
+    const more = at(0.6)
+    expect(more('belly')).toBeGreaterThan(more('muzzle'))
+    expect(more('muzzle')).toBeGreaterThan(more('back'))
   })
 
   it('redistributeDirt keeps any level, from clean to all mud', () => {
