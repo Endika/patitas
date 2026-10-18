@@ -15,7 +15,7 @@ import {
 import { stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
-import { createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { clampPlay, createCamera, fitCamera, playLocal, PLAY } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
 
 const DT = 1 / 60
@@ -70,6 +70,45 @@ describe('separate', () => {
     separate([a, b], 0.45)
     expect(flat(a, b)).toBeCloseTo(0.45)
   })
+})
+
+describe('separate at the edge of the play area', () => {
+  const cam = fitCamera(createCamera(), 0.46)
+  const clamp = (x: number, z: number) => clampPlay(cam, x, z)
+  const at = (d: number, side: number) => {
+    const q = playLocal(cam, 0, 0)
+    return clamp(cam.target.x + q.fx * d - q.fz * side, cam.target.z + q.fz * d + q.fx * side)
+  }
+  const edges: [string, [number, number], [number, number]][] = [
+    ['side', at(0.4, 9), at(0.4, 0)],
+    ['far', at(PLAY.far, 0), at(PLAY.far - 1, 0)],
+    ['near', at(PLAY.near, 0), at(PLAY.near + 1, 0)],
+  ]
+
+  it.each(edges)(
+    'a walker nudges a puppy on the %s edge along it, never out of the frame',
+    (_, [ex, ez], [wx, wz]) => {
+      const idle = puppy(ex, ez),
+        walker = puppy(wx, wz)
+      const goal = idle.m.pos.clone()
+      goTo(walker.m, goal.x, goal.z, { happy: 0.5, energy: 0.5, clamp })
+      let nearest = Infinity
+      for (let n = 0; n < 60 * 10; n++) {
+        for (const p of [idle, walker]) {
+          stepPoses(p.m, DT)
+          stepLocomotion(p.m, p.legs, DT)
+        }
+        separate([idle.m, walker.m], 0.45, clamp)
+        for (const p of [idle, walker]) {
+          const [cx, cz] = clamp(p.m.pos.x, p.m.pos.z)
+          expect(Math.hypot(cx - p.m.pos.x, cz - p.m.pos.z)).toBeLessThan(1e-6)
+        }
+        expect(flat(idle.m, walker.m)).toBeGreaterThanOrEqual(0.45 - 1e-6)
+        nearest = Math.min(nearest, Math.hypot(walker.m.pos.x - goal.x, walker.m.pos.z - goal.z))
+      }
+      expect(nearest).toBeLessThan(0.1)
+    },
+  )
 })
 
 describe('claimBall', () => {
