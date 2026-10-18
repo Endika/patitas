@@ -341,6 +341,8 @@ const toBowl: Step = (r, m, ctx) => {
   if (m.pose !== 'stand') setPose(m, 'stand')
   if (!approach(r, m, ctx, bowl) || !faceTarget(r, m)) return
   if (!r.beg) return enter(r, 'eating')
+  // The pause counts from here too, so a beg cut short by play does not start again at once
+  r.begAgo = 0
   enter(r, 'begging')
   setPose(m, 'sit', BEG_TIME)
 }

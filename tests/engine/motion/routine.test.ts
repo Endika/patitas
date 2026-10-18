@@ -303,7 +303,7 @@ describe('meals', () => {
     expect(p.seen).toEqual(['toBowl', 'eating', 'none'])
     expect(p.time.eating).toBeCloseTo(MEAL_TIME, 1)
     expect(MEAL_TIME).toBe(4)
-    expect(-near).toBeLessThan(0.07)
+    expect(-near).toBeLessThan(0.03)
     expect(-facing).toBeLessThan(0.1)
     expect(p.care.hunger).toBeLessThanOrEqual(0.2)
     expect(p.care.weightKg).toBeGreaterThan(kg)
@@ -335,7 +335,7 @@ describe('meals', () => {
     ;[a, b].forEach((p, i) => {
       expect(p.seen).toEqual(['toBowl', 'eating', 'none'])
       expect(p.bowl).toBe(0)
-      expect(worst[i]).toBeLessThan(0.07)
+      expect(worst[i]).toBeLessThan(0.03)
     })
     expect(a.care.hunger).toBeCloseTo(0.1)
     expect(b.care.hunger).toBe(0)
@@ -352,7 +352,7 @@ describe('meals', () => {
     let sat = 0
     run([p], 12, at(12), SPOTS, () => {
       if (p.r.routine === 'begging' && p.m.pose === 'sit') sat += DT
-      if (p.r.routine === 'begging') expect(offMeal(p, SPOTS, 0)).toBeLessThan(0.07)
+      if (p.r.routine === 'begging') expect(offMeal(p, SPOTS, 0)).toBeLessThan(0.03)
     })
     expect(p.seen).toEqual(['toBowl', 'begging', 'none'])
     expect(sat).toBeGreaterThan(2)
@@ -363,6 +363,22 @@ describe('meals', () => {
     run([p], 1, at(12, 2))
     // Still by the bowl, it asks again at once
     expect(p.seen.slice(-3)).toEqual(['none', 'toBowl', 'begging'])
+  })
+
+  it('keeps the pause after a beg that play cut short', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 0)
+    run([p], 5, at(12))
+    expect(p.r.routine).toBe('begging')
+    stepRoutine(
+      p.r,
+      p.m,
+      { ...base, now: at(12), care: p.care, spots: SPOTS, place: 0, bowl: 0, busy: true },
+      DT,
+    )
+    expect(p.r.routine).toBe('none')
+    const before = p.seen.length
+    run([p], BEG_EVERY - 6, at(12, 1))
+    expect(p.seen.slice(before)).toEqual(['none'])
   })
 
   it('goes to eat as soon as its bowl is filled while it begs', () => {
