@@ -1,6 +1,9 @@
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { openDB } from 'idb'
+import { BREEDS } from '../../src/domain/breeds'
+import { createCare } from '../../src/domain/care'
 import { createPuppy } from '../../src/domain/puppy'
 import { openGameStorage } from '../../src/infrastructure/idbStorage'
 
@@ -59,5 +62,32 @@ describe('idbStorage', () => {
     const puppy = puppyAt('Luna', 1)
     await storage.savePuppy(puppy)
     expect(await storage.listPuppies()).toEqual([puppy])
+  })
+
+  it('keeps care across reopening', async () => {
+    const first = await openGameStorage()
+    expect(await first.loadCare('x')).toBeUndefined()
+    const care = createCare(BREEDS.dorado, 7)
+    await first.saveCare('x', care)
+    expect(await (await openGameStorage()).loadCare('x')).toEqual(care)
+  })
+
+  it('upgrades a v1 database keeping puppies and room', async () => {
+    const v1 = await openDB('patitas', 1, {
+      upgrade(db) {
+        db.createObjectStore('puppies', { keyPath: 'id' })
+        db.createObjectStore('meta')
+      },
+    })
+    const puppy = puppyAt('Luna', 5)
+    await v1.put('puppies', puppy)
+    await v1.put('meta', { inRoom: [puppy.id] }, 'room')
+    v1.close()
+
+    const storage = await openGameStorage()
+    expect(storage.persistent).toBe(true)
+    expect(await storage.listPuppies()).toEqual([puppy])
+    expect(await storage.loadRoom()).toEqual({ inRoom: [puppy.id] })
+    expect(await storage.loadCare(puppy.id)).toBeUndefined()
   })
 })
