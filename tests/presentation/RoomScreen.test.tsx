@@ -83,6 +83,26 @@ describe('RoomScreen', () => {
     expect(await storage.listPuppies()).toHaveLength(2)
   })
 
+  it('tells the player a puppy adopted into a full room waits outside', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const stage = start(storage)
+
+    await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))
+    await user.type(screen.getByLabelText('Nombre'), 'Toby')
+    await user.click(screen.getByRole('button', { name: 'Adoptar' }))
+
+    expect(
+      await screen.findByText('Toby espera fuera: saca a uno para que entre.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Luna y Kira' })).toBeInTheDocument()
+    expect(stage.names()).toEqual(['Luna', 'Kira'])
+
+    const list = await roster()
+    await user.click(list.getByRole('button', { name: 'Sacar a Luna' }))
+    expect(screen.queryByText(/espera fuera/)).not.toBeInTheDocument()
+  })
+
   it('gives every stage a canvas of its own and removes it when the room goes', async () => {
     const user = userEvent.setup()
     const stage = createFakeStage()
