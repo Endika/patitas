@@ -4,7 +4,8 @@ import App from './App'
 
 const DebugPuppy = lazy(() => import('./DebugPuppy'))
 
-const asBreed = (id: string | null): BreedId | null => (id && id in BREEDS ? (id as BreedId) : null)
+const asBreed = (id: string | null): BreedId | null =>
+  id && Object.hasOwn(BREEDS, id) ? (id as BreedId) : null
 
 function debugBreeds(search: string): BreedId[] | null {
   const params = new URLSearchParams(search)
