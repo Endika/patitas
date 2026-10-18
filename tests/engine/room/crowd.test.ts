@@ -160,8 +160,8 @@ describe('claimBall', () => {
   })
 
   it('sends the energetic puppy more often', () => {
-    const [a, b] = throws(200, [1, 0.3], seeded(11))
-    expect(a!).toBeGreaterThan(b!)
+    const [a, b] = throws(200, [0.3, 1], seeded(11))
+    expect(b!).toBeGreaterThan(a!)
   })
 
   it('sends both on a race roll and lets only one reach the ball', () => {
@@ -169,7 +169,6 @@ describe('claimBall', () => {
     const ball: BallState = { ...createBall(), state: 'air' }
     const { fx, fz } = playLocal(cam, 0, 0)
     ball.pos.set(cam.target.x + fx * 0.9, BALL_R, cam.target.z + fz * 0.9)
-    // Both already within reach of the resting ball: they arrive in the same frame
     const a = puppy(ball.pos.x - REACH, ball.pos.z),
       b = puppy(ball.pos.x + REACH, ball.pos.z)
     a.m.heading = Math.PI / 2
@@ -222,11 +221,47 @@ describe('claimBall', () => {
     expect(loser.f.task).toBe('free')
   })
 
-  it('never sends a puppy that is not chasing', () => {
-    for (const random of [() => 0.1, () => 0.9, seeded(3)]) {
-      const wins = throws(1, [0.5, 0.5], random)
-      expect(wins[0]! + wins[1]!).toBeLessThanOrEqual(1)
+  it('lets only one grab when both are within reach in the same frame', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const { fx, fz } = playLocal(cam, 0, 0)
+    ball.pos.set(cam.target.x + fx * 0.9, BALL_R, cam.target.z + fz * 0.9)
+    const a = puppy(ball.pos.x - REACH, ball.pos.z, Math.PI / 2),
+      b = puppy(ball.pos.x + REACH, ball.pos.z, -Math.PI / 2)
+    const dogs = [a, b]
+    for (const p of dogs) p.f.task = 'chase'
+    let grabbed = 0,
+      emptyReturn = false
+    for (let n = 0; n < 60 * 8; n++) {
+      for (const p of dogs) {
+        const ev = stepFetch(
+          p.f,
+          p.m,
+          ball,
+          {
+            reach: REACH,
+            cam,
+            mouthWorld: p.mouth,
+            mood: { happy: 0.5 },
+            energy: 0.5,
+            random: () => 0.9,
+          },
+          DT,
+        )
+        if (ev.grabbed) grabbed++
+        if (p.f.task === 'return' && !p.f.holding) emptyReturn = true
+      }
+      for (const p of dogs) {
+        stepPoses(p.m, DT)
+        stepLocomotion(p.m, p.legs, DT)
+      }
+      stepBall(ball, cam, DT)
     }
+    expect(grabbed).toBe(1)
+    expect(emptyReturn).toBe(false)
+  })
+
+  it('never sends a puppy that is not chasing', () => {
     const ball: BallState = { ...createBall(), state: 'air' }
     ball.pos.set(0, BALL_R, 1)
     const dogs = [puppy(-0.5, 0), puppy(0.5, 0)]
