@@ -522,6 +522,8 @@ export function stepRoutine(
   }
   if (ctx.busy && !keepsEating(r, ctx.care)) {
     r.idle = 0
+    // The stamp's heading goes with it, or play would start with a stray turn
+    if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null
     if (r.routine !== 'none') enter(r, 'none')
   } else {
     if (r.routine === 'none') choose(r, m, ctx, dt)

@@ -8,7 +8,14 @@ import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
 import { createRoutineState, tuckIn } from '@/engine/motion/routine'
 import { createBehaviourState } from '@/engine/puppy/behaviour'
-import { hitZone, offerBall, restBounds, type ZoneRig } from '@/engine/puppy/view'
+import {
+  disposeOwn,
+  hitZone,
+  offerBall,
+  ownGeometry,
+  restBounds,
+  type ZoneRig,
+} from '@/engine/puppy/view'
 import { createBall } from '@/engine/room/ball'
 
 describe('hitZone', () => {
@@ -89,5 +96,37 @@ describe('offerBall', () => {
       peckish = pup(0.2)
     offerBall([hungry, peckish], createBall())
     expect([hungry.fetch.task, peckish.fetch.task]).toEqual(['free', 'wait'])
+  })
+})
+
+describe('ownGeometry', () => {
+  it('shares the breed mesh and frees only its own dirt when a view goes', () => {
+    const shared = new THREE.BoxGeometry(0.4, 0.6, 0.8)
+    const names = Object.keys(shared.attributes)
+    const dirtA = new THREE.BufferAttribute(new Float32Array(shared.attributes.position!.count), 1)
+    const dirtB = new THREE.BufferAttribute(new Float32Array(shared.attributes.position!.count), 1)
+    const a = ownGeometry(shared, dirtA),
+      b = ownGeometry(shared, dirtB)
+    for (const n of names) {
+      expect(a.attributes[n]).toBe(shared.attributes[n])
+      expect(b.attributes[n]).toBe(shared.attributes[n])
+    }
+    expect(a.index).toBe(shared.index)
+    expect(a.attributes.dirt).toBe(dirtA)
+
+    // What the renderer would free is what the geometry still lists when it is disposed
+    let freed: { attrs: THREE.BufferAttribute[]; index: unknown } | null = null
+    a.addEventListener('dispose', () => {
+      freed = {
+        attrs: Object.values(a.attributes) as THREE.BufferAttribute[],
+        index: a.index,
+      }
+    })
+    disposeOwn(a, shared)
+    expect(freed).toEqual({ attrs: [dirtA], index: null })
+    expect(Object.keys(shared.attributes)).toEqual(names)
+    for (const n of names) expect(b.attributes[n]).toBe(shared.attributes[n])
+    expect(b.index).toBe(shared.index)
+    expect(b.attributes.dirt).toBe(dirtB)
   })
 })
