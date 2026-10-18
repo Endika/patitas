@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { cameraPosition, clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { bedSlots } from '@/engine/motion/routine'
 import {
   computeSpots,
   formatKg,
@@ -188,6 +189,30 @@ describe('inMud', () => {
       expect(last - v).toBeLessThan(0.35)
       last = v
     }
+  })
+})
+
+describe('the bed in frame', () => {
+  it.each(ASPECTS)('keeps two sleepers and their overhang on screen at aspect %f', (aspect) => {
+    const { cam, camera } = view(aspect)
+    const spots = computeSpots(cam)
+    const ux = Math.cos(spots.bed.facing),
+      uz = -Math.sin(spots.bed.facing)
+    const vx = Math.sin(spots.bed.facing),
+      vz = Math.cos(spots.bed.facing)
+    // A curled sleeper reaches 0.45 across its slot (its head turned outwards, ears and all),
+    // measured on the shots, and its head up to 0.3 towards the camera
+    for (const slot of bedSlots(spots, 2))
+      for (const off of [-0.45, 0.45])
+        for (const ahead of [0, 0.3])
+          for (const y of [0, 0.4]) {
+            const p = new THREE.Vector3(
+              slot.x + ux * off + vx * ahead,
+              y,
+              slot.z + uz * off + vz * ahead,
+            ).project(camera)
+            expect(Math.abs(p.x)).toBeLessThanOrEqual(0.95)
+          }
   })
 })
 

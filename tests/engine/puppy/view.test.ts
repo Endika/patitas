@@ -3,7 +3,11 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
-import { hitZone, restBounds, type ZoneRig } from '@/engine/puppy/view'
+import { createFetchState } from '@/engine/motion/fetch'
+import { createRoutineState, tuckIn } from '@/engine/motion/routine'
+import { createBehaviourState } from '@/engine/puppy/behaviour'
+import { hitZone, offerBall, restBounds, type ZoneRig } from '@/engine/puppy/view'
+import { createBall } from '@/engine/room/ball'
 
 describe('hitZone', () => {
   // A ray from the side passes the belly first and the chest behind it
@@ -47,5 +51,22 @@ describe('restBounds', () => {
     expect(second).not.toBe(first)
     second.expandByScalar(1)
     close(cached!.max, [0.2, 0.6, 0.4])
+  })
+})
+
+describe('offerBall', () => {
+  it('lets a sleeping puppy sleep on while the awake one waits for the throw', () => {
+    const pup = () => ({
+      motion: createMotionState(),
+      fetch: createFetchState(),
+      behaviour: createBehaviourState(),
+      routine: createRoutineState(),
+    })
+    const awake = pup(),
+      asleep = pup()
+    tuckIn(asleep.routine, asleep.motion)
+    offerBall([awake, asleep], createBall())
+    expect([awake.fetch.task, asleep.fetch.task]).toEqual(['wait', 'free'])
+    expect([asleep.routine.routine, asleep.motion.pose]).toEqual(['sleeping', 'sleep'])
   })
 })

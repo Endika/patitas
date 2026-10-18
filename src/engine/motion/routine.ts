@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { isNight, rest, tire, type Care } from '@/domain/care'
 import type { Vec3 } from '@/engine/math'
-import { furnitureObstacles, type Circle, type Spots } from '@/engine/room/furniture'
+import { furnitureObstacles, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
 import { goTo, type MotionState } from './locomotion'
 import { POSES, setPose } from './poses'
 
@@ -198,6 +198,23 @@ function detour(from: Vec3, to: Vec3, circles: readonly Circle[]): { x: number; 
   return best ?? to
 }
 
+/**
+ * Walks to `r.target`, round any furniture in the way except `spot`, the piece it is going to.
+ * Returns true once there and standing still: the routine's "do something" can start.
+ */
+export function approach(r: RoutineState, m: MotionState, ctx: RoutineCtx, spot: Spot): boolean {
+  const dist = Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z)
+  if (dist <= ARRIVED && !m.goal) return true
+  const way = detour(
+    m.pos,
+    r.target,
+    furnitureObstacles(ctx.spots).filter((c) => c.x !== spot.center.x || c.z !== spot.center.z),
+  )
+  if (!m.goal || Math.hypot(m.goal.x - way.x, m.goal.z - way.z) > 0.02)
+    goTo(m, way.x, way.z, { happy: 0, energy: 0, gait: 'walk', clamp: ctx.clamp })
+  return false
+}
+
 type Step = (
   r: RoutineState,
   m: MotionState,
@@ -215,18 +232,7 @@ const toBed: Step = (r, m, ctx) => {
     return enter(r, 'none')
   }
   if (r.turnLeft == null) {
-    const dist = Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z)
-    if (dist > ARRIVED || m.goal) {
-      const bed = ctx.spots.bed
-      const way = detour(
-        m.pos,
-        r.target,
-        furnitureObstacles(ctx.spots).filter((c) => c.x !== bed.center.x || c.z !== bed.center.z),
-      )
-      if (!m.goal || Math.hypot(m.goal.x - way.x, m.goal.z - way.z) > 0.02)
-        goTo(m, way.x, way.z, { happy: 0, energy: 0, gait: 'walk', clamp: ctx.clamp })
-      return
-    }
+    if (!approach(r, m, ctx, ctx.spots.bed)) return
     // There: one full turn round, ending at the slot's heading
     r.turnLeft = Math.PI * 2 + angle(r.heading - m.heading)
     r.lastHeading = m.heading
@@ -262,7 +268,8 @@ const stretch: Step = (r, m, _ctx, ev, dt) => {
 
 /**
  * The extension point: each routine's step. A new routine adds its states to `Routine`, a step
- * here, and its want in `choose`, ahead of or behind the bed by priority.
+ * here (walking there with `approach`), and its want in `choose`, ahead of or behind the bed by
+ * priority.
  */
 const STEPS: { [K in Routine]?: Step } = { toBed, sleeping, stretch }
 

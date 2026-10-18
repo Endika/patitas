@@ -546,12 +546,18 @@ export function headWorld(view: PuppyView, out: Vec3 = new THREE.Vector3()): Vec
   return view.bones.head!.getWorldPosition(out)
 }
 
-/** The ball comes out: the puppies stand and wait for the throw. */
-export function offerBall(views: PuppyView[], ball: BallState): void {
+const asleep = (v: Pick<PuppyView, 'routine'>) => v.routine.routine === 'sleeping'
+
+/** The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on. */
+export function offerBall(
+  views: Pick<PuppyView, 'motion' | 'fetch' | 'behaviour' | 'routine'>[],
+  ball: BallState,
+): void {
   if (ball.state === 'mouth') return
   ball.state = 'hand'
   ball.vel.set(0, 0, 0)
   for (const v of views) {
+    if (asleep(v)) continue
     setPose(v.motion, 'stand')
     v.fetch.task = 'wait'
     v.fetch.taskT = 0
@@ -565,11 +571,12 @@ export function putBallAway(views: PuppyView[], ball: BallState): void {
   for (const v of views) if (v.fetch.task === 'wait') v.fetch.task = 'free'
 }
 
-/** Every puppy perks up at the throw; the one whose mouth is nearest goes for it. */
+/** Every puppy awake perks up at the throw; the one whose mouth is nearest goes for it. */
 export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void {
   ball.vel.copy(vel)
   ball.state = 'air'
   for (const v of views) {
+    if (asleep(v)) continue
     v.fetch.task = 'chase'
     v.fetch.taskT = 0
     v.behaviour.perk = 1
