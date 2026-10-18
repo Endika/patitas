@@ -30,7 +30,11 @@ const start = (storage: GameStorage) => {
   return stage
 }
 
-const roster = async () => within(await screen.findByRole('list', { name: 'Tus cachorros' }))
+const roster = async () =>
+  // React 19 holds a Suspense fallback at least 300 ms before showing the lazy screen
+  within(await screen.findByRole('list', { name: 'Tus cachorros' }, { timeout: 3000 }))
+
+beforeAll(() => import('@/presentation/screens/RoomScreen'))
 
 describe('RoomScreen', () => {
   it('keeps two puppies in the room and lets the third in once one leaves', async () => {
