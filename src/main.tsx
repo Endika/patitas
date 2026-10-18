@@ -1,10 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './presentation/App'
+import Root from './presentation/Root'
 import './styles/index.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <Root search={location.search} />
   </StrictMode>,
 )
