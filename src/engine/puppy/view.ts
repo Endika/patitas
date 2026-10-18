@@ -30,7 +30,7 @@ import {
 import type { BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
-import { showBowls } from '@/engine/room/furniture'
+import { inMud, showBowls } from '@/engine/room/furniture'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
 import type { Anatomy, Tuple3, ZoneId } from './anatomy'
@@ -46,6 +46,16 @@ import {
   type BehaviourState,
 } from './behaviour'
 import { RIM } from './coat'
+import {
+  createDirt,
+  dirtRest,
+  mudDepth,
+  redistributeDirt,
+  stepDirt,
+  withDirt,
+  type Dirt,
+  type DirtRest,
+} from './dirt'
 import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from './face'
 import type { PuppyGeometry } from './geometry'
 import {
@@ -109,6 +119,10 @@ export interface PuppyView extends BehaviourRig, SceneView {
   bowl: number
   /** Its place in the room's order: which bed and bowl are its. */
   place: number
+  /** Its own mud on the breed's shared mesh; `care.cleanliness` is 1 − its mean. */
+  dirt: Dirt
+  /** The GPU copy of `dirt.field`, marked for upload when it changes. */
+  dirtAttr: THREE.BufferAttribute
   /** Seconds to the next «z» while asleep. */
   snoreT: number
   /** Where a held ball sits, in the jaw's frame. */
@@ -136,6 +150,41 @@ const GLINTS: [Tuple3, number, number][] = [
 ]
 
 const Z = new THREE.Vector3(0, 0, 1)
+
+const dirtRests = new WeakMap<THREE.BufferGeometry, DirtRest>()
+
+/** Where mud reaches on a breed's mesh: worked out once for the geometry every view shares. */
+function restOf(geometry: THREE.BufferGeometry, A: Anatomy): DirtRest {
+  let rest = dirtRests.get(geometry)
+  if (!rest) {
+    rest = dirtRest(
+      geometry.attributes.position!.array,
+      geometry.attributes.normal!.array,
+      A.nose.c,
+    )
+    dirtRests.set(geometry, rest)
+  }
+  return rest
+}
+
+/**
+ * A geometry of the puppy's own over the breed's shared one: the same attribute objects, so the
+ * GPU keeps one copy of the mesh, plus this puppy's `dirt`.
+ */
+function ownGeometry(shared: THREE.BufferGeometry, dirt: THREE.BufferAttribute) {
+  const g = new THREE.BufferGeometry()
+  for (const [name, a] of Object.entries(shared.attributes)) g.setAttribute(name, a)
+  g.setIndex(shared.index)
+  g.setAttribute('dirt', dirt)
+  return g
+}
+
+/** Frees only what the puppy owns: disposing drops every GPU buffer the geometry still lists. */
+function disposeOwn(own: THREE.BufferGeometry, shared: THREE.BufferGeometry) {
+  for (const name of Object.keys(shared.attributes)) own.deleteAttribute(name)
+  own.setIndex(null)
+  own.dispose()
+}
 
 /** Builds the skinned, furred puppy with its eyes, nose and tongue and adds it to the room. */
 export function mountPuppyView(
@@ -177,13 +226,17 @@ export function mountPuppyView(
   group.updateMatrixWorld(true)
   const skeleton = new THREE.Skeleton(boneList)
   const ident = new THREE.Matrix4()
+  const dirt = createDirt(restOf(geometry, A))
+  redistributeDirt(dirt.field, dirt.rest, 1 - care.cleanliness)
+  const dirtAttr = new THREE.BufferAttribute(dirt.field, 1).setUsage(THREE.DynamicDrawUsage)
+  const furGeometry = ownGeometry(geometry, dirtAttr)
   // Fewer shells re-space and hide layers instead of compiling new materials
   const furU = furUniforms(breed.fur)
   const shells: THREE.SkinnedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[] = []
   const setShells = (n: number) => {
     while (shells.length <= n) {
       const i = shells.length
-      const m = new THREE.SkinnedMesh(geometry, furMaterial(0, furU))
+      const m = new THREE.SkinnedMesh(furGeometry, furMaterial(0, furU))
       m.frustumCulled = false
       m.castShadow = i === 0
       m.renderOrder = i
@@ -289,12 +342,15 @@ export function mountPuppyView(
     bowl: 0,
     snoreT: 0,
     place: 0,
+    dirt,
+    dirtAttr,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
     setQuality: (q) => setShells(q.shells),
     dispose() {
       room.remove(view)
       for (const m of shells) m.material.dispose()
+      disposeOwn(furGeometry, geometry)
       for (const m of [eyeMat, lidMat, noseMat, tongueMat]) m.dispose()
       for (const g of [eyeGeo, upperLid, lowerLid, noseGeo, tongue.geometry]) g.dispose()
       for (const g of glints) {
@@ -403,6 +459,7 @@ export function tickPuppies(
   t: number,
 ): FetchEvents[] {
   const { ball, room } = ctx
+  const spots = room.furniture?.spots
   const moved = views.map((view) => {
     const M = view.motion
     const ev = stepFetch(
@@ -416,10 +473,12 @@ export function tickPuppies(
         mood: view.behaviour,
         energy: view.persona.energy,
         ...(ctx.random && { random: ctx.random }),
+        ...(spots && {
+          wade: (x: number, z: number) => (inMud(spots, x, z) > 0 ? spots.mud.center : null),
+        }),
       },
       dt,
     )
-    const spots = room.furniture?.spots
     if (spots && ctx.clock != null) {
       const r = stepRoutine(
         view.routine,
@@ -434,6 +493,8 @@ export function tickPuppies(
           muzzle: view.reach * EAT_REACH,
           clamp: (x, z) => clampPlay(room.cam, x, z),
           busy: view.fetch.task !== 'free',
+          curious: view.persona.curious,
+          ...(ctx.random && { random: ctx.random }),
         },
         dt,
       )
@@ -453,6 +514,10 @@ export function tickPuppies(
           ...(ctx.random && { random: ctx.random }),
         })
       }
+    }
+    if (spots && stepDirt(view.dirt, mudDepth(spots, M.pos, view.legs), dt)) {
+      view.dirtAttr.needsUpdate = true
+      view.care = withDirt(view.care, view.dirt.field)
     }
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }

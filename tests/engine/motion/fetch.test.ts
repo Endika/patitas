@@ -14,7 +14,8 @@ import { createLegStates, createMotionState, stepLocomotion } from '@/engine/mot
 import { stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
-import { createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { computeSpots, inMud } from '@/engine/room/furniture'
 
 const A = anatomy(BREEDS.dorado)
 const DT = 1 / 60
@@ -167,5 +168,71 @@ describe('holding the ball', () => {
       DT,
     )
     expect(f.watch).toBe(false)
+  })
+})
+
+describe('a ball in the mud', () => {
+  it('the chaser picks it up and walks out through the puddle, then brings it', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const spots = computeSpots(cam, 1)
+    const m = createMotionState()
+    m.pos.set(0.12, 0, -0.12)
+    const legs = createLegStates(legRigs(A), m)
+    const reach = A.tongue[2] - 0.12
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const [bx, bz] = clampPlay(cam, spots.mud.center.x, spots.mud.center.z)
+    ball.pos.set(bx, BALL_R, bz)
+    const f: FetchState = { ...createFetchState(), task: 'chase' }
+    const ctx: FetchCtx = {
+      reach,
+      cam,
+      mouthWorld: (out) =>
+        out.set(
+          m.pos.x + Math.sin(m.heading) * reach,
+          A.tongue[1],
+          m.pos.z + Math.cos(m.heading) * reach,
+        ),
+      mood: { happy: 0.5 },
+      energy: 0.5,
+      random: () => 0.9,
+      wade: (x, z) => (inMud(spots, x, z) > 0 ? spots.mud.center : null),
+    }
+    const tasks: FetchTask[] = [f.task]
+    let deepest = 0
+    for (let n = 0; n < 60 * 20 && f.task !== 'present'; n++) {
+      stepFetch(f, m, ball, ctx, DT)
+      stepPoses(m, DT)
+      stepLocomotion(m, legs, DT)
+      if (f.holding) deepest = Math.max(deepest, inMud(spots, m.pos.x, m.pos.z))
+      if (tasks.at(-1) !== f.task) tasks.push(f.task)
+    }
+    expect(tasks).toEqual(['chase', 'grab', 'return', 'present'])
+    expect(deepest).toBeGreaterThan(0.8)
+    expect(f.holding).toBe(true)
+  })
+
+  it('a ball out of the mud comes straight back', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const m = createMotionState()
+    const f: FetchState = { ...createFetchState(), task: 'grab', taskT: 0.6 }
+    const ball: BallState = { ...createBall(), state: 'mouth' }
+    f.holding = true
+    let asked = 0
+    stepFetch(
+      f,
+      m,
+      ball,
+      {
+        reach: 0.5,
+        cam,
+        mouthWorld: (out) => out,
+        mood: { happy: 0.5 },
+        energy: 0.5,
+        wade: () => (asked++, null),
+      },
+      0.1,
+    )
+    expect([f.task, asked]).toEqual(['return', 1])
+    expect(Math.hypot(m.goal!.x - f.drop.x, m.goal!.z - f.drop.z)).toBeLessThan(1e-9)
   })
 })

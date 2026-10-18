@@ -15,6 +15,8 @@ export interface FetchState {
   holding: boolean
   /** Lost the ball to another puppy: follows it with its eyes until it comes to rest. */
   watch: boolean
+  /** Picked the ball up in the mud: walks out through the puddle before bringing it. */
+  wading: boolean
 }
 
 export interface FetchEvents {
@@ -32,10 +34,19 @@ export interface FetchCtx {
   mood: { happy: number }
   energy: number
   random?: () => number
+  /** Where to walk through the mud with a ball picked up at (x, z), or null out of the mud. */
+  wade?: (x: number, z: number) => Pick<Vec3, 'x' | 'z'> | null
 }
 
 export function createFetchState(): FetchState {
-  return { task: 'free', taskT: 0, drop: new THREE.Vector3(), holding: false, watch: false }
+  return {
+    task: 'free',
+    taskT: 0,
+    drop: new THREE.Vector3(),
+    holding: false,
+    watch: false,
+    wading: false,
+  }
 }
 
 const camPos = new THREE.Vector3()
@@ -113,10 +124,16 @@ export function stepFetch(
       f.taskT = 0
       const toCam = playAxes(cam)
       f.drop.set(cam.target.x - toCam.fx * 0.45, 0, cam.target.z - toCam.fz * 0.45)
-      go(f.drop.x, f.drop.z, 'hop')
+      const through = f.holding ? ctx.wade?.(p.x, p.z) : null
+      f.wading = !!through
+      if (through) go(through.x, through.z, 'walk')
+      else go(f.drop.x, f.drop.z, 'hop')
     }
   } else if (f.task === 'return') {
-    if (!m.goal) {
+    if (!m.goal && f.wading) {
+      f.wading = false
+      go(f.drop.x, f.drop.z, 'trot')
+    } else if (!m.goal) {
       f.task = 'present'
       f.taskT = 0
       cameraPosition(cam, camPos)

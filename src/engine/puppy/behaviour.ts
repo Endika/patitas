@@ -25,6 +25,9 @@ const EAT_PITCH = 0.9
 const EAT_BOB = { amp: 0.07, hz: 1.3 }
 const CHEW = 0.12,
   CHEW_HZ = 3
+/** In the puddle: the head dips at the mud with a quick sniffing nod. */
+const MUD_PITCH = 0.75,
+  MUD_NOD = { amp: 0.08, hz: 2.2 }
 /** Asking for food: the head tips to one side, then the other. */
 const BEG_TILT = 0.24
 /** Asleep: the head turns onto the front paws and the tail wraps round the body. */
@@ -265,7 +268,8 @@ export function stepBehaviour(
   const asleep = M.pose === 'sleep',
     sw = M.sleepW
   const eating = input.routine === 'eating',
-    begging = input.routine === 'begging'
+    begging = input.routine === 'begging',
+    splashing = input.routine === 'splashing'
 
   if ((zone === 'belly' || zone === 'back') && M.pose === 'lie' && s.happy > 0.4)
     setPose(M, 'belly')
@@ -273,7 +277,7 @@ export function stepBehaviour(
 
   // Where it looks
   const target = new THREE.Vector3()
-  if (eating)
+  if (eating || splashing)
     target.set(M.pos.x + Math.sin(M.heading) * 0.45, 0.05, M.pos.z + Math.cos(M.heading) * 0.45)
   else if (begging) target.copy(input.camera)
   else if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
@@ -329,6 +333,10 @@ export function stepBehaviour(
   if (eating) {
     pitchT = EAT_PITCH + EAT_BOB.amp * Math.sin(t * 2 * Math.PI * EAT_BOB.hz)
     yawT = 0
+  }
+  if (splashing) {
+    pitchT = MUD_PITCH + MUD_NOD.amp * Math.sin(t * 2 * Math.PI * MUD_NOD.hz)
+    yawT *= 0.3
   }
   spring(s.yaw, yawT, 55, 12, dt)
   spring(s.pitch, pitchT, 55, 12, dt)

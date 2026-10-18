@@ -17,6 +17,8 @@ export type Routine =
   | 'begging'
   | 'toScale'
   | 'onScale'
+  | 'toMud'
+  | 'splashing'
 
 export interface RoutineState {
   routine: Routine
@@ -40,6 +42,10 @@ export interface RoutineState {
   begAgo: number
   /** Share of a full bowl eaten in this meal and not yet fed: it counts once the meal ends. */
   eaten: number
+  /** Seconds since it last came out of the mud, or since the room opened. */
+  mudAgo: number
+  /** Where it set off for the mud from, to go back to afterwards. */
+  from: Vec3
 }
 
 export interface RoutineCtx {
@@ -57,6 +63,9 @@ export interface RoutineCtx {
   clamp: (x: number, z: number) => [number, number]
   /** Playing ball: routines give way and the idle count starts again. */
   busy?: boolean
+  /** Its persona's curiosity, 0 to 1: how readily it wanders into the mud. None, never. */
+  curious?: number
+  random?: () => number
 }
 
 export interface RoutineEvents {
@@ -100,6 +109,16 @@ const KEEP_EATING = 0.6
 /** Leaning in over the bowl to eat. */
 const EAT_BOW = 0.6
 const FACED = 0.08
+/** At most one wander into the mud this often, and only after this long without a touch. */
+export const MUD_EVERY = 120
+const MUD_IDLE = 20
+/** Chance per second of setting off once it may, for a puppy fully curious. */
+const MUD_RATE = 1 / 30
+/** Seconds it stamps about in the puddle: turning foot to foot and sniffing at the mud. */
+export const SPLASH_TIME = 5
+const STAMP = 0.7,
+  STAMP_TURN = 0.4,
+  SNIFF_BOW = 0.45
 
 export function createRoutineState(): RoutineState {
   return {
@@ -115,6 +134,8 @@ export function createRoutineState(): RoutineState {
     beg: false,
     begAgo: BEG_EVERY,
     eaten: 0,
+    mudAgo: 0,
+    from: new THREE.Vector3(),
   }
 }
 
@@ -372,12 +393,48 @@ const begging: Step = (r, m, ctx) => {
   enter(r, 'none')
 }
 
+const toMud: Step = (r, m, ctx) => {
+  if (hungryFor(ctx) || sleepy(r, ctx)) {
+    m.goal = null
+    return enter(r, 'none')
+  }
+  if (m.pose !== 'stand') setPose(m, 'stand')
+  if (!approach(r, m, ctx, ctx.spots.mud)) return
+  r.heading = m.heading
+  enter(r, 'splashing')
+}
+
+const splashing: Step = (r, m, ctx) => {
+  if (m.goal || m.pose !== 'stand') {
+    m.face = null
+    return enter(r, 'none')
+  }
+  if (r.t < SPLASH_TIME) {
+    m.face = r.heading + STAMP_TURN * (Math.floor(r.t / STAMP) % 2 ? 1 : -1)
+    m.bowGoal = Math.sin(r.t * 2.3) > 0.4 ? SNIFF_BOW : 0
+    return
+  }
+  m.face = null
+  r.mudAgo = 0
+  enter(r, 'none')
+  goTo(m, r.from.x, r.from.z, { happy: 0.5, energy: 0, gait: 'trot', clamp: ctx.clamp })
+}
+
 /**
  * The extension point: each routine's step. A new routine adds its states to `Routine`, a step
  * here (walking there with `approach`), and its want in `choose`, ahead of or behind the bed by
  * priority.
  */
-const STEPS: { [K in Routine]?: Step } = { toBed, sleeping, stretch, toBowl, eating, begging }
+const STEPS: { [K in Routine]?: Step } = {
+  toBed,
+  sleeping,
+  stretch,
+  toBowl,
+  eating,
+  begging,
+  toMud,
+  splashing,
+}
 
 function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
   const bowl = ctx.spots.bowls[ctx.place]
@@ -395,9 +452,11 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
  * asked):
  * 1. eat, with food in its bowl and hunger from MEAL_HUNGER, even at bedtime;
  * 2. bed, after NIGHT_IDLE untouched at night or tired by day;
- * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds.
+ * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds;
+ * 4. wander into the mud, by day and left alone a while, at most every MUD_EVERY seconds and
+ *    by chance, more often the more curious it is.
  */
-function choose(r: RoutineState, ctx: RoutineCtx) {
+function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
   if (hungryFor(ctx) && goToBowl(r, ctx, false)) return
   const slot = bedSlots(ctx.spots)[ctx.place]
   if (slot && r.idle >= NIGHT_IDLE && sleepy(r, ctx)) {
@@ -408,8 +467,33 @@ function choose(r: RoutineState, ctx: RoutineCtx) {
     enter(r, 'toBed')
     return
   }
-  if (ctx.bowl <= 0 && ctx.care.hunger >= BEG_HUNGER && r.begAgo >= BEG_EVERY)
+  if (ctx.bowl <= 0 && ctx.care.hunger >= BEG_HUNGER && r.begAgo >= BEG_EVERY) {
     goToBowl(r, ctx, true)
+    return
+  }
+  const curious = ctx.curious ?? 0
+  if (
+    curious > 0 &&
+    r.mudAgo >= MUD_EVERY &&
+    r.idle >= MUD_IDLE &&
+    !sleepy(r, ctx) &&
+    (ctx.random ?? Math.random)() < MUD_RATE * curious * dt
+  )
+    goToMud(r, m, ctx.spots, ctx.clamp)
+}
+
+/** Sets off for the middle of the puddle, to stamp about in it and come back. */
+export function goToMud(
+  r: RoutineState,
+  m: MotionState,
+  spots: Spots,
+  clamp: RoutineCtx['clamp'],
+): void {
+  const { center } = spots.mud
+  const [x, z] = clamp(center.x, center.z)
+  r.from.copy(m.pos)
+  r.target.set(x, 0, z)
+  enter(r, 'toMud')
 }
 
 /**
@@ -426,6 +510,7 @@ export function stepRoutine(
   r.t += dt
   r.idle += dt
   r.begAgo += dt
+  r.mudAgo += dt
   const ev: RoutineEvents = {
     care:
       r.routine === 'sleeping'
@@ -439,7 +524,7 @@ export function stepRoutine(
     r.idle = 0
     if (r.routine !== 'none') enter(r, 'none')
   } else {
-    if (r.routine === 'none') choose(r, ctx)
+    if (r.routine === 'none') choose(r, m, ctx, dt)
     STEPS[r.routine]?.(r, m, ctx, ev, dt)
   }
   // A meal counts once it is over, however it ended
