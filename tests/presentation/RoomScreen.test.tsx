@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
@@ -80,5 +81,29 @@ describe('RoomScreen', () => {
 
     expect(await screen.findByRole('heading', { name: 'Luna y Kira' })).toBeInTheDocument()
     expect(await storage.listPuppies()).toHaveLength(2)
+  })
+
+  it('gives every stage a canvas of its own and removes it when the room goes', async () => {
+    const user = userEvent.setup()
+    const stage = createFakeStage()
+    const { unmount } = render(
+      <StrictMode>
+        <App openStorage={async () => adopted(['Luna'])} createStage={stage.create} />
+      </StrictMode>,
+    )
+    await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))
+    await user.click(screen.getByRole('button', { name: 'Volver a la sala' }))
+    await screen.findByRole('heading', { name: 'Luna' })
+
+    const { canvases } = stage
+    // StrictMode mounts each room twice, and the room is shown twice
+    expect(canvases).toHaveLength(4)
+    expect(new Set(canvases).size).toBe(canvases.length)
+    expect(canvases.filter((c) => c.isConnected)).toEqual([canvases.at(-1)])
+    expect(stage.calls.filter((c) => c === 'dispose')).toHaveLength(canvases.length - 1)
+
+    unmount()
+    expect(canvases.some((c) => c.isConnected)).toBe(false)
+    expect(stage.calls.filter((c) => c === 'dispose')).toHaveLength(canvases.length)
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BREEDS } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
@@ -7,6 +7,7 @@ import Roster from '../components/Roster'
 import UnsavedNotice from '../components/UnsavedNotice'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
+import { useRoomStage } from '../useRoomStage'
 import '../room.css'
 
 const WAITING: StageStatus = {
@@ -35,9 +36,8 @@ export default function RoomScreen({
   onAdoptAnother(): void
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const stageRef = useRef<RoomStage | null>(null)
-  const [status, setStatus] = useState(WAITING)
+  const { hostRef, stageRef, status: reported } = useRoomStage(createStage)
+  const status = reported ?? WAITING
   const [full, setFull] = useState(false)
   const inRoom = useMemo(
     () => room.inRoom.flatMap((id) => puppies.find((p) => p.id === id) ?? []),
@@ -45,19 +45,8 @@ export default function RoomScreen({
   )
 
   useEffect(() => {
-    const stage = createStage(canvasRef.current!)
-    stageRef.current = stage
-    const off = stage.onChange(setStatus)
-    return () => {
-      off()
-      stage.dispose()
-      stageRef.current = null
-    }
-  }, [createStage])
-
-  useEffect(() => {
     stageRef.current?.setPuppies(inRoom)
-  }, [createStage, inRoom])
+  }, [createStage, inRoom, stageRef])
 
   const toggle = async (puppy: Puppy, isIn: boolean) => {
     if (isIn) {
@@ -68,10 +57,7 @@ export default function RoomScreen({
 
   return (
     <div className="room">
-      <canvas
-        ref={canvasRef}
-        aria-label="Cachorro en 3D. Mueve el dedo para que te mire y desliza sobre él para acariciarlo."
-      />
+      <div ref={hostRef} className="room-stage" />
       <header className="room-top">
         <div className="room-head">
           <div className="room-who">
