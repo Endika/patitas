@@ -12,11 +12,13 @@ function boneIndex(A: Anatomy, name: string): number {
   return b
 }
 
-/** Meshes the breed's distance field and bakes skinning, coat colour, AO and fur length. */
-export function buildPuppyGeometry(breed: Breed): {
+export interface PuppyGeometry {
   geometry: THREE.BufferGeometry
   anatomy: Anatomy
-} {
+}
+
+/** Meshes the breed's distance field and bakes skinning, coat colour, AO and fur length. */
+export function buildPuppyGeometry(breed: Breed): PuppyGeometry {
   const A = anatomy(breed),
     P = A.prims
   const { position, normal, index: tri } = surfaceNets(P)

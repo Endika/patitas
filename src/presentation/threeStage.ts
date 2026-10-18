@@ -1,21 +1,19 @@
-import { BREEDS } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import { ROOM_CAPACITY } from '@/domain/room'
 import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/engine/puppy/behaviour'
 import {
   askTrick,
-  hasPuppyGeometry,
   headWorld,
   hitPuppy,
   mountPuppyView,
   offerBall,
   pointLook,
-  puppyGeometry,
   putBallAway,
   throwBall,
   tickPuppies,
   type PuppyView,
 } from '@/engine/puppy/view'
+import { loadPuppyGeometry, peekPuppyGeometry } from '@/engine/puppy/geometryClient'
 import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
@@ -92,7 +90,7 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
   let views: PuppyView[] = []
   let petView: PuppyView | null = null
   let hintNow: HintKey = 'idle'
-  let meshing: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
   const now = () => performance.now() / 1000
   const free = () => views.every((v) => v.fetch.task === 'free')
   const mood = (v: PuppyView) => ({
@@ -105,26 +103,25 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
     views = wanted.flatMap((p) => mounted.get(p.id) ?? [])
   }
 
-  const mountWanted = () => {
-    meshing = undefined
+  /** Mounts every wanted puppy whose mesh is ready; a mesh for a puppy no longer wanted waits unused. */
+  const mountReady = () => {
+    if (disposed) return
     const places = PLACES[wanted.length - 1] ?? []
     let added = false
     wanted.forEach((p, i) => {
       if (mounted.has(p.id)) return
+      const built = peekPuppyGeometry(p.breedId)
+      if (!built) return
       added = true
-      const view = mountPuppyView(
-        room,
-        p,
-        puppyGeometry(BREEDS[p.breedId]),
-        room.quality,
-        places[i],
-      )
-      mounted.set(p.id, view)
+      mounted.set(p.id, mountPuppyView(room, p, built, room.quality, places[i]))
     })
     order()
     // A newcomer waits for the throw like the others
     if (added && ball.state === 'hand') offerBall(views, ball)
-    hub.set({ notice: null })
+    const waiting = wanted.filter((p) => !mounted.has(p.id))
+    hub.set({
+      notice: waiting.length ? `Preparando a ${waiting.map((p) => p.name).join(' y ')}…` : null,
+    })
   }
 
   const detach = attachPointer(canvas, room.camera, {
@@ -221,12 +218,9 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
       }
       order()
       if (!views.length) putBallAway(views, ball)
-      const slow = wanted.filter((p) => !mounted.has(p.id) && !hasPuppyGeometry(p.breedId))
-      clearTimeout(meshing)
-      if (!slow.length) return mountWanted()
-      // Meshing blocks the page for a couple of seconds: let the notice paint first
-      hub.set({ notice: `Preparando a ${slow.map((p) => p.name).join(' y ')}…` })
-      meshing = setTimeout(mountWanted, 40)
+      mountReady()
+      for (const p of wanted)
+        if (!mounted.has(p.id)) void loadPuppyGeometry(p.breedId).then(mountReady)
     },
     takeBall() {
       if (views.length && ball.state !== 'hand' && free()) offerBall(views, ball)
@@ -239,7 +233,7 @@ export function createThreeStage(canvas: HTMLCanvasElement): RoomStage {
     },
     onChange: hub.onChange,
     dispose() {
-      clearTimeout(meshing)
+      disposed = true
       hub.clear()
       detach()
       offResize()

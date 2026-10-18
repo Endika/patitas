@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { BREEDS, type Breed, type BreedId } from '@/domain/breeds'
+import { BREEDS, type Breed } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -36,7 +36,7 @@ import {
 } from './behaviour'
 import { RIM } from './coat'
 import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from './face'
-import { buildPuppyGeometry } from './geometry'
+import type { PuppyGeometry } from './geometry'
 import {
   eyeMaterial,
   furMaterial,
@@ -48,21 +48,7 @@ import {
   tongueMaterial,
 } from './materials'
 
-export type PuppyGeometry = ReturnType<typeof buildPuppyGeometry>
-
-const geometryCache = new Map<BreedId, PuppyGeometry>()
-
-/** Meshing a breed takes 1.5–2 s, so each breed is built once and shared by its puppies. */
-export function puppyGeometry(breed: Breed): PuppyGeometry {
-  let built = geometryCache.get(breed.id)
-  if (!built) {
-    built = buildPuppyGeometry(breed)
-    geometryCache.set(breed.id, built)
-  }
-  return built
-}
-
-export const hasPuppyGeometry = (id: BreedId): boolean => geometryCache.has(id)
+export type { PuppyGeometry } from './geometry'
 
 export interface EyeRig {
   pivot: THREE.Object3D
