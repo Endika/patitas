@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { adoptPuppy } from '../../src/application/adoption'
+import { BREEDS } from '../../src/domain/breeds'
+import { createCare } from '../../src/domain/care'
 import { createMemoryStorage } from '../../src/infrastructure/memoryStorage'
 
 describe('adoptPuppy', () => {
@@ -15,5 +17,15 @@ describe('adoptPuppy', () => {
     expect([a.entered, b.entered, c.entered]).toEqual([true, true, false])
     expect(await storage.listPuppies()).toEqual([a.puppy, b.puppy, c.puppy])
     expect(await storage.loadRoom()).toEqual({ inRoom: [a.puppy.id, b.puppy.id] })
+  })
+
+  it('saves the initial care stamped with the adoption time', async () => {
+    const storage = createMemoryStorage()
+    const { puppy } = await adoptPuppy(
+      storage,
+      { name: 'Kira', breedId: 'beagle' },
+      { now: () => 99, random: () => 0.5 },
+    )
+    expect(await storage.loadCare(puppy.id)).toEqual(createCare(BREEDS.beagle, 99))
   })
 })

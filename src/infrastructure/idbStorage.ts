@@ -1,4 +1,5 @@
 import { openDB, type DBSchema } from 'idb'
+import type { Care } from '../domain/care'
 import type { Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
 import { createMemoryStorage } from './memoryStorage'
@@ -7,16 +8,20 @@ import type { GameStorage } from './storage'
 interface PatitasDb extends DBSchema {
   puppies: { key: string; value: Puppy }
   meta: { key: string; value: Room }
+  care: { key: string; value: Care }
 }
 
 const ROOM_KEY = 'room'
 
 export async function openGameStorage(): Promise<GameStorage> {
   try {
-    const db = await openDB<PatitasDb>('patitas', 1, {
-      upgrade(upgrading) {
-        upgrading.createObjectStore('puppies', { keyPath: 'id' })
-        upgrading.createObjectStore('meta')
+    const db = await openDB<PatitasDb>('patitas', 2, {
+      upgrade(upgrading, oldVersion) {
+        if (oldVersion < 1) {
+          upgrading.createObjectStore('puppies', { keyPath: 'id' })
+          upgrading.createObjectStore('meta')
+        }
+        if (oldVersion < 2) upgrading.createObjectStore('care')
       },
     })
     return {
@@ -28,6 +33,11 @@ export async function openGameStorage(): Promise<GameStorage> {
       },
       removePuppy: async (id) => {
         await db.delete('puppies', id)
+        await db.delete('care', id)
+      },
+      loadCare: (id) => db.get('care', id),
+      saveCare: async (id, care) => {
+        await db.put('care', care, id)
       },
       loadRoom: async () => (await db.get('meta', ROOM_KEY)) ?? { inRoom: [] },
       saveRoom: async (room) => {

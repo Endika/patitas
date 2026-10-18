@@ -1,9 +1,11 @@
+import type { Care } from '../domain/care'
 import type { Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
 import type { GameStorage } from './storage'
 
 export function createMemoryStorage(): GameStorage {
   const puppies = new Map<string, Puppy>()
+  const cares = new Map<string, Care>()
   let room: Room = { inRoom: [] }
   return {
     persistent: false,
@@ -13,6 +15,14 @@ export function createMemoryStorage(): GameStorage {
     },
     removePuppy: async (id) => {
       puppies.delete(id)
+      cares.delete(id)
+    },
+    loadCare: async (id) => {
+      const care = cares.get(id)
+      return care && { ...care }
+    },
+    saveCare: async (id, care) => {
+      cares.set(id, { ...care })
     },
     loadRoom: async () => ({ inRoom: [...room.inRoom] }),
     saveRoom: async (next) => {
