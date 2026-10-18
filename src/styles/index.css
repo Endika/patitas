@@ -2,6 +2,14 @@
 
 @theme {
   --color-ground: #e6eeeb;
+  --color-ground-low: #c9d8d3;
   --color-ink: #1d2a27;
+  --color-ink-soft: #414e4b;
+  --color-on-ink: #f7faf9;
+  --color-line: rgba(34, 48, 46, 0.13);
+  --color-glass: rgba(249, 252, 251, 0.8);
   --color-brand: #e0674f;
+  --color-error: #a83a26;
+  --font-display: 'Trebuchet MS', system-ui, sans-serif;
+  --font-sans: 'Segoe UI', system-ui, sans-serif;
 }
