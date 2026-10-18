@@ -32,8 +32,8 @@ export interface RoutineCtx {
   now: number
   care: Care
   spots: Spots
-  /** The other puppies in the room. */
-  others: readonly MotionState[]
+  /** Its place in the room's order, which says whose bed and bowl are its. */
+  place: number
   clamp: (x: number, z: number) => [number, number]
   /** Playing ball: routines give way and the idle count starts again. */
   busy?: boolean
@@ -55,8 +55,6 @@ const WAKE_ENERGY = 0.9
 const STRETCH = 1.5
 const STRETCH_BOW = 0.9
 const STRETCH_YAWN = 0.5
-/** Half the gap between two puppies sharing the bed: wider than their personal space. */
-const BED_SLOT = 0.23
 /** Two sleepers turn this far from facing the camera, each to its own side. */
 const BED_TURN = 0.25
 const ARRIVED = 0.06
@@ -108,18 +106,18 @@ export interface BedSlot {
   side: number
 }
 
-/** Where `n` puppies lie in the bed: one in the middle, two side by side, left first. */
-export function bedSlots(spots: Spots, n: number): BedSlot[] {
-  const { center, facing } = spots.bed
-  const ux = Math.cos(facing),
-    uz = -Math.sin(facing)
-  const offsets = n > 1 ? [-1, 1] : [0]
-  return offsets.map((side) => ({
-    x: center.x + ux * side * BED_SLOT,
-    z: center.z + uz * side * BED_SLOT,
-    heading: facing + side * BED_TURN,
-    side: side || 1,
-  }))
+/** Where each puppy lies, in the middle of its own bed, left first. */
+export function bedSlots(spots: Spots): BedSlot[] {
+  const two = spots.beds.length > 1
+  return spots.beds.map(({ center, facing }, i) => {
+    const side = two ? (i === 0 ? -1 : 1) : 1
+    return {
+      x: center.x,
+      z: center.z,
+      heading: facing + (two ? side * BED_TURN : 0),
+      side,
+    }
+  })
 }
 
 /** Already asleep where it stands, as when the room opens at night in the bed. */
@@ -139,40 +137,31 @@ function lieDown(r: RoutineState, m: MotionState) {
   m.sleepSide = r.side
 }
 
-const across = (spots: Spots, p: Vec3) =>
-  (p.x - spots.bed.center.x) * Math.cos(spots.bed.facing) -
-  (p.z - spots.bed.center.z) * Math.sin(spots.bed.facing)
-
-const inBed = (spots: Spots, p: Vec3) => {
-  const { center, radius, depth, facing } = spots.bed
-  const rx = p.x - center.x,
-    rz = p.z - center.z
-  const u = (rx * Math.cos(facing) - rz * Math.sin(facing)) / radius,
-    v = (rx * Math.sin(facing) + rz * Math.cos(facing)) / depth
-  return Math.hypot(u, v) < 1
+/**
+ * Its bed moved by (dx, dz), with the frame or as the beds were laid out again: asleep in it, the
+ * puppy is carried along with `body` (its position and the points its paws stand on); on the way
+ * there, it heads for the new place.
+ */
+export function followBed(r: RoutineState, body: readonly Vec3[], dx: number, dz: number): void {
+  if (r.routine !== 'toBed' && r.routine !== 'sleeping') return
+  r.target.x += dx
+  r.target.z += dz
+  if (r.routine !== 'sleeping') return
+  for (const p of body) {
+    p.x += dx
+    p.z += dz
+  }
 }
 
 /**
- * Picks this puppy's place in the bed: the side away from whoever is already in it or headed
- * there, else the side it is on relative to the others.
+ * The beds and bowls were laid out again for a puppy coming or going: one on its way to a piece
+ * stops, to choose again where its own now stands. A sleeper sleeps on, for `followBed` to carry.
  */
-function pickSlot(r: RoutineState, m: MotionState, ctx: RoutineCtx) {
-  const { spots, others } = ctx
-  const slots = bedSlots(spots, others.length + 1)
-  let slot = slots[0]!
-  if (slots.length > 1) {
-    const there = others.flatMap((o) =>
-      [o.goal, o.pos].filter((p): p is Vec3 => !!p && inBed(spots, p)),
-    )
-    const mine = across(spots, m.pos)
-    const right = there.length
-      ? across(spots, there[0]!) < 0
-      : others.some((o) => across(spots, o.pos) < mine)
-    slot = slots[right ? 1 : 0]!
-  }
-  r.target.set(slot.x, 0, slot.z)
-  r.heading = slot.heading
-  r.side = slot.side
+export function forgetRoute(r: RoutineState, m: MotionState): void {
+  if (r.routine === 'none' || r.routine === 'sleeping' || r.routine === 'stretch') return
+  m.goal = null
+  m.face = null
+  enter(r, 'none')
 }
 
 /** The next point to walk to: straight to `to`, or round the side of the first circle in the way. */
@@ -231,8 +220,13 @@ const toBed: Step = (r, m, ctx) => {
     m.goal = null
     return enter(r, 'none')
   }
+  const bed = ctx.spots.beds[ctx.place]
+  if (!bed) {
+    m.goal = null
+    return enter(r, 'none')
+  }
   if (r.turnLeft == null) {
-    if (!approach(r, m, ctx, ctx.spots.bed)) return
+    if (!approach(r, m, ctx, bed)) return
     // There: one full turn round, ending at the slot's heading
     r.turnLeft = Math.PI * 2 + angle(r.heading - m.heading)
     r.lastHeading = m.heading
@@ -273,10 +267,13 @@ const stretch: Step = (r, m, _ctx, ev, dt) => {
  */
 const STEPS: { [K in Routine]?: Step } = { toBed, sleeping, stretch }
 
-function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx) {
-  if (r.idle >= NIGHT_IDLE && sleepy(r, ctx)) {
+function choose(r: RoutineState, ctx: RoutineCtx) {
+  const slot = bedSlots(ctx.spots)[ctx.place]
+  if (slot && r.idle >= NIGHT_IDLE && sleepy(r, ctx)) {
     r.tired = ctx.care.energy < TIRED_ENERGY
-    pickSlot(r, m, ctx)
+    r.target.set(slot.x, 0, slot.z)
+    r.heading = slot.heading
+    r.side = slot.side
     enter(r, 'toBed')
   }
 }
@@ -307,7 +304,7 @@ export function stepRoutine(
     if (r.routine !== 'none') enter(r, 'none')
     return ev
   }
-  if (r.routine === 'none') choose(r, m, ctx)
+  if (r.routine === 'none') choose(r, ctx)
   STEPS[r.routine]?.(r, m, ctx, ev, dt)
   return ev
 }

@@ -15,6 +15,8 @@ import {
   approach,
   bedSlots,
   createRoutineState,
+  followBed,
+  forgetRoute,
   stepRoutine,
   touch,
   tuckIn,
@@ -25,12 +27,13 @@ import {
 import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
 import { separate } from '@/engine/room/crowd'
-import { computeSpots, type Spots } from '@/engine/room/furniture'
+import { computeSpots, type Spot, type Spots } from '@/engine/room/furniture'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.shiba)
 const cam = fitCamera(createCamera(), 0.46)
-const SPOTS = computeSpots(cam)
+const SPOTS = computeSpots(cam, 1),
+  SPOTS2 = computeSpots(cam, 2)
 const clamp = (x: number, z: number) => clampPlay(cam, x, z)
 const at = (h: number, min = 0) => new Date(2026, 9, 18, h, min).getTime()
 
@@ -54,15 +57,25 @@ function pup(x: number, z: number, energy = 0.8): Pup {
   }
 }
 
-/** Runs the puppies for `secs` the way the room does: routine, poses, steps, then apart. */
-function run(pups: Pup[], secs: number, now: number, spots: Spots = SPOTS, each?: () => void) {
+/**
+ * Runs the puppies for `secs` the way the room does: routine, poses, steps, then apart. Each one's
+ * place is its index, unless `places` says otherwise.
+ */
+function run(
+  pups: Pup[],
+  secs: number,
+  now: number,
+  spots: Spots = SPOTS,
+  each?: () => void,
+  places?: number[],
+) {
   for (let n = 0; n < secs / DT; n++) {
-    for (const p of pups) {
+    for (const [i, p] of pups.entries()) {
       const ctx: RoutineCtx = {
         now: now + n * DT * 1000,
         care: p.care,
         spots,
-        others: pups.filter((o) => o !== p).map((o) => o.m),
+        place: places?.[i] ?? i,
         clamp,
       }
       p.care = stepRoutine(p.r, p.m, ctx, DT).care
@@ -79,9 +92,9 @@ function run(pups: Pup[], secs: number, now: number, spots: Spots = SPOTS, each?
   }
 }
 
-/** Where a point lies in the bed's oval: below 1 is inside. */
-const inBed = (m: MotionState) => {
-  const { center, radius, depth, facing } = SPOTS.bed
+/** Where a point lies in a bed's oval: below 1 is inside. */
+const inBed = (m: MotionState, bed: Spot = SPOTS.beds[0]!) => {
+  const { center, radius, depth, facing } = bed
   const rx = m.pos.x - center.x,
     rz = m.pos.z - center.z
   const u = (rx * Math.cos(facing) - rz * Math.sin(facing)) / radius,
@@ -90,42 +103,78 @@ const inBed = (m: MotionState) => {
 }
 
 describe('stepRoutine', () => {
-  it('sends both puppies to bed at 20:00, where they turn round and fall asleep side by side', () => {
+  it('sends both puppies to their own beds at 20:00, where they turn round and fall asleep', () => {
     const a = pup(-0.1, 0),
       b = pup(0.35, 0)
     let turned = 0,
       last = a.m.heading
-    run([a, b], 40, at(20), SPOTS, () => {
+    run([a, b], 40, at(20), SPOTS2, () => {
       if (a.r.routine === 'toBed') turned += Math.abs(a.m.heading - last)
       last = a.m.heading
     })
-    for (const p of [a, b]) {
+    ;[a, b].forEach((p, i) => {
+      const bed = SPOTS2.beds[i]!
       expect(p.seen).toEqual(['toBed', 'sleeping'])
       expect(p.m.pose).toBe('sleep')
-      expect(inBed(p.m)).toBeLessThan(0.75)
-    }
-    bedSlots(SPOTS, 2).forEach((slot, i) =>
-      expect(Math.hypot([a, b][i]!.m.pos.x - slot.x, [a, b][i]!.m.pos.z - slot.z)).toBeLessThan(
-        0.1,
-      ),
-    )
+      expect(inBed(p.m, bed)).toBeLessThan(0.25)
+      expect(Math.hypot(p.m.pos.x - bed.center.x, p.m.pos.z - bed.center.z)).toBeLessThan(0.1)
+    })
     expect([a.m.sleepSide, b.m.sleepSide]).toEqual([-1, 1])
     expect(turned).toBeGreaterThan(Math.PI * 2 - 0.3)
   })
 
+  it('goes to the bed of its place in the room, wherever it starts', () => {
+    const a = pup(0.35, 0),
+      b = pup(-0.1, 0)
+    run([a, b], 50, at(20), SPOTS2, undefined, [0, 1])
+    expect(inBed(a.m, SPOTS2.beds[0]!)).toBeLessThan(0.25)
+    expect(inBed(b.m, SPOTS2.beds[1]!)).toBeLessThan(0.25)
+    expect([a.r.routine, b.r.routine]).toEqual(['sleeping', 'sleeping'])
+  })
+
+  it('left alone, a sleeper is carried to the one bed and one on its way heads there', () => {
+    const body = (p: Pup) => [p.m.pos, ...p.legs.flatMap((L) => [L.planted, L.from, L.land, L.pos])]
+    const move = (p: Pup, from: Spot, to: Spot) => {
+      forgetRoute(p.r, p.m)
+      followBed(p.r, body(p), to.center.x - from.center.x, to.center.z - from.center.z)
+    }
+    const one = SPOTS.beds[0]!
+    // Asleep in the right-hand bed when the left-hand puppy leaves
+    const a = pup(-0.1, 0),
+      b = pup(0.35, 0)
+    run([a, b], 40, at(20), SPOTS2)
+    expect(b.r.routine).toBe('sleeping')
+    move(b, SPOTS2.beds[1]!, one)
+    expect(b.r.routine).toBe('sleeping')
+    expect(inBed(b.m, one)).toBeLessThan(0.25)
+    run([b], 2, at(20, 1), SPOTS)
+    expect(b.r.routine).toBe('sleeping')
+    // On the way there
+    const c = pup(-0.1, 0),
+      d = pup(0.35, 0)
+    run([c, d], 1, at(20), SPOTS2)
+    expect(d.r.routine).toBe('toBed')
+    move(d, SPOTS2.beds[1]!, one)
+    expect([d.r.routine, d.m.goal]).toEqual(['none', null])
+    run([d], 40, at(20, 1), SPOTS)
+    expect(d.seen.slice(-2)).toEqual(['toBed', 'sleeping'])
+    expect(inBed(d.m, one)).toBeLessThan(0.25)
+  })
+
   it('walks round furniture in the way, but not round the bed it is going to', () => {
     const p = pup(-0.2, -0.3)
-    const bed = SPOTS.bed.center
+    const bed = SPOTS.beds[0]!.center,
+      bowl = SPOTS.bowls[0]!
     const mid = { x: (p.m.pos.x + bed.x) / 2, z: (p.m.pos.z + bed.z) / 2 }
     const spots: Spots = {
       ...SPOTS,
-      bowl: { ...SPOTS.bowl, center: SPOTS.bowl.center.clone().set(mid.x, 0, mid.z) },
+      bowls: [{ ...bowl, center: bowl.center.clone().set(mid.x, 0, mid.z) }],
     }
     let nearest = Infinity
     run([p], 30, at(21), spots, () => {
       nearest = Math.min(nearest, Math.hypot(p.m.pos.x - mid.x, p.m.pos.z - mid.z))
     })
-    expect(nearest).toBeGreaterThan(spots.bowl.radius)
+    expect(nearest).toBeGreaterThan(bowl.radius)
     expect(p.r.routine).toBe('sleeping')
   })
 
@@ -140,7 +189,7 @@ describe('stepRoutine', () => {
       const ev = stepRoutine(
         p.r,
         p.m,
-        { now: at(22, 1), care: p.care, spots: SPOTS, others: [], clamp },
+        { now: at(22, 1), care: p.care, spots: SPOTS, place: 0, clamp },
         DT,
       )
       if (ev.yawn) yawns++
@@ -176,7 +225,7 @@ describe('stepRoutine', () => {
   it('rests asleep and tires slowly while walking about', () => {
     const p = pup(0, 0, 0.5)
     tuckIn(p.r, p.m)
-    const ctx = { now: at(23), care: p.care, spots: SPOTS, others: [], clamp }
+    const ctx = { now: at(23), care: p.care, spots: SPOTS, place: 0, clamp }
     expect(stepRoutine(p.r, p.m, ctx, 3600).care.energy).toBeCloseTo(0.75)
     const awake = pup(0, 0, 0.5)
     awake.m.speed = 0.3
@@ -192,7 +241,7 @@ describe('stepRoutine', () => {
     stepRoutine(
       p.r,
       p.m,
-      { now: at(23), care: p.care, spots: SPOTS, others: [], clamp, busy: true },
+      { now: at(23), care: p.care, spots: SPOTS, place: 0, clamp, busy: true },
       DT,
     )
     expect([p.r.routine, p.r.idle]).toEqual(['none', 0])
@@ -202,7 +251,7 @@ describe('stepRoutine', () => {
     const p = pup(0, 0)
     tuckIn(p.r, p.m)
     p.m.pose = 'stand'
-    stepRoutine(p.r, p.m, { now: at(23), care: p.care, spots: SPOTS, others: [], clamp }, DT)
+    stepRoutine(p.r, p.m, { now: at(23), care: p.care, spots: SPOTS, place: 0, clamp }, DT)
     expect(p.r.routine).toBe('none')
     expect(touch(p.r)).toBe(false)
   })
@@ -212,10 +261,10 @@ describe('approach', () => {
   it('walks to the target and says so once there and still', () => {
     const p = pup(0, 0)
     p.r.target.set(0.5, 0, 0.2)
-    const ctx: RoutineCtx = { now: at(12), care: p.care, spots: SPOTS, others: [], clamp }
+    const ctx: RoutineCtx = { now: at(12), care: p.care, spots: SPOTS, place: 0, clamp }
     let there = false
     for (let n = 0; n < 20 / DT && !there; n++) {
-      there = approach(p.r, p.m, ctx, SPOTS.bowl)
+      there = approach(p.r, p.m, ctx, SPOTS.bowls[0]!)
       stepPoses(p.m, DT)
       stepLocomotion(p.m, p.legs, DT)
     }
@@ -225,21 +274,23 @@ describe('approach', () => {
 })
 
 describe('bedSlots', () => {
-  it('puts one puppy in the middle and two side by side, all inside the bed and the play area', () => {
-    const [one] = bedSlots(SPOTS, 1)
-    expect(Math.hypot(one!.x - SPOTS.bed.center.x, one!.z - SPOTS.bed.center.z)).toBeLessThan(1e-9)
-    const [l, r] = bedSlots(SPOTS, 2)
+  it('puts each puppy in the middle of its own bed, left first, inside the play area', () => {
+    const [one] = bedSlots(SPOTS)
+    const bed = SPOTS.beds[0]!
+    expect(Math.hypot(one!.x - bed.center.x, one!.z - bed.center.z)).toBeLessThan(1e-9)
+    expect(one!.heading).toBeCloseTo(bed.facing)
+    const [l, r] = bedSlots(SPOTS2)
     expect(Math.hypot(l!.x - r!.x, l!.z - r!.z)).toBeGreaterThanOrEqual(0.45)
     expect(playLocal(cam, l!.x, l!.z).side).toBeLessThan(playLocal(cam, r!.x, r!.z).side)
     // Each curls its head outwards, so neither hides the other
     expect([one!.side, l!.side, r!.side]).toEqual([1, -1, 1])
-    for (const s of [l!, r!]) {
+    ;[l!, r!].forEach((s, i) => {
       const [x, z] = clamp(s.x, s.z)
       expect(Math.hypot(x - s.x, z - s.z)).toBeLessThan(1e-9)
       const m = createMotionState()
       m.pos.set(s.x, 0, s.z)
-      expect(inBed(m)).toBeLessThan(0.75)
-    }
+      expect(inBed(m, SPOTS2.beds[i]!)).toBeLessThan(1e-9)
+    })
   })
 })
 

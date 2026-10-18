@@ -2,6 +2,7 @@ import { BREEDS } from '@/domain/breeds'
 import { createCare, isNight } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { ROOM_CAPACITY } from '@/domain/room'
+import type { Vec3 } from '@/engine/math'
 import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/engine/puppy/behaviour'
 import {
   askTrick,
@@ -20,7 +21,7 @@ import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
-import { bedSlots, touch, tuckIn } from '@/engine/motion/routine'
+import { bedSlots, followBed, forgetRoute, touch, tuckIn } from '@/engine/motion/routine'
 import { START_PLACES } from '@/engine/room/furniture'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
@@ -101,15 +102,45 @@ export function createThreeStage(
     clamp: (x: number, z: number) => clampPlay(room.cam, x, z),
   })
 
+  /** Where each puppy's bed stood when last looked. */
+  const bedAt = new Map<PuppyView, Vec3>()
+  /** Whoever is in its bed or on the way there moves along with it. */
+  const followBeds = () => {
+    const beds = room.furniture?.spots.beds
+    if (!beds) return
+    for (const v of views) {
+      const bed = beds[v.place]?.center
+      if (!bed) continue
+      const was = bedAt.get(v)
+      bedAt.set(v, bed.clone())
+      if (!was) continue
+      followBed(
+        v.routine,
+        [v.motion.pos, ...v.legs.flatMap((L) => [L.planted, L.from, L.land, L.pos])],
+        bed.x - was.x,
+        bed.z - was.z,
+      )
+    }
+  }
+
+  /** Each puppy's place in the room is its place in `wanted`: its bed and bowl. */
   const order = () => {
-    views = wanted.flatMap((p) => mounted.get(p.id) ?? [])
+    views = wanted.flatMap((p, i) => {
+      const v = mounted.get(p.id)
+      if (!v) return []
+      v.place = i
+      return [v]
+    })
+    if (room.furnish(wanted.length > 1 ? 2 : 1))
+      for (const v of views) forgetRoute(v.routine, v.motion)
+    followBeds()
   }
 
   /** Mounts every wanted puppy whose mesh is ready; a mesh for a puppy no longer wanted waits unused. */
   const mountReady = () => {
     if (disposed) return
     const spots = room.furniture?.spots
-    const beds = spots && isNight(clock()) ? bedSlots(spots, wanted.length) : null
+    const beds = spots && isNight(clock()) ? bedSlots(spots) : null
     const places = beds ?? START_PLACES[wanted.length - 1] ?? []
     let added = false
     wanted.forEach((p, i) => {
@@ -182,29 +213,9 @@ export function createThreeStage(
       else if (g.kind === 'puzzle') for (const v of views) puzzle(v.behaviour)
     },
   })
-  // The bed moves with the frame: whoever is in it or on the way moves along
-  const bedAt = room.furniture?.spots.bed.center.clone()
+  // The beds move with the frame
   const offResize = room.onResize(() => {
-    const bed = room.furniture?.spots.bed.center
-    if (bed && bedAt) {
-      const dx = bed.x - bedAt.x,
-        dz = bed.z - bedAt.z
-      bedAt.copy(bed)
-      for (const v of views) {
-        const r = v.routine
-        if (r.routine !== 'toBed' && r.routine !== 'sleeping') continue
-        r.target.x += dx
-        r.target.z += dz
-        if (r.routine !== 'sleeping') continue
-        for (const p of [
-          v.motion.pos,
-          ...v.legs.flatMap((L) => [L.planted, L.from, L.land, L.pos]),
-        ]) {
-          p.x += dx
-          p.z += dz
-        }
-      }
-    }
+    followBeds()
     for (const v of views) keepInPlay(v.motion, room.cam, mood(v))
   })
 
@@ -260,6 +271,7 @@ export function createThreeStage(
         if (view === petView) petView = null
         view.dispose()
         mounted.delete(id)
+        bedAt.delete(view)
       }
       order()
       if (!views.length) putBallAway(views, ball)

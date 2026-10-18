@@ -95,6 +95,8 @@ export interface PuppyView extends BehaviourRig, SceneView {
   routine: RoutineState
   /** Kept in memory while the room is open. */
   care: Care
+  /** Its place in the room's order: which bed and bowl are its. */
+  place: number
   /** Seconds to the next «z» while asleep. */
   snoreT: number
   /** Where a held ball sits, in the jaw's frame. */
@@ -273,6 +275,7 @@ export function mountPuppyView(
     routine: createRoutineState(),
     care,
     snoreT: 0,
+    place: 0,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
     setQuality: (q) => setShells(q.shells),
@@ -408,7 +411,7 @@ export function tickPuppies(
           now: ctx.clock,
           care: view.care,
           spots,
-          others: views.flatMap((o) => (o === view ? [] : [o.motion])),
+          place: view.place,
           clamp: (x, z) => clampPlay(room.cam, x, z),
           busy: view.fetch.task !== 'free',
         },
