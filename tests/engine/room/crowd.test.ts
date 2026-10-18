@@ -121,7 +121,129 @@ describe('separate at the edge of the play area', () => {
   )
 })
 
+/** Never races (the roll is above 0.3) and picks the first chaser that outweighs a third. */
+const calm = { random: () => 0.31 }
+
+function seeded(seed: number) {
+  let a = seed
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function throws(n: number, energies: number[], random: () => number) {
+  const wins = [0, 0]
+  for (let k = 0; k < n; k++) {
+    const ball: BallState = { ...createBall(), state: 'air' }
+    ball.pos.set(0, BALL_R, 1)
+    const dogs = [puppy(-0.5, 0), puppy(0.5, 0)]
+    for (const p of dogs) p.f.task = 'chase'
+    const w = claimBall(
+      dogs.map((p) => p.f),
+      dogs.map((p) => p.m),
+      ball,
+      { random, energies },
+    )
+    if (w != null) wins[w]!++
+  }
+  return wins
+}
+
 describe('claimBall', () => {
+  it('splits the chases evenly between equal puppies at equal distance', () => {
+    const [a, b] = throws(200, [0.5, 0.5], seeded(7))
+    expect(a! / (a! + b!)).toBeGreaterThan(0.35)
+    expect(a! / (a! + b!)).toBeLessThan(0.65)
+  })
+
+  it('sends the energetic puppy more often', () => {
+    const [a, b] = throws(200, [1, 0.3], seeded(11))
+    expect(a!).toBeGreaterThan(b!)
+  })
+
+  it('sends both on a race roll and lets only one reach the ball', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const { fx, fz } = playLocal(cam, 0, 0)
+    ball.pos.set(cam.target.x + fx * 0.9, BALL_R, cam.target.z + fz * 0.9)
+    // Both already within reach of the resting ball: they arrive in the same frame
+    const a = puppy(ball.pos.x - REACH, ball.pos.z),
+      b = puppy(ball.pos.x + REACH, ball.pos.z)
+    a.m.heading = Math.PI / 2
+    b.m.heading = -Math.PI / 2
+    const dogs = [a, b]
+    for (const p of dogs) p.f.task = 'chase'
+    const winner = claimBall(
+      dogs.map((p) => p.f),
+      dogs.map((p) => p.m),
+      ball,
+      { random: () => 0.1, energies: [0.5, 0.5] },
+    )
+    expect(winner).toBeNull()
+    expect(dogs.map((p) => p.f.task)).toEqual(['chase', 'chase'])
+
+    let grabbed = 0
+    const grabbers = new Set<number>()
+    for (let n = 0; n < 60 * 8; n++) {
+      dogs.forEach((p, i) => {
+        const ev = stepFetch(
+          p.f,
+          p.m,
+          ball,
+          {
+            reach: REACH,
+            cam,
+            mouthWorld: p.mouth,
+            mood: { happy: 0.5 },
+            energy: 0.5,
+            random: () => 0.9,
+          },
+          DT,
+        )
+        if (ev.grabbed) {
+          grabbed++
+          grabbers.add(i)
+        }
+      })
+      for (const p of dogs) {
+        stepPoses(p.m, DT)
+        stepLocomotion(p.m, p.legs, DT)
+      }
+      separate(dogs.map((p) => p.m))
+      stepBall(ball, cam, DT)
+    }
+    expect(grabbed).toBe(1)
+    expect(grabbers.size).toBe(1)
+    const loser = dogs[grabbers.has(0) ? 1 : 0]!
+    expect(loser.f.holding).toBe(false)
+    expect(loser.f.task).toBe('free')
+  })
+
+  it('never sends a puppy that is not chasing', () => {
+    for (const random of [() => 0.1, () => 0.9, seeded(3)]) {
+      const wins = throws(1, [0.5, 0.5], random)
+      expect(wins[0]! + wins[1]!).toBeLessThanOrEqual(1)
+    }
+    const ball: BallState = { ...createBall(), state: 'air' }
+    ball.pos.set(0, BALL_R, 1)
+    const dogs = [puppy(-0.5, 0), puppy(0.5, 0)]
+    dogs[1]!.f.task = 'chase'
+    for (const random of [() => 0.1, () => 0.9, () => 0.5]) {
+      dogs[1]!.f.task = 'chase'
+      const w = claimBall(
+        dogs.map((p) => p.f),
+        dogs.map((p) => p.m),
+        ball,
+        { random, energies: [0.5, 0.5] },
+      )
+      expect(w).toBe(1)
+      expect(dogs[0]!.f.task).toBe('free')
+    }
+  })
+
   it('sends the puppy whose mouth is nearest; the other watches it go', () => {
     const ball: BallState = { ...createBall(), state: 'air' }
     ball.pos.set(0, BALL_R, 1)
@@ -129,10 +251,11 @@ describe('claimBall', () => {
     const away = puppy(0, 0.45, Math.PI),
       facing = puppy(0, 1.55, Math.PI)
     for (const p of [away, facing]) p.f.task = 'chase'
-    const winner = claimBall([away.f, facing.f], [away.m, facing.m], ball, [
-      away.mouth(new THREE.Vector3()),
-      facing.mouth(new THREE.Vector3()),
-    ])
+    const winner = claimBall([away.f, facing.f], [away.m, facing.m], ball, {
+      ...calm,
+      energies: [0.5, 0.5],
+      mouths: [away.mouth(new THREE.Vector3()), facing.mouth(new THREE.Vector3())],
+    })
     expect(winner).toBe(1)
     expect(facing.f.task).toBe('chase')
     expect(away.f.task).toBe('free')
@@ -142,7 +265,7 @@ describe('claimBall', () => {
   it('claims nothing when the ball is not loose', () => {
     const p = puppy(0, 0)
     p.f.task = 'chase'
-    expect(claimBall([p.f], [p.m], createBall())).toBeNull()
+    expect(claimBall([p.f], [p.m], createBall(), { ...calm, energies: [0.5] })).toBeNull()
   })
 
   it('lets only one of two puppies grab a thrown ball and carry it', () => {
@@ -160,7 +283,11 @@ describe('claimBall', () => {
         fetches,
         dogs.map((p) => p.m),
         ball,
-        dogs.map((p) => p.mouth(new THREE.Vector3())),
+        {
+          ...calm,
+          energies: [0.5, 0.5],
+          mouths: dogs.map((p) => p.mouth(new THREE.Vector3())),
+        },
       ),
     ).toBe(0)
 

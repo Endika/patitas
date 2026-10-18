@@ -95,6 +95,12 @@ export function stepFetch(
     }
   } else if (f.task === 'grab') {
     m.bowGoal = 1
+    if (f.taskT > 0.4 && !f.holding && ball.state !== 'air') {
+      f.task = 'free'
+      f.taskT = 0
+      f.watch = ball.state === 'mouth'
+      return ev
+    }
     if (f.taskT > 0.4 && ball.state === 'air') {
       ball.state = 'mouth'
       ball.vel.set(0, 0, 0)

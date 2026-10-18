@@ -571,8 +571,13 @@ export function putBallAway(views: PuppyView[], ball: BallState): void {
   for (const v of views) if (v.fetch.task === 'wait') v.fetch.task = 'free'
 }
 
-/** Every puppy awake perks up at the throw; the one whose mouth is nearest goes for it. */
-export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void {
+/** Every puppy awake perks up at the throw; one is picked to go for it, or two race. */
+export function throwBall(
+  views: PuppyView[],
+  ball: BallState,
+  vel: Vec3,
+  random: () => number = Math.random,
+): void {
   ball.vel.copy(vel)
   ball.state = 'air'
   for (const v of views) {
@@ -586,7 +591,11 @@ export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void 
     views.map((v) => v.fetch),
     views.map((v) => v.motion),
     ball,
-    views.map((v) => mouthWorld(v, new THREE.Vector3())),
+    {
+      random,
+      energies: views.map((v) => v.persona.energy),
+      mouths: views.map((v) => mouthWorld(v, new THREE.Vector3())),
+    },
   )
 }
 
