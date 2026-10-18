@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { BREEDS, type Persona } from '@/domain/breeds'
 import { createFetchState, type FetchTask } from '@/engine/motion/fetch'
 import { createMotionState, type BodyPose } from '@/engine/motion/locomotion'
-import type { ZoneId } from '@/engine/puppy/anatomy'
+import { anatomy, type ZoneId } from '@/engine/puppy/anatomy'
 import {
   behaviourRig,
   createBehaviourState,
@@ -17,10 +17,11 @@ import {
 import { createBall } from '@/engine/room/ball'
 
 const DT = 1 / 60
+const EARS = anatomy(BREEDS.dorado).ears
 const STILL: BodyPose = { y: 0, pitch: 0, roll: 0, k: 0 }
 
 function world(persona: Persona = BREEDS.dorado.defaultPersona, task: FetchTask = 'free') {
-  const rig = behaviourRig(BREEDS.dorado, persona, [0, 0.62, 0.43])
+  const rig = behaviourRig(BREEDS.dorado, persona, { look: [0, 0.62, 0.43], ears: EARS })
   const s = createBehaviourState()
   const fetch = createFetchState()
   fetch.task = task

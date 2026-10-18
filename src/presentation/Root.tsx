@@ -4,20 +4,22 @@ import App from './App'
 
 const DebugPuppy = lazy(() => import('./DebugPuppy'))
 
-function debugBreed(search: string): BreedId | null {
+const asBreed = (id: string | null): BreedId | null => (id && id in BREEDS ? (id as BreedId) : null)
+
+function debugBreeds(search: string): BreedId[] | null {
   const params = new URLSearchParams(search)
   if (params.get('debug') !== 'puppy') return null
-  const breed = params.get('breed')
-  return breed && breed in BREEDS ? (breed as BreedId) : 'dorado'
+  const second = asBreed(params.get('breed2'))
+  return [asBreed(params.get('breed')) ?? 'dorado', ...(second ? [second] : [])]
 }
 
-/** The app, or with `?debug=puppy&breed=…` a single puppy for checking the render. */
+/** The app, or with `?debug=puppy&breed=…[&breed2=…]` one or two puppies for checking the render. */
 export default function Root({ search }: { search: string }) {
-  const breed = debugBreed(search)
-  if (!breed) return <App />
+  const breeds = debugBreeds(search)
+  if (!breeds) return <App />
   return (
     <Suspense>
-      <DebugPuppy breedId={breed} />
+      <DebugPuppy breedIds={breeds} />
     </Suspense>
   )
 }

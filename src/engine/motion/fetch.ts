@@ -11,6 +11,10 @@ export interface FetchState {
   task: FetchTask
   taskT: number
   drop: Vec3
+  /** This puppy has the ball in its mouth; only the holder carries it. */
+  holding: boolean
+  /** Lost the ball to another puppy: follows it with its eyes until it comes to rest. */
+  watch: boolean
 }
 
 export interface FetchEvents {
@@ -31,10 +35,13 @@ export interface FetchCtx {
 }
 
 export function createFetchState(): FetchState {
-  return { task: 'free', taskT: 0, drop: new THREE.Vector3() }
+  return { task: 'free', taskT: 0, drop: new THREE.Vector3(), holding: false, watch: false }
 }
 
 const camPos = new THREE.Vector3()
+
+const resting = (ball: BallState) =>
+  ball.state === 'air' && ball.vel.length() < 0.05 && ball.pos.y < BALL_R + 0.01
 
 /**
  * One tick of the fetch game. Resets `sitGoal` and `bowGoal` before setting its own, so call it
@@ -59,6 +66,12 @@ export function stepFetch(
       ...(ctx.random && { random: ctx.random }),
     })
   f.taskT += dt
+  if (f.holding && ball.state !== 'mouth') f.holding = false
+  if (
+    f.watch &&
+    (f.task !== 'free' || ball.state === 'none' || ball.state === 'hand' || resting(ball))
+  )
+    f.watch = false
   m.sitGoal = 0
   m.bowGoal = 0
   if (f.task === 'wait') {
@@ -67,6 +80,7 @@ export function stepFetch(
   } else if (f.task === 'chase') {
     if (ball.state !== 'air') {
       f.task = 'free'
+      f.watch = ball.state === 'mouth'
       return ev
     }
     const dx = p.x - m.pos.x,
@@ -84,6 +98,7 @@ export function stepFetch(
     if (f.taskT > 0.4 && ball.state === 'air') {
       ball.state = 'mouth'
       ball.vel.set(0, 0, 0)
+      f.holding = true
       ev.grabbed = true
     }
     if (f.taskT > 0.65) {
@@ -102,9 +117,10 @@ export function stepFetch(
     }
   } else if (f.task === 'present') {
     m.sitGoal = m.face == null ? 1 : 0
-    if (f.taskT > 1.1 && ball.state === 'mouth') {
+    if (f.taskT > 1.1 && f.holding) {
       ctx.mouthWorld(p)
       ball.state = 'air'
+      f.holding = false
       cameraPosition(cam, camPos)
       ball.vel.set(camPos.x - p.x, 0, camPos.z - p.z).setLength(0.35)
       ball.vel.y = 0.4
@@ -113,6 +129,6 @@ export function stepFetch(
     }
     if (f.taskT > 2.6) f.task = 'free'
   }
-  if (ball.state === 'mouth') ctx.mouthWorld(p)
+  if (f.holding) ctx.mouthWorld(p)
   return ev
 }

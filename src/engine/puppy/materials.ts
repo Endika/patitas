@@ -23,8 +23,10 @@ export function furUniforms(f: FurParams): FurUniforms {
  */
 export function furMaterial(h: number, u: FurUniforms): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })
+  const uH = { value: h }
+  m.userData.uH = uH
   m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, u, { uH: { value: h } })
+    Object.assign(sh.uniforms, u, { uH })
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -68,6 +70,11 @@ vec3 h33(vec3 p){ p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz
 export function furMaterials(shells: number, f: FurParams): THREE.MeshStandardMaterial[] {
   const u = furUniforms(f)
   return Array.from({ length: shells + 1 }, (_, i) => furMaterial(i / shells, u))
+}
+
+/** Moves a shell to height `h` without compiling it again. */
+export function setFurHeight(m: THREE.Material, h: number): void {
+  ;(m.userData.uH as { value: number }).value = h
 }
 
 export function eyeMaterial(map: THREE.Texture): THREE.MeshPhysicalMaterial {
