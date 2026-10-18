@@ -98,6 +98,7 @@ export function stepFetch(
     if (f.taskT > 0.4 && !f.holding && ball.state !== 'air') {
       f.task = 'free'
       f.taskT = 0
+      // Only a ball in another's mouth is worth watching; a lost or put-away one is not
       f.watch = ball.state === 'mouth'
       return ev
     }

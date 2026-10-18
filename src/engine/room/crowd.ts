@@ -87,7 +87,7 @@ export function claimBall(
   if (ball.state !== 'air') return null
   const chasers: number[] = []
   for (let i = 0; i < fetches.length; i++) if (fetches[i]!.task === 'chase') chasers.push(i)
-  if (chasers.length >= 2 && random() < RACE) return null
+  if (chasers.length === 2 && random() < RACE) return null
   const weights = chasers.map((i) => {
     const at = mouths?.[i] ?? motions[i]!.pos,
       d = Math.hypot(at.x - ball.pos.x, at.z - ball.pos.z)
