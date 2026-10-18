@@ -61,31 +61,48 @@ function push(a: Vec3, b: Vec3, minDist: number, clamp?: Clamp) {
   move(free, s * nx * left, s * nz * left, clamp)
 }
 
+/** Chance that two puppies both go for the ball and race for it. */
+const RACE = 0.3
+
+export interface ClaimOpts {
+  random: () => number
+  /** Each puppy's energy, same order as the fetches. */
+  energies: readonly number[]
+  /** Mouth positions (the bodies when absent). */
+  mouths?: readonly Vec3[]
+}
+
 /**
- * Decides who fetches a thrown ball: the chaser whose mouth is nearest (its body when no mouths
- * are given). The others give up, stop where they are and watch the ball.
+ * Decides who fetches a thrown ball among the chasers: a weighted random pick, favouring the
+ * energetic and the near (distance from the mouth to the ball). Now and then, with two chasers,
+ * both go and the first to reach it wins (returns null). The others give up, stop where they are
+ * and watch the ball.
  */
 export function claimBall(
   fetches: FetchState[],
   motions: MotionState[],
   ball: BallState,
-  mouths?: readonly Vec3[],
+  { random, energies, mouths }: ClaimOpts,
 ): number | null {
   if (ball.state !== 'air') return null
-  let best: number | null = null,
-    bd = Infinity
-  for (let i = 0; i < fetches.length; i++) {
-    if (fetches[i]!.task !== 'chase') continue
+  const chasers: number[] = []
+  for (let i = 0; i < fetches.length; i++) if (fetches[i]!.task === 'chase') chasers.push(i)
+  if (chasers.length >= 2 && random() < RACE) return null
+  const weights = chasers.map((i) => {
     const at = mouths?.[i] ?? motions[i]!.pos,
       d = Math.hypot(at.x - ball.pos.x, at.z - ball.pos.z)
-    if (d < bd) {
-      bd = d
-      best = i
-    }
+    return (energies[i] ?? 0.5) / (0.3 + d)
+  })
+  let roll = random() * weights.reduce((a, b) => a + b, 0),
+    best: number | null = null
+  for (let k = 0; k < chasers.length; k++) {
+    best = chasers[k]!
+    roll -= weights[k]!
+    if (roll < 0) break
   }
-  for (let i = 0; i < fetches.length; i++) {
+  for (const i of chasers) {
+    if (i === best) continue
     const f = fetches[i]!
-    if (i === best || f.task !== 'chase') continue
     f.task = 'free'
     f.taskT = 0
     f.watch = true
