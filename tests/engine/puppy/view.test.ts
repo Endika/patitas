@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
-import { hitZone, type ZoneRig } from '@/engine/puppy/view'
+import { hitZone, restBounds, type ZoneRig } from '@/engine/puppy/view'
 
 describe('hitZone', () => {
   // A ray from the side passes the belly first and the chest behind it
@@ -24,5 +24,28 @@ describe('hitZone', () => {
       setPose(motion, pose)
       expect(hitZone({ motion, zones }, ray)?.zone).toBe('belly')
     }
+  })
+})
+
+describe('restBounds', () => {
+  it('places the shared geometry box where the puppy stands, measuring the geometry once', () => {
+    const geometry = new THREE.BoxGeometry(0.4, 0.6, 0.8).translate(0, 0.3, 0)
+    const group = new THREE.Group()
+    group.position.set(1, 0, -2)
+    group.updateMatrixWorld(true)
+
+    const first = restBounds(geometry, group)
+    const cached = geometry.boundingBox
+    const second = restBounds(geometry, group)
+
+    expect(cached).not.toBeNull()
+    expect(geometry.boundingBox).toBe(cached)
+    const close = (v: THREE.Vector3, to: [number, number, number]) =>
+      to.forEach((x, i) => expect(v.getComponent(i)).toBeCloseTo(x))
+    close(first.min, [0.8, 0, -2.4])
+    close(first.max, [1.2, 0.6, -1.6])
+    expect(second).not.toBe(first)
+    second.expandByScalar(1)
+    close(cached!.max, [0.2, 0.6, 0.4])
   })
 })

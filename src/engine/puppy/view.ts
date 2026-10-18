@@ -303,6 +303,15 @@ export function hitZone(
   return best ? { zone: best.zone, point: ray.at(bt, new THREE.Vector3()), distance: bt } : null
 }
 
+/**
+ * The puppy's rest-pose bounds where its group stands. The box is measured once on the geometry
+ * every view of the breed shares, so no shell is skinned to find it.
+ */
+export function restBounds(geometry: THREE.BufferGeometry, group: THREE.Object3D): THREE.Box3 {
+  if (!geometry.boundingBox) geometry.computeBoundingBox()
+  return geometry.boundingBox!.clone().applyMatrix4(group.matrixWorld)
+}
+
 /** The nearest hit among several puppies. */
 export function hitPuppy(
   views: PuppyView[],

@@ -1,4 +1,4 @@
-import * as THREE from 'three'
+import type * as THREE from 'three'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import { endPet, movePet, startPet } from '@/engine/puppy/behaviour'
@@ -7,6 +7,7 @@ import {
   hitZone,
   mountPuppyView,
   pointLook,
+  restBounds,
   tickPuppies,
   type PuppyView,
 } from '@/engine/puppy/view'
@@ -88,7 +89,7 @@ export function createThreePreviewStage(canvas: HTMLCanvasElement): PreviewStage
     mount(id, built) {
       view = mountPuppyView(room, previewPuppy(id), built, room.quality)
       view.group.updateMatrixWorld(true)
-      bounds = new THREE.Box3().setFromObject(view.group)
+      bounds = restBounds(built.geometry, view.group)
       room.resize()
     },
     unmount() {
