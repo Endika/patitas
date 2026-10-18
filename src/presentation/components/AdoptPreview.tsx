@@ -70,7 +70,8 @@ export default function AdoptPreview({
 
   const waiting = status.loading || status.notice !== null
   return (
-    <div className="relative h-[40dvh] min-h-56 w-full overflow-hidden rounded-3xl border border-line bg-glass">
+    // Takes what the form leaves of the screen, up to 40 %, so «Adoptar» stays in view
+    <div className="relative max-h-[40dvh] min-h-48 w-full flex-[1_1_0] overflow-hidden rounded-3xl border border-line bg-glass">
       <div
         ref={hostRef}
         className="absolute inset-0 *:block *:size-full *:touch-none *:select-none"

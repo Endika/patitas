@@ -34,6 +34,34 @@ export function fitCamera(cam: FixedCamera, aspect: number): FixedCamera {
   return cam
 }
 
+/** Elevation for a close look at one puppy: a little more from above than the room's. */
+const FRAME_EL = 0.3
+
+/**
+ * Aims at the middle of a box (a puppy) and backs off until it fills `fill` of the view's height
+ * or width, whichever is tighter, as seen from the camera's azimuth; half its depth is added so
+ * the near side fits too.
+ */
+export function frameBox(
+  cam: FixedCamera,
+  box: THREE.Box3,
+  aspect: number,
+  fill = 0.7,
+): FixedCamera {
+  const t = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))
+  const size = box.getSize(new THREE.Vector3())
+  box.getCenter(cam.target)
+  cam.el = FRAME_EL
+  cam.tanH = t * aspect
+  // The camera looks from `az`, so the box's depth shows in its width too
+  const c = Math.abs(Math.cos(cam.az)),
+    s = Math.abs(Math.sin(cam.az))
+  const w = size.x * c + size.z * s,
+    d = size.x * s + size.z * c
+  cam.dist = Math.max(size.y / (fill * 2 * t), w / (fill * 2 * t * aspect)) + d / 2
+  return cam
+}
+
 export function cameraPosition(cam: FixedCamera, out: Vec3 = new THREE.Vector3()): Vec3 {
   const { az, el, dist, target } = cam
   return out.set(

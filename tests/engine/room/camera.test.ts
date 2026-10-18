@@ -1,10 +1,12 @@
 // @vitest-environment node
+import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import {
   cameraPosition,
   clampPlay,
   createCamera,
   fitCamera,
+  frameBox,
   PLAY,
   playLocal,
 } from '@/engine/room/camera'
@@ -26,6 +28,57 @@ describe('fitCamera', () => {
     expect(Math.atan2(p.x - cam.target.x, p.z - cam.target.z)).toBeCloseTo(0.4)
     expect(Math.asin((p.y - cam.target.y) / cam.dist)).toBeCloseTo(0.24)
   })
+})
+
+describe('frameBox', () => {
+  const t = Math.tan(((30 / 2) * Math.PI) / 180)
+  const puppy = new THREE.Box3(new THREE.Vector3(-0.2, 0, -0.35), new THREE.Vector3(0.2, 0.6, 0.35))
+
+  /** The corners of the box in normalised device coordinates, as the real camera sees them. */
+  const corners = (aspect: number) => {
+    const cam = frameBox(createCamera(), puppy, aspect)
+    const camera = new THREE.PerspectiveCamera(cam.fov, aspect, 0.05, 60)
+    cameraPosition(cam, camera.position)
+    camera.lookAt(cam.target)
+    camera.updateMatrixWorld()
+    const out: THREE.Vector3[] = []
+    for (const x of [puppy.min.x, puppy.max.x])
+      for (const y of [puppy.min.y, puppy.max.y])
+        for (const z of [puppy.min.z, puppy.max.z])
+          out.push(new THREE.Vector3(x, y, z).project(camera))
+    return out
+  }
+
+  it('aims at the middle of the box from a little above', () => {
+    const cam = frameBox(createCamera(), puppy, 1.2)
+    expect(cam.target.x).toBeCloseTo(0)
+    expect(cam.target.y).toBeCloseTo(0.3)
+    expect(cam.target.z).toBeCloseTo(0)
+    expect(cam.el).toBeCloseTo(0.3)
+    expect(cam.tanH).toBeCloseTo(t * 1.2)
+  })
+
+  it('fits the height on a wide view and the width on a narrow one, plus half the depth', () => {
+    const [c, sn] = [Math.cos(0.4), Math.sin(0.4)]
+    const w = 0.4 * c + 0.7 * sn,
+      d = 0.4 * sn + 0.7 * c
+    expect(frameBox(createCamera(), puppy, 1.2).dist).toBeCloseTo(0.6 / (0.7 * 2 * t) + d / 2)
+    expect(frameBox(createCamera(), puppy, 0.4).dist).toBeCloseTo(w / (0.7 * 2 * t * 0.4) + d / 2)
+  })
+
+  it.each([0.4, 1.2, 2])(
+    'keeps the whole box in view and fills most of it at aspect %f',
+    (aspect) => {
+      const ndc = corners(aspect)
+      for (const p of ndc) {
+        expect(Math.abs(p.x)).toBeLessThanOrEqual(1)
+        expect(Math.abs(p.y)).toBeLessThanOrEqual(1)
+      }
+      const spanX = Math.max(...ndc.map((p) => p.x)) - Math.min(...ndc.map((p) => p.x))
+      const spanY = Math.max(...ndc.map((p) => p.y)) - Math.min(...ndc.map((p) => p.y))
+      expect(Math.max(spanX, spanY) / 2).toBeGreaterThan(0.6)
+    },
+  )
 })
 
 describe('clampPlay', () => {
