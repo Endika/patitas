@@ -10,14 +10,18 @@ type Clamp = (x: number, z: number) => [number, number]
  * and two walking to the same spot get spots `minDist` apart. A walker heading where another
  * stands keeps its goal and nudges that one aside, so a chase can always reach the ball. With
  * `clamp`, bodies and goals stay in the play area: a puppy pinned against its edge is only
- * moved along it, and the other one takes the rest of the push.
+ * moved along it, and the other one takes the rest of the push. A sleeper stays in its place in
+ * the bed and the awake one takes the whole push.
  */
 export function separate(states: MotionState[], minDist = 0.45, clamp?: Clamp): void {
   for (let i = 0; i < states.length; i++)
     for (let j = i + 1; j < states.length; j++) {
       const a = states[i]!,
         b = states[j]!
-      push(a.pos, b.pos, minDist, clamp)
+      const sa = a.pose === 'sleep',
+        sb = b.pose === 'sleep'
+      if (sa !== sb) shove(sa ? a.pos : b.pos, sa ? b.pos : a.pos, minDist, clamp)
+      else push(a.pos, b.pos, minDist, clamp)
       if (a.goal && b.goal) push(a.goal, b.goal, minDist, clamp)
     }
 }
@@ -29,6 +33,16 @@ function move(p: Vec3, dx: number, dz: number, clamp?: Clamp): number {
   p.z += dz
   if (clamp) [p.x, p.z] = clamp(p.x, p.z)
   return Math.hypot(p.x - x0, p.z - z0)
+}
+
+/** Moves `b` the whole way out of `still`'s space. */
+function shove(still: Vec3, b: Vec3, minDist: number, clamp?: Clamp) {
+  const dx = b.x - still.x,
+    dz = b.z - still.z,
+    d = Math.hypot(dx, dz)
+  if (d >= minDist) return
+  const [nx, nz] = d > 1e-6 ? [dx / d, dz / d] : [1, 0]
+  move(b, nx * (minDist - d), nz * (minDist - d), clamp)
 }
 
 function push(a: Vec3, b: Vec3, minDist: number, clamp?: Clamp) {

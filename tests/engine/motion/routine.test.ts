@@ -12,6 +12,7 @@ import {
 } from '@/engine/motion/locomotion'
 import { POSES, stepPoses } from '@/engine/motion/poses'
 import {
+  approach,
   bedSlots,
   createRoutineState,
   stepRoutine,
@@ -103,7 +104,11 @@ describe('stepRoutine', () => {
       expect(p.m.pose).toBe('sleep')
       expect(inBed(p.m)).toBeLessThan(0.75)
     }
-    expect(a.m.pos.distanceTo(b.m.pos)).toBeGreaterThanOrEqual(0.25)
+    bedSlots(SPOTS, 2).forEach((slot, i) =>
+      expect(Math.hypot([a, b][i]!.m.pos.x - slot.x, [a, b][i]!.m.pos.z - slot.z)).toBeLessThan(
+        0.1,
+      ),
+    )
     expect([a.m.sleepSide, b.m.sleepSide]).toEqual([-1, 1])
     expect(turned).toBeGreaterThan(Math.PI * 2 - 0.3)
   })
@@ -200,6 +205,22 @@ describe('stepRoutine', () => {
     stepRoutine(p.r, p.m, { now: at(23), care: p.care, spots: SPOTS, others: [], clamp }, DT)
     expect(p.r.routine).toBe('none')
     expect(touch(p.r)).toBe(false)
+  })
+})
+
+describe('approach', () => {
+  it('walks to the target and says so once there and still', () => {
+    const p = pup(0, 0)
+    p.r.target.set(0.5, 0, 0.2)
+    const ctx: RoutineCtx = { now: at(12), care: p.care, spots: SPOTS, others: [], clamp }
+    let there = false
+    for (let n = 0; n < 20 / DT && !there; n++) {
+      there = approach(p.r, p.m, ctx, SPOTS.bowl)
+      stepPoses(p.m, DT)
+      stepLocomotion(p.m, p.legs, DT)
+    }
+    expect(there).toBe(true)
+    expect(Math.hypot(p.m.pos.x - 0.5, p.m.pos.z - 0.2)).toBeLessThan(0.06)
   })
 })
 

@@ -12,7 +12,7 @@ import {
   stepLocomotion,
   type MotionState,
 } from '@/engine/motion/locomotion'
-import { stepPoses } from '@/engine/motion/poses'
+import { setPose, stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
 import { clampPlay, createCamera, fitCamera, playLocal, PLAY } from '@/engine/room/camera'
@@ -62,6 +62,16 @@ describe('separate', () => {
     expect(b.m.goal).toBeNull()
     expect(closest).toBeGreaterThanOrEqual(0.45 - 1e-9)
     expect(flat(a.m, b.m)).toBeLessThan(0.6)
+  })
+
+  it('leaves a sleeper in its place and puts the whole push on the awake one', () => {
+    const sleeper = createMotionState(),
+      awake = createMotionState()
+    setPose(sleeper, 'sleep')
+    awake.pos.set(0.2, 0, 0)
+    separate([awake, sleeper], 0.45)
+    expect(sleeper.pos.length()).toBe(0)
+    expect(awake.pos.x).toBeCloseTo(0.45)
   })
 
   it('pulls apart two puppies standing on the same spot', () => {

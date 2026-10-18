@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
-import { playHalf, playWorld, type FixedCamera } from './camera'
+import { playAxes, playHalf, playWorld, type FixedCamera } from './camera'
 
 /** An oval footprint on the floor, turned to face the camera. */
 export interface Spot {
@@ -45,6 +45,11 @@ const BED = { radius: 0.6, depth: 0.47 },
   BOWL = { radius: 0.13, depth: 0.13 },
   SCALE = { radius: 0.2, depth: 0.16 }
 
+/** The bed's depth in the play area. */
+const BED_D = 1.6
+/** How far past the bed's rim two curled sleepers reach, plus a margin to the screen edge. */
+const BED_OVERHANG = 0.2
+
 /** The garden as drawn, before `layout` stretches it to the frame. */
 const GARDEN = { radius: 0.315, depth: 0.45 }
 /** The garden's width over its depth. */
@@ -59,10 +64,15 @@ const MUD = { u: -0.12, v: 0.35, size: 0.55 }
  */
 export function computeSpots(cam: FixedCamera): Spots {
   const facing = cam.az
-  const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot => {
-    const [x, z] = playWorld(cam, d, side * playHalf(cam, d))
+  const at = (d: number, side: number, size: { radius: number; depth: number }): Spot => {
+    const [x, z] = playWorld(cam, d, side)
     return { center: new THREE.Vector3(x, 0, z), ...size, facing }
   }
+  const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot =>
+    at(d, side * playHalf(cam, d), size)
+  // On a narrow screen the bed comes in from the edge so the sleepers in it stay in frame
+  const frustumHalf = (playAxes(cam).camD + BED_D) * cam.tanH
+  const bedSide = Math.min(0.55 * playHalf(cam, BED_D), frustumHalf - BED.radius - BED_OVERHANG)
   const gd = 0.8,
     depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
   const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
@@ -82,7 +92,7 @@ export function computeSpots(cam: FixedCamera): Spots {
     facing,
   }
   return {
-    bed: spot(1.4, 0.55, BED),
+    bed: at(BED_D, bedSide, BED),
     bowl: spot(-0.48, -0.8, BOWL),
     scale: spot(-0.48, 0.8, SCALE),
     mud,
