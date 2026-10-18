@@ -6,6 +6,7 @@ import type { GameStorage } from '@/infrastructure/storage'
 /** A room with no 3D: it records what the screen asks of it and lets a test push status. */
 export function createFakeStage() {
   const calls: string[] = []
+  const canvases: HTMLCanvasElement[] = []
   const shown: Puppy[][] = []
   const listeners = new Set<(s: StageStatus) => void>()
   let status: StageStatus = {
@@ -30,13 +31,18 @@ export function createFakeStage() {
   }
   return {
     calls,
+    /** Every canvas a stage was created on, in order. */
+    canvases,
     /** Names of the puppies the room shows now. */
     names: () => (shown.at(-1) ?? []).map((p) => p.name),
     emit(next: Partial<StageStatus>) {
       status = { ...status, ...next }
       for (const l of listeners) l(status)
     },
-    create: (_canvas: HTMLCanvasElement) => stage,
+    create: (canvas: HTMLCanvasElement) => {
+      canvases.push(canvas)
+      return stage
+    },
   }
 }
 

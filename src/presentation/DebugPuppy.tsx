@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import Hud from './components/Hud'
-import type { RoomStage, StageStatus } from './roomStage'
 import { createThreeStage } from './threeStage'
+import { useRoomStage } from './useRoomStage'
 import './room.css'
 
 const NAMES: Record<BreedId, string> = { dorado: 'Canela', shiba: 'Kuma', beagle: 'Txiki' }
@@ -26,28 +26,19 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 export default function DebugPuppy({ breedIds }: { breedIds: BreedId[] }) {
   const key = breedIds.join(',')
   const name = debugNames(breedIds).join(' y ')
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const stageRef = useRef<RoomStage | null>(null)
-  const [status, setStatus] = useState<StageStatus | null>(null)
-
-  useEffect(() => {
-    const stage = createThreeStage(canvasRef.current!)
-    stageRef.current = stage
-    const off = stage.onChange(setStatus)
-    stage.setPuppies(debugPuppies(key.split(',') as BreedId[]))
-    return () => {
-      off()
-      stage.dispose()
-      stageRef.current = null
-    }
-  }, [key])
+  const createStage = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      const stage = createThreeStage(canvas)
+      stage.setPuppies(debugPuppies(key.split(',') as BreedId[]))
+      return stage
+    },
+    [key],
+  )
+  const { hostRef, stageRef, status } = useRoomStage(createStage)
 
   return (
     <div className="room">
-      <canvas
-        ref={canvasRef}
-        aria-label="Cachorro en 3D. Mueve el dedo para que te mire y desliza sobre él para acariciarlo."
-      />
+      <div ref={hostRef} className="room-stage" />
       <header className="room-top">
         <div className="room-head">
           <div className="room-who">

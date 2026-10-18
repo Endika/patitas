@@ -227,7 +227,8 @@ export function mountPuppyView(
     return { pivot, ball, lid, low }
   })
   const noseMat = noseMaterial(breed.nose)
-  const nose = new THREE.Mesh(noseGeometry(), noseMat)
+  const noseGeo = noseGeometry()
+  const nose = new THREE.Mesh(noseGeo, noseMat)
   nose.scale.set(...A.nose.rad)
   nose.position.copy(local(A.nose.c))
   head.add(nose)
@@ -280,7 +281,7 @@ export function mountPuppyView(
       room.remove(view)
       for (const m of shells) m.material.dispose()
       for (const m of [eyeMat, lidMat, noseMat, tongueMat]) m.dispose()
-      for (const g of [eyeGeo, upperLid, lowerLid, tongue.geometry]) g.dispose()
+      for (const g of [eyeGeo, upperLid, lowerLid, noseGeo, tongue.geometry]) g.dispose()
       for (const g of glints) {
         g.geo.dispose()
         g.mat.dispose()

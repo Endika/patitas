@@ -404,7 +404,10 @@ export function createRoomScene(
           mat.dispose()
         }
       })
+      sun.shadow.dispose()
       renderer.dispose()
+      // Cached puppy geometry keeps a dispose listener that holds this renderer: let the GPU go now
+      renderer.forceContextLoss()
     },
   }
   return room
