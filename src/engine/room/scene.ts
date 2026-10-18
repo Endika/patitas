@@ -1,0 +1,351 @@
+import * as THREE from 'three'
+import { MAX_DT } from '@/engine/math'
+import { goTo, type MotionState } from '@/engine/motion/locomotion'
+import { BALL_R, type BallState } from './ball'
+import { cameraPosition, clampPlay, createCamera, fitCamera, type FixedCamera } from './camera'
+
+/** Render budget: fur shells per puppy, device pixel ratio cap and shadow map size. */
+export interface Quality {
+  shells: number
+  dpr: number
+  shadowMap: number
+}
+
+/** Until pickQuality lands: the prototype's desktop and touch settings. */
+export function defaultQuality(): Quality {
+  const coarse = matchMedia('(pointer: coarse)').matches
+  return coarse
+    ? { shells: 16, dpr: 1.6, shadowMap: 2048 }
+    : { shells: 24, dpr: Math.min(devicePixelRatio, 2), shadowMap: 2048 }
+}
+
+/** Anything the room shows: a puppy view or a prop. */
+export interface SceneView {
+  group: THREE.Object3D
+}
+
+export interface RoomScene {
+  renderer: THREE.WebGLRenderer
+  scene: THREE.Scene
+  camera: THREE.PerspectiveCamera
+  cam: FixedCamera
+  quality: Quality
+  ballMesh: THREE.Mesh
+  add(view: SceneView): void
+  remove(view: SceneView): void
+  resize(): void
+  /** Called after every resize, once the camera and play area are refitted. */
+  onResize(cb: () => void): () => void
+  emitHeart(at: THREE.Vector3): void
+  start(tick: (dt: number, t: number) => void): void
+  dispose(): void
+}
+
+function roomEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  const env = new THREE.Scene()
+  // A room sky with one big window, for the shine on the eyes and nose
+  env.add(
+    new THREE.Mesh(
+      new THREE.SphereGeometry(20, 32, 16),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        vertexShader:
+          'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: `varying vec3 vP; void main(){
+      float y = normalize(vP).y;
+      vec3 top = vec3(0.86, 0.92, 0.95), hor = vec3(0.80, 0.80, 0.74), gnd = vec3(0.42, 0.31, 0.22);
+      vec3 c = y > 0.0 ? mix(hor, top, pow(y, 0.6)) : mix(hor, gnd, pow(-y, 0.45));
+      gl_FragColor = vec4(c, 1.0); }`,
+      }),
+    ),
+  )
+  const win = new THREE.Mesh(
+    new THREE.PlaneGeometry(7, 5),
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1, 0.96, 0.88).multiplyScalar(7),
+      side: THREE.DoubleSide,
+    }),
+  )
+  win.position.set(5, 6, 8)
+  win.lookAt(0, 0, 0)
+  env.add(win)
+  const fill = new THREE.Mesh(
+    new THREE.PlaneGeometry(6, 4),
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.8, 0.9, 1).multiplyScalar(2.2),
+      side: THREE.DoubleSide,
+    }),
+  )
+  fill.position.set(-8, 3, 2)
+  fill.lookAt(0, 0, 0)
+  env.add(fill)
+  const tex = pmrem.fromScene(env, 0.02).texture
+  env.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose()
+      ;(o.material as THREE.Material).dispose()
+    }
+  })
+  pmrem.dispose()
+  return tex
+}
+
+function radialCanvas(): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = c.height = 256
+  const g = c.getContext('2d')!
+  const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128)
+  gr.addColorStop(0, '#fff')
+  gr.addColorStop(0.5, '#fff')
+  gr.addColorStop(1, '#000')
+  g.fillStyle = gr
+  g.fillRect(0, 0, 256, 256)
+  return c
+}
+
+function floorMesh(): THREE.Mesh {
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(2.6, 72),
+    new THREE.MeshStandardMaterial({
+      color: '#c49b70',
+      roughness: 0.78,
+      alphaMap: new THREE.CanvasTexture(radialCanvas()),
+      transparent: true,
+      depthWrite: false,
+    }),
+  )
+  floor.rotation.x = -Math.PI / 2
+  floor.receiveShadow = true
+  floor.renderOrder = -1
+  return floor
+}
+
+function tennisBall(): THREE.Mesh {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const g = c.getContext('2d')!
+  g.fillStyle = '#c9d93b'
+  g.fillRect(0, 0, 256, 128)
+  g.strokeStyle = '#f4f6e8'
+  g.lineWidth = 5
+  g.beginPath()
+  for (let x = 0; x <= 256; x += 4) g.lineTo(x, 64 + 36 * Math.sin((x / 256) * Math.PI * 4))
+  g.stroke()
+  const map = new THREE.CanvasTexture(c)
+  map.colorSpace = THREE.SRGBColorSpace
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(BALL_R, 32, 20),
+    new THREE.MeshStandardMaterial({ map, roughness: 0.95 }),
+  )
+  mesh.castShadow = true
+  mesh.visible = false
+  return mesh
+}
+
+function heartTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 128
+  const g = c.getContext('2d')!
+  g.fillStyle = '#e8606a'
+  g.beginPath()
+  g.moveTo(64, 112)
+  g.bezierCurveTo(10, 72, 8, 30, 38, 22)
+  g.bezierCurveTo(54, 18, 62, 30, 64, 40)
+  g.bezierCurveTo(66, 30, 74, 18, 90, 22)
+  g.bezierCurveTo(120, 30, 118, 72, 64, 112)
+  g.fill()
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+const HEART_LIFE = 1.3
+
+/** Throws when the browser has no WebGL. */
+export function createRoomScene(canvas: HTMLCanvasElement, quality: Quality): RoomScene {
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true,
+    powerPreference: 'high-performance',
+  })
+  renderer.setPixelRatio(Math.min(devicePixelRatio, quality.dpr))
+  renderer.setClearColor(0x000000, 0)
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+
+  const scene = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60)
+  const cam = createCamera()
+  scene.environment = roomEnvironment(renderer)
+  scene.environmentIntensity = 0.9
+
+  const sun = new THREE.DirectionalLight(new THREE.Color(1, 0.94, 0.85), 2.4)
+  sun.position.set(1.6, 3.4, 2.4)
+  sun.target.position.set(0, 0.3, 0)
+  sun.castShadow = true
+  sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap)
+  Object.assign(sun.shadow.camera, {
+    left: -1.1,
+    right: 1.1,
+    top: 1.1,
+    bottom: -1.1,
+    near: 0.5,
+    far: 8,
+  })
+  sun.shadow.bias = -0.0004
+  sun.shadow.normalBias = 0.01
+  scene.add(sun, sun.target)
+  const rim = new THREE.DirectionalLight(new THREE.Color(0.85, 0.92, 1), 1.1)
+  rim.position.set(-2.2, 1.6, -2.8)
+  scene.add(rim)
+  scene.add(floorMesh())
+  const ballMesh = tennisBall()
+  scene.add(ballMesh)
+
+  const views = new Set<SceneView>()
+  const resizeListeners = new Set<() => void>()
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const heartMap = heartTexture()
+  const hearts: { s: THREE.Sprite; life: number }[] = []
+
+  const resize = () => {
+    const w = canvas.clientWidth,
+      h = canvas.clientHeight
+    if (!w || !h) return
+    renderer.setSize(w, h, false)
+    camera.aspect = w / h
+    fitCamera(cam, camera.aspect)
+    camera.updateProjectionMatrix()
+    cameraPosition(cam, camera.position)
+    camera.lookAt(cam.target)
+    camera.updateMatrixWorld()
+    for (const cb of resizeListeners) cb()
+  }
+  addEventListener('resize', resize)
+  resize()
+
+  const tickHearts = (dt: number) => {
+    for (let i = hearts.length - 1; i >= 0; i--) {
+      const h = hearts[i]!
+      h.life += dt
+      h.s.position.y += dt * 0.22
+      h.s.scale.setScalar(0.05 + h.life * 0.03)
+      h.s.material.opacity = Math.max(0, 1 - h.life / HEART_LIFE)
+      if (h.life > HEART_LIFE) {
+        scene.remove(h.s)
+        h.s.material.dispose()
+        hearts.splice(i, 1)
+      }
+    }
+  }
+
+  // The sun's shadow box follows the puppies
+  const follow = () => {
+    if (!views.size) return
+    let x = 0,
+      z = 0
+    for (const v of views) {
+      x += v.group.position.x
+      z += v.group.position.z
+    }
+    x /= views.size
+    z /= views.size
+    sun.position.set(x + 1.6, 3.4, z + 2.4)
+    sun.target.position.set(x, 0.3, z)
+  }
+
+  return {
+    renderer,
+    scene,
+    camera,
+    cam,
+    quality,
+    ballMesh,
+    add(view) {
+      views.add(view)
+      scene.add(view.group)
+    },
+    remove(view) {
+      views.delete(view)
+      scene.remove(view.group)
+    },
+    resize,
+    onResize(cb) {
+      resizeListeners.add(cb)
+      return () => resizeListeners.delete(cb)
+    },
+    emitHeart(at) {
+      if (reduceMotion) return
+      const s = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: heartMap, transparent: true, depthWrite: false }),
+      )
+      s.position
+        .copy(at)
+        .add(new THREE.Vector3((Math.random() - 0.5) * 0.08, 0.04, (Math.random() - 0.5) * 0.08))
+      s.scale.setScalar(0.05)
+      scene.add(s)
+      hearts.push({ s, life: 0 })
+    },
+    start(tick) {
+      const clock = new THREE.Clock()
+      renderer.setAnimationLoop(() => {
+        const dt = Math.min(clock.getDelta(), MAX_DT),
+          t = clock.elapsedTime
+        tick(dt, t)
+        follow()
+        tickHearts(dt)
+        renderer.render(scene, camera)
+      })
+    },
+    dispose() {
+      renderer.setAnimationLoop(null)
+      removeEventListener('resize', resize)
+      resizeListeners.clear()
+      // Puppy views own their resources and may share cached geometry
+      for (const v of views) scene.remove(v.group)
+      views.clear()
+      for (const h of hearts) h.s.material.dispose()
+      heartMap.dispose()
+      scene.environment?.dispose()
+      scene.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose()
+          const mat = o.material as THREE.MeshStandardMaterial
+          mat.map?.dispose()
+          mat.alphaMap?.dispose()
+          mat.dispose()
+        }
+      })
+      renderer.dispose()
+    },
+  }
+}
+
+/** Puts the ball mesh where the ball is: in front of the camera when in hand. */
+export function syncBallMesh(room: RoomScene, ball: BallState): void {
+  const mesh = room.ballMesh
+  mesh.visible = ball.state !== 'none'
+  if (ball.state === 'hand') ball.pos.set(0, -0.26, -1).applyMatrix4(room.camera.matrixWorld)
+  mesh.position.copy(ball.pos)
+  mesh.rotation.set(ball.rot.x, 0, ball.rot.z)
+}
+
+/**
+ * After the play area changes (a resize or a turned screen), a puppy standing or heading outside
+ * it walks back in rather than jumping.
+ */
+export function keepInPlay(
+  m: MotionState,
+  cam: FixedCamera,
+  mood: { happy: number; energy: number },
+): boolean {
+  const at = m.goal ?? m.pos
+  const [x, z] = clampPlay(cam, at.x, at.z)
+  if (Math.hypot(x - at.x, z - at.z) < 1e-3) return false
+  goTo(m, x, z, { happy: mood.happy, energy: mood.energy, clamp: (cx, cz) => [cx, cz] })
+  return true
+}
