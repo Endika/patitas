@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '@/domain/breeds'
-import { createCare } from '@/domain/care'
+import { addMess, createCare, messPenalty } from '@/domain/care'
 import {
   brushAt,
   createDirt,
@@ -9,6 +9,7 @@ import {
   DIRT_STEP,
   dirtRest,
   meanDirt,
+  messDepth,
   redistributeDirt,
   scrubAt,
   soilFromMud,
@@ -198,5 +199,31 @@ describe('dirt', () => {
     const before = meanDirt(d.field)
     for (let n = 0; n < 60; n++) expect(stepDirt(d, 0, 1 / 60)).toBe(false)
     expect(meanDirt(d.field)).toBe(before)
+  })
+
+  it('a mess underfoot soils the paws only, through the same steps as mud', () => {
+    const legs = [{ pos: { x: 0.5, z: 0 } }, { pos: { x: 1.02, z: 1 } }]
+    const under = [{ x: 1, z: 1, r: 0.05 }]
+    expect(messDepth(under, legs)).toBeGreaterThan(0)
+    expect(messDepth(under, [{ pos: { x: 1.1, z: 1 } }])).toBe(0)
+    expect(messDepth([], legs)).toBe(0)
+    const { rest, parts } = body()
+    const d = createDirt(rest)
+    for (let t = 0; t < 3; t += 1 / 60) stepDirt(d, messDepth(under, legs), 1 / 60)
+    expect(meanOf(d.field, parts, 'paw')).toBeGreaterThan(0.3)
+    expect(meanOf(d.field, parts, 'belly')).toBe(0)
+    expect(meanOf(d.field, parts, 'muzzle')).toBe(0)
+  })
+
+  it('cleanliness keeps what the waiting messes take off, through saving and loading', () => {
+    const { rest } = body()
+    const f = createDirtField(rest.paw.length)
+    wade(f, rest, 0.5, 2)
+    const messy = addMess(createCare(BREEDS.shiba, 0), { kind: 'pee', x: 0, z: 0, createdAt: 0 })
+    const care = withDirt(messy, f)
+    expect(care.cleanliness).toBeCloseTo(1 - meanDirt(f) - messPenalty(messy))
+    const loaded = createDirtField(rest.paw.length)
+    redistributeDirt(loaded, rest, 1 - care.cleanliness - messPenalty(care))
+    expect(withDirt(care, loaded).cleanliness).toBeCloseTo(care.cleanliness, 3)
   })
 })

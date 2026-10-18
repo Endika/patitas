@@ -100,6 +100,11 @@ export interface PointerHandlers<H extends PuppyHit = PuppyHit> {
   /** The mouse left the canvas: attention fades sooner. */
   leave(now: number): void
   gesture(g: Gesture): void
+  /**
+   * A tap on the floor, at (x, y) pixels on the `w` × `h` canvas, for the room to use first: true
+   * when it did, and it goes no further.
+   */
+  tap?(x: number, y: number, w: number, h: number): boolean
 }
 
 const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
@@ -154,8 +159,14 @@ export function attachPointer<H extends PuppyHit>(
     }
     h.look(ray, now / 1000)
   }
+  const tookTap = (e: PointerEvent) => {
+    if (mode !== 'tap' || !h.tap || Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_PX)
+      return false
+    const r = canvas.getBoundingClientRect()
+    return h.tap(e.clientX - r.left, e.clientY - r.top, r.width, r.height)
+  }
   const up = (e: PointerEvent) => {
-    if (mode) {
+    if (mode && !tookTap(e)) {
       const ray = cast(e)
       const ground = ray.intersectPlane(GROUND, hitPoint)
       h.gesture(

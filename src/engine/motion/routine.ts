@@ -1,6 +1,18 @@
 import * as THREE from 'three'
 import type { Breed } from '@/domain/breeds'
-import { feed, isNight, rest, tire, type Care } from '@/domain/care'
+import {
+  feed,
+  fillBladder,
+  isNight,
+  MESS_CAP,
+  messKind,
+  relieve,
+  rest,
+  sulk,
+  tire,
+  type Care,
+  type MessKind,
+} from '@/domain/care'
 import type { Vec3 } from '@/engine/math'
 import { furnitureObstacles, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
 import { goTo, type MotionState } from './locomotion'
@@ -19,6 +31,8 @@ export type Routine =
   | 'onScale'
   | 'toMud'
   | 'splashing'
+  | 'toGarden'
+  | 'relieving'
 
 export interface RoutineState {
   routine: Routine
@@ -46,6 +60,16 @@ export interface RoutineState {
   mudAgo: number
   /** Where it set off for the mud from, to go back to afterwards. */
   from: Vec3
+  /** What it is about to do when it squats, and whether that is in the garden, where it leaves nothing. */
+  kind: MessKind
+  inGarden: boolean
+  /** Squatting has begun: the bladder is empty and the mess is down. */
+  relieved: boolean
+  /** Seconds since it last ate. */
+  fedAgo: number
+  /** Seconds awake, and with a mess waiting, not yet counted into the care. */
+  awake: number
+  sulking: number
 }
 
 export interface RoutineCtx {
@@ -78,6 +102,8 @@ export interface RoutineEvents {
   bowl: number
   /** Just finished a meal. */
   fed?: true
+  /** Just squatted outside the garden: what it left, and where, in world coordinates. */
+  mess?: { kind: MessKind; x: number; z: number }
 }
 
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
@@ -119,6 +145,22 @@ export const SPLASH_TIME = 5
 const STAMP = 0.7,
   STAMP_TURN = 0.4,
   SNIFF_BOW = 0.45
+/** Seconds it squats. */
+export const RELIEF_TIME = 3
+/** How often it walks to the garden first, when it may squat anywhere. */
+const GARDEN_CHANCE = 0.3
+/** A meal this recent makes a poop likelier. */
+const FED_RECENTLY = 30 * 60
+/** Behind its hind paws, so it does not stand in what it leaves. */
+const MESS_BEHIND = 0.33
+/** Squatting: hind end down for a pee, hunched lower for a poop. */
+const PEE_SIT = 0.5,
+  POOP_SIT = 0.75,
+  POOP_BOW = 0.3
+/** How past the mud, across the garden, it goes: as a share of the way from the puddle. */
+const POTTY_FROM_MUD = 1.3
+/** Seconds of bladder and sulking gathered before they are written to the care. */
+const CARE_FLUSH = 10
 
 export function createRoutineState(): RoutineState {
   return {
@@ -136,6 +178,12 @@ export function createRoutineState(): RoutineState {
     eaten: 0,
     mudAgo: 0,
     from: new THREE.Vector3(),
+    kind: 'pee',
+    inGarden: false,
+    relieved: false,
+    fedAgo: FED_RECENTLY,
+    awake: 0,
+    sulking: 0,
   }
 }
 
@@ -420,6 +468,39 @@ const splashing: Step = (r, m, ctx) => {
   goTo(m, r.from.x, r.from.z, { happy: 0.5, energy: 0, gait: 'trot', clamp: ctx.clamp })
 }
 
+const toGarden: Step = (r, m, ctx) => {
+  if (m.pose !== 'stand') setPose(m, 'stand')
+  if (!approach(r, m, ctx, ctx.spots.garden)) return
+  enter(r, 'relieving')
+}
+
+const relieving: Step = (r, m, ctx, ev) => {
+  if (!r.relieved) {
+    r.relieved = true
+    m.goal = null
+    m.face = null
+    if (m.pose !== 'stand') setPose(m, 'stand')
+    ev.care = relieve(ev.care)
+    if (!r.inGarden) {
+      const [x, z] = ctx.clamp(
+        m.pos.x - Math.sin(m.heading) * MESS_BEHIND,
+        m.pos.z - Math.cos(m.heading) * MESS_BEHIND,
+      )
+      ev.mess = { kind: r.kind, x, z }
+    }
+  } else if (m.goal || m.pose !== 'stand') {
+    m.sitGoal = m.bowGoal = 0
+    return enter(r, 'none')
+  }
+  if (r.t < RELIEF_TIME) {
+    m.sitGoal = r.kind === 'pee' ? PEE_SIT : POOP_SIT
+    m.bowGoal = r.kind === 'pee' ? 0 : POOP_BOW
+    return
+  }
+  m.sitGoal = m.bowGoal = 0
+  enter(r, 'none')
+}
+
 /**
  * The extension point: each routine's step. A new routine adds its states to `Routine`, a step
  * here (walking there with `approach`), and its want in `choose`, ahead of or behind the bed by
@@ -434,6 +515,8 @@ const STEPS: { [K in Routine]?: Step } = {
   begging,
   toMud,
   splashing,
+  toGarden,
+  relieving,
 }
 
 function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
@@ -450,6 +533,8 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
 /**
  * What a puppy with nothing to do does next, first match wins (asleep or stretching it is never
  * asked):
+ * 0. relieve itself, with a full bladder: where it is, or now and then (always with MESS_CAP
+ *    messes waiting) in the garden;
  * 1. eat, with food in its bowl and hunger from MEAL_HUNGER, even at bedtime;
  * 2. bed, after NIGHT_IDLE untouched at night or tired by day;
  * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds;
@@ -457,6 +542,7 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
  *    by chance, more often the more curious it is.
  */
 function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
+  if (ctx.care.bladder >= 1) return goRelieve(r, m, ctx)
   if (hungryFor(ctx) && goToBowl(r, ctx, false)) return
   const slot = bedSlots(ctx.spots)[ctx.place]
   if (slot && r.idle >= NIGHT_IDLE && sleepy(r, ctx)) {
@@ -480,6 +566,34 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
     (ctx.random ?? Math.random)() < MUD_RATE * curious * dt
   )
     goToMud(r, m, ctx.spots, ctx.clamp)
+}
+
+function goRelieve(r: RoutineState, m: MotionState, ctx: RoutineCtx) {
+  const random = ctx.random ?? Math.random
+  const garden = ctx.care.messes.length >= MESS_CAP || random() < GARDEN_CHANCE
+  r.kind = messKind(random(), r.fedAgo < FED_RECENTLY)
+  r.inGarden = garden
+  r.relieved = false
+  if (!garden) return enter(r, 'relieving')
+  // Across the garden from the puddle
+  const g = ctx.spots.garden.center,
+    mud = ctx.spots.mud.center
+  const [x, z] = ctx.clamp(
+    g.x + (g.x - mud.x) * POTTY_FROM_MUD,
+    g.z + (g.z - mud.z) * POTTY_FROM_MUD,
+  )
+  r.target.set(x, 0, z)
+  m.goal = null
+  enter(r, 'toGarden')
+}
+
+/** Squats where it stands, at once and with `kind`: the debug page's way to see one. */
+export function relieveNow(r: RoutineState, m: MotionState, kind: MessKind): void {
+  r.kind = kind
+  r.inGarden = false
+  r.relieved = false
+  m.goal = null
+  enter(r, 'relieving')
 }
 
 /** Sets off for the middle of the puddle, to stamp about in it and come back. */
@@ -511,6 +625,9 @@ export function stepRoutine(
   r.idle += dt
   r.begAgo += dt
   r.mudAgo += dt
+  r.fedAgo += dt
+  if (r.routine !== 'sleeping') r.awake += dt
+  r.sulking = ctx.care.messes.length ? r.sulking + dt : 0
   const ev: RoutineEvents = {
     care:
       r.routine === 'sleeping'
@@ -520,10 +637,19 @@ export function stepRoutine(
           : ctx.care,
     bowl: ctx.bowl,
   }
+  if (r.awake >= CARE_FLUSH) {
+    ev.care = fillBladder(ev.care, r.awake)
+    r.awake = 0
+  }
+  if (r.sulking >= CARE_FLUSH) {
+    ev.care = sulk(ev.care, r.sulking)
+    r.sulking = 0
+  }
   if (ctx.busy && !keepsEating(r, ctx.care)) {
     r.idle = 0
     // The stamp's heading goes with it, or play would start with a stray turn
     if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null
+    if (r.routine === 'relieving') m.sitGoal = m.bowGoal = 0
     if (r.routine !== 'none') enter(r, 'none')
   } else {
     if (r.routine === 'none') choose(r, m, ctx, dt)
@@ -533,6 +659,7 @@ export function stepRoutine(
   if (r.routine !== 'eating' && r.eaten > 0) {
     ev.care = feed(ev.care, ctx.breed, r.eaten)
     r.eaten = 0
+    r.fedAgo = 0
   }
   return ev
 }

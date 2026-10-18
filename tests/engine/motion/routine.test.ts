@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '@/domain/breeds'
-import { createCare, type Care } from '@/domain/care'
+import { addMess, createCare, MESS_GLOOM_MAX, type Care, type MessKind } from '@/domain/care'
 import { legRigs } from '@/engine/motion/ik'
 import {
   createLegStates,
@@ -22,6 +22,8 @@ import {
   MEAL_TIME,
   mealSpot,
   MUD_EVERY,
+  RELIEF_TIME,
+  relieveNow,
   SPLASH_TIME,
   stepRoutine,
   touch,
@@ -57,6 +59,8 @@ interface Pup {
   /** Seconds spent in each routine. */
   time: Partial<Record<Routine, number>>
   fed: number
+  /** What it left on the floor, in world coordinates, as the room keeps it. */
+  left: { kind: MessKind; x: number; z: number }[]
 }
 
 function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
@@ -71,6 +75,7 @@ function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
     seen: [],
     time: {},
     fed: 0,
+    left: [],
   }
 }
 
@@ -102,6 +107,10 @@ function run(
       p.care = ev.care
       p.bowl = ev.bowl
       if (ev.fed) p.fed++
+      if (ev.mess) {
+        p.left.push({ ...ev.mess })
+        p.care = addMess(p.care, { ...ev.mess, createdAt: ctx.now })
+      }
       p.time[p.r.routine] = (p.time[p.r.routine] ?? 0) + DT
       if (p.seen.at(-1) !== p.r.routine) p.seen.push(p.r.routine)
       stepPoses(p.m, DT)
@@ -497,6 +506,146 @@ describe('mud', () => {
     night.r.mudAgo = MUD_EVERY
     run([night], 1, at(22), SPOTS, undefined, undefined, curious(1))
     expect(night.r.routine).toBe('toBed')
+  })
+})
+
+describe('pee and poop', () => {
+  /** Draws in turn: first whether it goes to the garden, then pee or poop. */
+  const draws = (...values: number[]) => {
+    let i = 0
+    return () => values[i++ % values.length]!
+  }
+  const full = (p: Pup) => {
+    p.care = { ...p.care, bladder: 1 }
+    return p
+  }
+  const ahead = (m: MotionState) => ({ x: Math.sin(m.heading), z: Math.cos(m.heading) })
+
+  it('with a full bladder it squats where it is, leaves a puddle behind it and empties', () => {
+    const p = full(pup(0.12, -0.12))
+    let squat = 0
+    run(
+      [p],
+      1,
+      at(12),
+      SPOTS,
+      () => {
+        if (p.r.routine === 'relieving') squat = Math.max(squat, p.m.sitGoal)
+      },
+      undefined,
+      { random: draws(0.9, 0.9) },
+    )
+    expect(p.seen).toEqual(['relieving'])
+    expect(p.care.bladder).toBe(0)
+    expect(p.left).toHaveLength(1)
+    const [mess] = p.left
+    expect(mess!.kind).toBe('pee')
+    // Behind its hind paws, where it stands
+    const f = ahead(p.m),
+      dx = mess!.x - p.m.pos.x,
+      dz = mess!.z - p.m.pos.z
+    expect(dx * f.x + dz * f.z).toBeLessThan(-0.25)
+    expect(Math.hypot(dx, dz)).toBeLessThan(0.35)
+    expect(squat).toBeGreaterThan(0.3)
+    run([p], RELIEF_TIME, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(p.seen).toEqual(['relieving', 'none'])
+    expect(p.time.relieving).toBeCloseTo(RELIEF_TIME, 1)
+    expect(p.left).toHaveLength(1)
+  })
+
+  it('poops a third of the time, more often just after a meal', () => {
+    const p = full(pup(0.12, -0.12))
+    run([p], 0.1, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.3) })
+    expect(p.left[0]!.kind).toBe('poop')
+    const fed = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([fed], 25, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.5) })
+    expect(fed.fed).toBe(1)
+    full(fed)
+    run([fed], 0.1, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.5) })
+    expect(fed.left.at(-1)!.kind).toBe('poop')
+    const later = full(pup(0.12, -0.12))
+    run([later], 0.1, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.5) })
+    expect(later.left[0]!.kind).toBe('pee')
+  })
+
+  it('sometimes walks to the garden first, clear of the mud, and leaves nothing there', () => {
+    const p = full(pup(0.12, -0.12))
+    run([p], 30, at(12), SPOTS, undefined, undefined, { random: draws(0.1, 0.9) })
+    expect(p.seen.slice(0, 3)).toEqual(['toGarden', 'relieving', 'none'])
+    expect(p.left).toEqual([])
+    expect(p.care.bladder).toBeLessThan(0.01)
+    const { center, radius, depth } = SPOTS.garden
+    expect(Math.hypot(p.m.pos.x - center.x, p.m.pos.z - center.z)).toBeLessThan(
+      Math.max(radius, depth),
+    )
+    expect(inMud(SPOTS, p.m.pos.x, p.m.pos.z)).toBe(0)
+  })
+
+  it('with two messes waiting it always goes to the garden', () => {
+    const p = full(pup(0.12, -0.12))
+    const mess = { kind: 'pee' as const, x: 0, z: 0, createdAt: 0 }
+    p.care = addMess(addMess(p.care, mess), { ...mess })
+    run([p], 1, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(p.r.routine).toBe('toGarden')
+  })
+
+  it('fills while awake, holds on asleep and goes once it wakes', () => {
+    const awake = pup(0.12, -0.12)
+    run([awake], 60, at(12))
+    expect(awake.care.bladder).toBeGreaterThan(0.004)
+    const sleeper = pup(0, 0)
+    tuckIn(sleeper.r, sleeper.m)
+    run([sleeper], 60, at(23))
+    expect(sleeper.care.bladder).toBe(0)
+    full(sleeper)
+    run([sleeper], 10, at(23), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(sleeper.r.routine).toBe('sleeping')
+    touch(sleeper.r)
+    run([sleeper], 3, at(23), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(sleeper.seen.slice(-3)).toEqual(['stretch', 'none', 'relieving'])
+  })
+
+  it('waits while it eats or plays', () => {
+    const eating = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([eating], 6, at(12))
+    expect(eating.r.routine).toBe('eating')
+    full(eating)
+    run([eating], 6, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(eating.seen.slice(eating.seen.indexOf('eating'))).toEqual([
+      'eating',
+      'none',
+      'relieving',
+      'none',
+    ])
+    expect(eating.time.eating).toBeCloseTo(MEAL_TIME, 1)
+    const playing = full(pup(0.12, -0.12))
+    run([playing], 2, at(12), SPOTS, undefined, undefined, { busy: true })
+    expect(playing.seen).toEqual(['none'])
+  })
+
+  it('a call cuts the squat short; the puddle is already there', () => {
+    const p = full(pup(0.12, -0.12))
+    run([p], 0.5, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    p.m.goal = p.m.pos.clone().set(0.5, 0, 0.3)
+    run([p], DT, at(12))
+    expect(p.r.routine).toBe('none')
+    expect(p.left).toHaveLength(1)
+  })
+
+  it('relieveNow squats at once with the kind asked for', () => {
+    const p = pup(0.12, -0.12)
+    relieveNow(p.r, p.m, 'poop')
+    run([p], 0.1, at(12))
+    expect(p.left.map((m) => m.kind)).toEqual(['poop'])
+  })
+
+  it('while a mess waits, it gets a little sadder, 0.1 at most', () => {
+    const p = pup(0.12, -0.12)
+    p.care = addMess({ ...p.care, happiness: 0.8 }, { kind: 'pee', x: 0, z: 0, createdAt: 0 })
+    run([p], 60, at(12))
+    expect(p.care.happiness).toBeLessThan(0.8)
+    run([p], 1200, at(12))
+    expect(p.care.happiness).toBeCloseTo(0.8 - MESS_GLOOM_MAX)
   })
 })
 

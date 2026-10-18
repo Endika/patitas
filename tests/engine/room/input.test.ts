@@ -1,6 +1,14 @@
 // @vitest-environment node
+import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { classifyGesture, pointerMode, type Sample } from '@/engine/room/input'
+import {
+  attachPointer,
+  classifyGesture,
+  pointerMode,
+  type Gesture,
+  type PointerHandlers,
+  type Sample,
+} from '@/engine/room/input'
 
 /** A straight drag from (x0, y0) to (x1, y1) over `ms`, sampled every 16 ms. */
 function drag(x0: number, y0: number, x1: number, y1: number, ms: number): Sample[] {
@@ -66,5 +74,76 @@ describe('classifyGesture', () => {
 
   it('pets instead of tapping when the press starts on the puppy', () => {
     expect(pointerMode(false, true)).toBe('pet')
+  })
+})
+
+describe('attachPointer', () => {
+  /** A canvas stand-in 400 × 800 at (10, 20) that takes pointer events. */
+  const fakeCanvas = () =>
+    Object.assign(new EventTarget(), {
+      style: { cursor: '' },
+      setPointerCapture() {},
+      getBoundingClientRect: () => ({ left: 10, top: 20, width: 400, height: 800 }),
+    }) as unknown as HTMLCanvasElement
+  const press = (canvas: HTMLCanvasElement, type: string, x: number, y: number) => {
+    const e = Object.assign(new Event(type), { clientX: x, clientY: y, pointerId: 1 })
+    canvas.dispatchEvent(e)
+  }
+  const handlers = (tap: PointerHandlers['tap'], gestures: Gesture[]): PointerHandlers => ({
+    hit: () => null,
+    ballInHand: () => false,
+    onBall: () => false,
+    free: () => true,
+    petStart() {},
+    petMove() {},
+    petEnd() {},
+    look() {},
+    leave() {},
+    gesture: (g) => void gestures.push(g),
+    ...(tap && { tap }),
+  })
+  const camera = new THREE.PerspectiveCamera(30, 0.5, 0.05, 60)
+  camera.position.set(0, 2, 3)
+  camera.lookAt(0, 0, 0)
+  camera.updateMatrixWorld()
+
+  it('lets the room take a tap first, in canvas pixels, before it sends the puppy there', () => {
+    const canvas = fakeCanvas(),
+      gestures: Gesture[] = [],
+      taps: number[][] = []
+    const off = attachPointer(
+      canvas,
+      camera,
+      handlers((x, y, w, h) => {
+        taps.push([x, y, w, h])
+        return true
+      }, gestures),
+    )
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointerup', 212, 621)
+    expect(taps).toEqual([[202, 601, 400, 800]])
+    expect(gestures).toEqual([])
+    off()
+  })
+
+  it('a tap the room does not take is a gesture as before, and a drag never asks', () => {
+    const canvas = fakeCanvas(),
+      gestures: Gesture[] = []
+    let asked = 0
+    attachPointer(
+      canvas,
+      camera,
+      handlers(() => {
+        asked++
+        return false
+      }, gestures),
+    )
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointerup', 212, 621)
+    expect(asked).toBe(1)
+    expect(gestures.map((g) => g.kind)).toEqual(['goTo'])
+    press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointerup', 260, 621)
+    expect(asked).toBe(1)
   })
 })

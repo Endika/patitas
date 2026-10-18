@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from 'idb'
-import type { Care } from '../domain/care'
+import { withCareDefaults, type Care } from '../domain/care'
 import type { Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
 import { createMemoryStorage } from './memoryStorage'
@@ -35,7 +35,10 @@ export async function openGameStorage(): Promise<GameStorage> {
         await db.delete('puppies', id)
         await db.delete('care', id)
       },
-      loadCare: (id) => db.get('care', id),
+      loadCare: async (id) => {
+        const care = await db.get('care', id)
+        return care && withCareDefaults(care)
+      },
       saveCare: async (id, care) => {
         await db.put('care', care, id)
       },

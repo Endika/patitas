@@ -25,8 +25,8 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 
 /**
  * One or two puppies in the room with the prototype's controls, for checking the render by eye,
- * plus buttons that fill the bowls and send the first puppy into the puddle, and each puppy's care
- * as the room keeps it.
+ * plus buttons that fill the bowls, send the first puppy into the puddle or have it squat, and each
+ * puppy's care as the room keeps it.
  */
 export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
@@ -70,6 +70,12 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
           </button>
           <button type="button" onClick={() => stageRef.current?.toMud?.()}>
             Barro
+          </button>
+          <button type="button" onClick={() => stageRef.current?.relieve?.('pee')}>
+            Pis
+          </button>
+          <button type="button" onClick={() => stageRef.current?.relieve?.('poop')}>
+            Caca
           </button>
           {status?.needs.map((n) => (
             <span key={n.name}>
