@@ -37,7 +37,9 @@ describe('RoomScreen', () => {
     await waitFor(() => expect(stage.names()).toEqual(['Luna', 'Kira']))
     expect(screen.getByRole('heading', { name: 'Luna y Kira' })).toBeInTheDocument()
 
-    await user.click(list.getByRole('button', { name: 'Meter a Toby' }))
+    const enterToby = list.getByRole('button', { name: 'Meter a Toby' })
+    expect(enterToby).toHaveTextContent('Meter a Toby')
+    await user.click(enterToby)
     expect(
       await screen.findByText('Ya hay dos cachorros en la sala. Saca uno para que entre otro.'),
     ).toBeInTheDocument()

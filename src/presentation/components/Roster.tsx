@@ -19,12 +19,8 @@ export default function Roster({
           <li key={p.id} data-in={isIn || undefined}>
             <span>{p.name}</span>
             <small>{isIn ? 'En la sala' : BREEDS[p.breedId].label}</small>
-            <button
-              type="button"
-              aria-label={`${isIn ? 'Sacar' : 'Meter'} a ${p.name}`}
-              onClick={() => onToggle(p, isIn)}
-            >
-              {isIn ? 'Sacar' : 'Meter'}
+            <button type="button" onClick={() => onToggle(p, isIn)}>
+              {isIn ? 'Sacar' : 'Meter'} a {p.name}
             </button>
           </li>
         )
