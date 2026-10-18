@@ -1,6 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@400;600;700&display=swap');
-
-.dbg {
+.room {
   --wall-top: #e6eeeb;
   --wall-low: #c9d8d3;
   --ink: #22302e;
@@ -10,8 +8,8 @@
   --line: rgba(34, 48, 46, 0.13);
   --coral: #e0674f;
   --coral-soft: #f2c3b5;
-  --font-display: 'Fredoka', 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
-  --font-body: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Trebuchet MS', system-ui, sans-serif;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
   color-scheme: light;
   position: fixed;
   inset: 0;
@@ -21,7 +19,7 @@
   -webkit-tap-highlight-color: transparent;
   background: radial-gradient(130% 85% at 50% 28%, var(--wall-top), var(--wall-low));
 }
-.dbg canvas {
+.room canvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -29,8 +27,8 @@
   display: block;
   touch-action: none;
 }
-.dbg-top,
-.dbg-bottom {
+.room-top,
+.room-bottom {
   position: absolute;
   left: 0;
   right: 0;
@@ -38,31 +36,36 @@
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   pointer-events: none;
 }
-.dbg-top {
+.room-top {
   top: 0;
   padding-block: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.room-head {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
   align-items: center;
   justify-content: space-between;
 }
-.dbg-who {
+.room-who {
   display: grid;
   gap: 2px;
 }
-.dbg-name {
+.room-name {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 1.75rem;
   line-height: 1.05;
 }
-.dbg-breed {
+.room-breed {
   font-size: 0.88rem;
   color: var(--ink-soft);
   font-weight: 600;
 }
-.dbg-breeds {
+.room-breeds {
   pointer-events: auto;
   display: flex;
   gap: 4px;
@@ -72,18 +75,18 @@
   border: 1px solid var(--line);
   backdrop-filter: blur(10px);
 }
-.dbg-breeds a {
+.room-breeds a {
   font: 700 0.9rem var(--font-body);
   color: var(--ink);
   text-decoration: none;
   border-radius: 999px;
   padding: 9px 15px;
 }
-.dbg-breeds a[aria-current='page'] {
+.room-breeds a[aria-current='page'] {
   background: var(--ink);
   color: var(--on-ink);
 }
-.dbg-bottom {
+.room-bottom {
   bottom: 0;
   padding-block: 14px 20px;
   display: flex;
@@ -91,7 +94,7 @@
   align-items: center;
   gap: 12px;
 }
-.dbg-hint {
+.room-hint {
   margin: 0;
   max-width: 34ch;
   padding: 10px 16px;
@@ -104,7 +107,7 @@
   text-align: center;
   text-wrap: balance;
 }
-.dbg-ball {
+.room-ball {
   pointer-events: auto;
   font: 700 0.95rem var(--font-body);
   color: var(--on-ink);
@@ -114,18 +117,18 @@
   padding: 11px 20px;
   cursor: pointer;
 }
-.dbg-ball:disabled {
+.room-ball:disabled {
   opacity: 0.45;
   cursor: default;
 }
-.dbg-tricks {
+.room-tricks {
   pointer-events: auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
 }
-.dbg-tricks button {
+.room-tricks button {
   font: 700 0.8rem var(--font-body);
   color: var(--ink);
   background: var(--glass);
@@ -135,12 +138,12 @@
   cursor: pointer;
   backdrop-filter: blur(10px);
 }
-.dbg button:focus-visible,
-.dbg a:focus-visible {
+.room button:focus-visible,
+.room a:focus-visible {
   outline: 3px solid var(--coral);
   outline-offset: 2px;
 }
-.dbg-meter {
+.room-meter {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -150,14 +153,14 @@
   text-transform: uppercase;
   color: var(--ink-soft);
 }
-.dbg-bar {
+.room-bar {
   width: min(220px, 52vw);
   height: 9px;
   border-radius: 99px;
   background: var(--line);
   overflow: hidden;
 }
-.dbg-bar i {
+.room-bar i {
   display: block;
   height: 100%;
   width: 100%;
@@ -167,7 +170,7 @@
   transform-origin: left center;
   transition: transform 0.25s ease-out;
 }
-.dbg-loading {
+.room-loading {
   position: absolute;
   inset: 0;
   display: grid;
@@ -181,7 +184,11 @@
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .dbg-bar i {
+  .room-bar i {
     transition: none;
   }
+}
+.room-tricks button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
