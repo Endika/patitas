@@ -6,6 +6,7 @@ import { bedSlots } from '@/engine/motion/routine'
 import {
   computeSpots,
   formatKg,
+  showBowls,
   furnitureObstacles,
   inMud,
   START_PLACES,
@@ -303,5 +304,24 @@ describe('formatKg', () => {
 
   it('reads zero with nobody on it', () => {
     expect(formatKg(null)).toBe('0,0 kg')
+  })
+})
+
+describe('showBowls', () => {
+  it('puts back every bowl as full as its puppy left it on furniture laid out anew', () => {
+    const shown = (puppies: 1 | 2, views: { place: number; bowl: number }[]) => {
+      // Fresh furniture shows its bowls empty
+      const levels = Array<number>(puppies).fill(0)
+      showBowls({ bowlFill: (place, level) => void (levels[place] = level) }, views)
+      return levels
+    }
+    expect(
+      shown(2, [
+        { place: 0, bowl: 0.25 },
+        { place: 1, bowl: 1 },
+      ]),
+    ).toEqual([0.25, 1])
+    // The left one leaves: the other moves to the one bowl and keeps what was in its own
+    expect(shown(1, [{ place: 0, bowl: 1 }])).toEqual([1])
   })
 })

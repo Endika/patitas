@@ -173,11 +173,19 @@ export interface Furniture {
   spots: Spots
   /** Places every piece for the camera's current framing. */
   layout(cam: FixedCamera): void
-  /** How full the puppy's bowl is, 0 to 1. */
+  /** Shows the bowl at `place` this full, 0 to 1. */
   bowlFill(place: number, level: number): void
   scaleReading(kg: number | null): void
   inMud(x: number, z: number): number
   dispose(): void
+}
+
+/** Shows each puppy's bowl as full as the puppy left it: every frame, and so on new furniture too. */
+export function showBowls(
+  furniture: Pick<Furniture, 'bowlFill'>,
+  puppies: readonly { place: number; bowl: number }[],
+): void {
+  for (const p of puppies) furniture.bowlFill(p.place, p.bowl)
 }
 
 const INK = '#22302e'
@@ -588,7 +596,8 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
     },
   }
   furniture.layout(cam)
-  bowls.forEach((_, i) => furniture.bowlFill(i, 1))
+  // Empty until someone fills them
+  bowls.forEach((_, i) => furniture.bowlFill(i, 0))
   furniture.scaleReading(null)
   return furniture
 }

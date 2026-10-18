@@ -126,6 +126,47 @@ describe('stepBehaviour', () => {
     expect(asleep.s.breath).toBeLessThan(awake.s.breath * 0.5)
     expect(asleep.s.breath / 10).toBeCloseTo(0.7, 1)
   })
+
+  it('eats with the head down, chewing at 3 Hz with the jaw up to 0.12', () => {
+    const { rig, s, input } = world()
+    input.routine = 'eating'
+    let lo = Infinity,
+      hi = -Infinity,
+      opens = 0,
+      was = 0,
+      down = Infinity
+    for (let f = 1; f <= 240; f++) {
+      input.now = f * DT
+      const pose = stepBehaviour(rig, s, input, DT, input.now)
+      if (f < 60) continue
+      lo = Math.min(lo, pose.jaw)
+      hi = Math.max(hi, pose.jaw)
+      if (pose.jaw > 0.06 && was <= 0.06) opens++
+      was = pose.jaw
+      down = Math.min(down, pose.head[0] + pose.neck[0])
+    }
+    expect(lo).toBeLessThan(0.015)
+    expect(hi).toBeGreaterThan(0.1)
+    expect(hi).toBeLessThanOrEqual(0.12)
+    // Three seconds of chewing at 3 Hz
+    expect(opens).toBeGreaterThanOrEqual(8)
+    expect(opens).toBeLessThanOrEqual(10)
+    expect(down).toBeGreaterThan(0.75)
+  })
+
+  it('begs looking at the camera with its head tilted', () => {
+    const { rig, s, input } = world()
+    input.routine = 'begging'
+    let tilt = 0,
+      pose = stepBehaviour(rig, s, input, DT, 0)
+    for (let f = 1; f <= 120; f++) {
+      input.now = f * DT
+      pose = stepBehaviour(rig, s, input, DT, input.now)
+      tilt = Math.max(tilt, Math.abs(s.roll.x))
+    }
+    expect(pose.target.distanceTo(input.camera)).toBeLessThan(1e-9)
+    expect(tilt).toBeGreaterThan(0.15)
+  })
 })
 
 describe('pickHint', () => {

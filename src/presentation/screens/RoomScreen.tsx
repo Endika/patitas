@@ -15,6 +15,7 @@ const WAITING: StageStatus = {
   happiness: 0.25,
   ball: { inHand: false, disabled: true },
   notice: null,
+  needs: [],
 }
 
 /** The 3D room with the puppies in it, the list of every adopted one and the play controls. */

@@ -21,13 +21,36 @@ import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
-import { bedSlots, followBed, forgetRoute, touch, tuckIn } from '@/engine/motion/routine'
+import {
+  bedSlots,
+  followBed,
+  forgetRoute,
+  keepsEating,
+  touch,
+  tuckIn,
+} from '@/engine/motion/routine'
 import { START_PLACES } from '@/engine/room/furniture'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
-import { NO_3D, type RoomStage, type StageStatus } from './roomStage'
+import { NO_3D, type PuppyNeeds, type RoomStage, type StageStatus } from './roomStage'
 
 const IDLE_HAPPINESS = 0.25
+
+const hundredths = (x: number) => Math.round(x * 100) / 100
+
+const needsOf = (v: PuppyView): PuppyNeeds => ({
+  name: v.puppy.name,
+  hunger: hundredths(v.care.hunger),
+  energy: hundredths(v.care.energy),
+  cleanliness: hundredths(v.care.cleanliness),
+  happiness: hundredths(v.care.happiness),
+  weightKg: hundredths(v.care.weightKg),
+  bowl: hundredths(v.bowl),
+})
+
+const sameNeeds = (a: PuppyNeeds[], b: PuppyNeeds[]) =>
+  a.length === b.length &&
+  a.every((n, i) => (Object.keys(n) as (keyof PuppyNeeds)[]).every((k) => n[k] === b[i]![k]))
 
 function statusHub(initial: StageStatus) {
   let status = initial
@@ -41,7 +64,8 @@ function statusHub(initial: StageStatus) {
         merged.happiness === status.happiness &&
         merged.notice === status.notice &&
         merged.ball.inHand === status.ball.inHand &&
-        merged.ball.disabled === status.ball.disabled
+        merged.ball.disabled === status.ball.disabled &&
+        sameNeeds(merged.needs, status.needs)
       )
         return
       status = merged
@@ -69,6 +93,7 @@ export function createThreeStage(
     happiness: IDLE_HAPPINESS,
     ball: { inHand: false, disabled: false },
     notice: null,
+    needs: [],
   })
   let room: RoomScene
   try {
@@ -80,6 +105,7 @@ export function createThreeStage(
       takeBall() {},
       stowBall() {},
       trick() {},
+      feed() {},
       onChange: hub.onChange,
       dispose: hub.clear,
     }
@@ -206,7 +232,7 @@ export function createThreeStage(
       } else if (g.kind === 'takeBall') offerBall(views, ball)
       else if (g.kind === 'goTo')
         for (const v of views) {
-          if (touch(v.routine)) continue
+          if (touch(v.routine) || keepsEating(v.routine, v.care)) continue
           goTo(v.motion, g.x, g.z, mood(v))
           v.behaviour.perk = 1
         }
@@ -232,9 +258,11 @@ export function createThreeStage(
     syncBallMesh(room, ball)
     // The hint and the ball button follow whichever puppy is playing
     const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]
+    const needs = views.map(needsOf)
     if (!v) {
       hintNow = 'idle'
       hub.set({
+        needs,
         hint: '',
         happiness: IDLE_HAPPINESS,
         ball: { inHand: ball.state === 'hand', disabled: true },
@@ -251,6 +279,7 @@ export function createThreeStage(
       sincePet: now() - s.petLast,
     })
     hub.set({
+      needs,
       hint: HINTS[hintNow],
       happiness: Math.round(s.happy * 100) / 100,
       ball: {
@@ -293,6 +322,9 @@ export function createThreeStage(
     },
     trick(pose) {
       for (const v of views) askTrick(v, pose)
+    },
+    feed() {
+      for (const v of views) v.bowl = 1
     },
     onChange: hub.onChange,
     dispose() {

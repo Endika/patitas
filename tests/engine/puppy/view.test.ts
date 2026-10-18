@@ -1,6 +1,8 @@
 // @vitest-environment node
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { BREEDS } from '@/domain/breeds'
+import { createCare } from '@/domain/care'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
@@ -61,6 +63,7 @@ describe('offerBall', () => {
       fetch: createFetchState(),
       behaviour: createBehaviourState(),
       routine: createRoutineState(),
+      care: createCare(BREEDS.shiba, 0),
     })
     const awake = pup(),
       asleep = pup()
@@ -68,5 +71,23 @@ describe('offerBall', () => {
     offerBall([awake, asleep], createBall())
     expect([awake.fetch.task, asleep.fetch.task]).toEqual(['wait', 'free'])
     expect([asleep.routine.routine, asleep.motion.pose]).toEqual(['sleeping', 'sleep'])
+  })
+
+  it('lets a very hungry puppy finish its meal, and calls one a little hungry to play', () => {
+    const pup = (hunger: number) => {
+      const routine = createRoutineState()
+      routine.routine = 'eating'
+      return {
+        motion: createMotionState(),
+        fetch: createFetchState(),
+        behaviour: createBehaviourState(),
+        routine,
+        care: { ...createCare(BREEDS.shiba, 0), hunger },
+      }
+    }
+    const hungry = pup(0.8),
+      peckish = pup(0.2)
+    offerBall([hungry, peckish], createBall())
+    expect([hungry.fetch.task, peckish.fetch.task]).toEqual(['free', 'wait'])
   })
 })

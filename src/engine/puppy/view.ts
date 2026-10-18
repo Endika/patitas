@@ -20,10 +20,17 @@ import {
   type MotionState,
 } from '@/engine/motion/locomotion'
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
-import { createRoutineState, stepRoutine, touch, type RoutineState } from '@/engine/motion/routine'
+import {
+  createRoutineState,
+  keepsEating,
+  stepRoutine,
+  touch,
+  type RoutineState,
+} from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
+import { showBowls } from '@/engine/room/furniture'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
 import type { Anatomy, Tuple3, ZoneId } from './anatomy'
@@ -95,6 +102,11 @@ export interface PuppyView extends BehaviourRig, SceneView {
   routine: RoutineState
   /** Kept in memory while the room is open. */
   care: Care
+  /**
+   * How full its own bowl is, 0 to 1: kept with the puppy rather than in the furniture, so a
+   * bowl laid out anew shows it again.
+   */
+  bowl: number
   /** Its place in the room's order: which bed and bowl are its. */
   place: number
   /** Seconds to the next «z» while asleep. */
@@ -274,6 +286,7 @@ export function mountPuppyView(
     behaviour: createBehaviourState(),
     routine: createRoutineState(),
     care,
+    bowl: 0,
     snoreT: 0,
     place: 0,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
@@ -373,6 +386,10 @@ const PERSONAL_SPACE = 0.45
 const SNORE = 1.2
 /** Just woken, a puppy walks this far in front of the room's middle to say hello. */
 const HELLO = 0.35
+/** Head down to eat it bows less than to pick up a ball, so its mouth meets the floor nearer. */
+const EAT_REACH = 0.7
+/** A full tummy: a burst of wagging. */
+const FED_HAPPY = 0.35
 
 /**
  * One frame of the puppies in the room: fetch, routine, poses and steps for each, then they are
@@ -412,12 +429,20 @@ export function tickPuppies(
           care: view.care,
           spots,
           place: view.place,
+          breed: view.breed,
+          bowl: view.bowl,
+          muzzle: view.reach * EAT_REACH,
           clamp: (x, z) => clampPlay(room.cam, x, z),
           busy: view.fetch.task !== 'free',
         },
         dt,
       )
       view.care = r.care
+      view.bowl = r.bowl
+      if (r.fed) {
+        view.behaviour.happy = Math.min(1, view.behaviour.happy + FED_HAPPY)
+        view.behaviour.perk = 1
+      }
       if (r.yawn) yawn(view.behaviour)
       if (r.woke) {
         const { fx, fz } = playAxes(room.cam)
@@ -432,6 +457,7 @@ export function tickPuppies(
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
+  if (room.furniture) showBowls(room.furniture, views)
   if (views.length > 1)
     separate(
       views.map((v) => v.motion),
@@ -458,6 +484,7 @@ export function tickPuppies(
         fetch: view.fetch,
         ball,
         camera: camPos,
+        routine: view.routine.routine,
         ...(ctx.random && { random: ctx.random }),
       },
       dt,
@@ -549,18 +576,23 @@ export function headWorld(view: PuppyView, out: Vec3 = new THREE.Vector3()): Vec
   return view.bones.head!.getWorldPosition(out)
 }
 
-const asleep = (v: Pick<PuppyView, 'routine'>) => v.routine.routine === 'sleeping'
+/** Asleep, or too hungry to leave its meal: the ball goes on without it. */
+const away = (v: Pick<PuppyView, 'routine' | 'care'>) =>
+  v.routine.routine === 'sleeping' || keepsEating(v.routine, v.care)
 
-/** The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on. */
+/**
+ * The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on and a
+ * very hungry one eats on.
+ */
 export function offerBall(
-  views: Pick<PuppyView, 'motion' | 'fetch' | 'behaviour' | 'routine'>[],
+  views: Pick<PuppyView, 'motion' | 'fetch' | 'behaviour' | 'routine' | 'care'>[],
   ball: BallState,
 ): void {
   if (ball.state === 'mouth') return
   ball.state = 'hand'
   ball.vel.set(0, 0, 0)
   for (const v of views) {
-    if (asleep(v)) continue
+    if (away(v)) continue
     setPose(v.motion, 'stand')
     v.fetch.task = 'wait'
     v.fetch.taskT = 0
@@ -574,7 +606,7 @@ export function putBallAway(views: PuppyView[], ball: BallState): void {
   for (const v of views) if (v.fetch.task === 'wait') v.fetch.task = 'free'
 }
 
-/** Every puppy awake perks up at the throw; one is picked to go for it, or two race. */
+/** Every puppy awake and not deep in a meal perks up at the throw; one goes for it, or two race. */
 export function throwBall(
   views: PuppyView[],
   ball: BallState,
@@ -584,7 +616,7 @@ export function throwBall(
   ball.vel.copy(vel)
   ball.state = 'air'
   for (const v of views) {
-    if (asleep(v)) continue
+    if (away(v)) continue
     v.fetch.task = 'chase'
     v.fetch.taskT = 0
     v.behaviour.perk = 1
@@ -602,9 +634,13 @@ export function throwBall(
   )
 }
 
-/** Asks for a trick; only while the puppy is not playing ball. A sleeping one wakes instead. */
+/**
+ * Asks for a trick; only while the puppy is not playing ball or deep in a meal. A sleeping one
+ * wakes instead.
+ */
 export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
-  if (touch(view.routine) || view.fetch.task !== 'free') return false
+  if (touch(view.routine) || view.fetch.task !== 'free' || keepsEating(view.routine, view.care))
+    return false
   setPose(view.motion, pose)
   view.behaviour.happy = Math.min(1, view.behaviour.happy + 0.05)
   return true

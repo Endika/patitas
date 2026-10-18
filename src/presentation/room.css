@@ -92,6 +92,25 @@
   background: var(--ink);
   color: var(--on-ink);
 }
+.room-debug {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  font: 600 0.8rem var(--font-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.room-debug button {
+  pointer-events: auto;
+  font: 700 0.85rem var(--font-body);
+  color: var(--on-ink);
+  background: var(--ink);
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
 .room-bottom {
   bottom: 0;
   padding-top: 14px;
