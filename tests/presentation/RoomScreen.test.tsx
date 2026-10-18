@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
 import { adoptPuppy } from '@/application/adoption'
 import type { GameStorage } from '@/infrastructure/storage'
-import { createFakeStage, savingStorage } from './fakeStage'
+import { createFakePreview, createFakeStage, savingStorage } from './fakeStage'
 
 async function adopted(names: string[]): Promise<GameStorage> {
   const storage = savingStorage()
@@ -20,7 +20,13 @@ async function adopted(names: string[]): Promise<GameStorage> {
 
 const start = (storage: GameStorage) => {
   const stage = createFakeStage()
-  render(<App openStorage={async () => storage} createStage={stage.create} />)
+  render(
+    <App
+      openStorage={async () => storage}
+      createStage={stage.create}
+      createPreview={createFakePreview().create}
+    />,
+  )
   return stage
 }
 
@@ -110,7 +116,11 @@ describe('RoomScreen', () => {
     const stage = createFakeStage()
     const { unmount } = render(
       <StrictMode>
-        <App openStorage={async () => adopted(['Luna'])} createStage={stage.create} />
+        <App
+          openStorage={async () => adopted(['Luna'])}
+          createStage={stage.create}
+          createPreview={createFakePreview().create}
+        />
       </StrictMode>,
     )
     await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))

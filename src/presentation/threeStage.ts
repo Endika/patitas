@@ -20,7 +20,7 @@ import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
-import type { RoomStage, StageStatus } from './roomStage'
+import { NO_3D, type RoomStage, type StageStatus } from './roomStage'
 
 /** Where each puppy starts, for one or two. */
 const PLACES = [
@@ -31,7 +31,6 @@ const PLACES = [
   ],
 ]
 
-const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
 const IDLE_HAPPINESS = 0.25
 
 function statusHub(initial: StageStatus) {
