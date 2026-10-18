@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react'
 import { openGameStorage } from '@/infrastructure/idbStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 import type { RoomStage } from './roomStage'
+import type { CreatePreview } from './components/AdoptPreview'
 import AdoptScreen from './screens/AdoptScreen'
 import { useGame } from './useGame'
 
@@ -14,9 +15,11 @@ const Blank = () => <main aria-busy="true" className="min-h-dvh bg-ground" />
 export default function App({
   openStorage = openGameStorage,
   createStage,
+  createPreview,
 }: {
   openStorage?: () => Promise<GameStorage>
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
+  createPreview?: CreatePreview
 }) {
   const game = useGame(openStorage)
   const [adopting, setAdopting] = useState(false)
@@ -35,6 +38,7 @@ export default function App({
           setAdopting(false)
         }}
         onBack={puppies.length ? () => setAdopting(false) : undefined}
+        createPreview={createPreview}
       />
     )
   return (

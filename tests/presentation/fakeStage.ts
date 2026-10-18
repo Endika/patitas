@@ -1,5 +1,6 @@
 import type { Puppy } from '@/domain/puppy'
 import type { RoomStage, StageStatus } from '@/presentation/roomStage'
+import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
 import { createMemoryStorage } from '@/infrastructure/memoryStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 
@@ -48,3 +49,31 @@ export function createFakeStage() {
 
 /** The in-memory storage, as if the browser could keep it. */
 export const savingStorage = (): GameStorage => ({ ...createMemoryStorage(), persistent: true })
+
+/** An adoption preview with no 3D: it records what it is asked and lets a test push status. */
+export function createFakePreview() {
+  const calls: string[] = []
+  const canvases: HTMLCanvasElement[] = []
+  const listeners = new Set<(s: PreviewStatus) => void>()
+  let status: PreviewStatus = { loading: true, notice: null }
+  return {
+    calls,
+    canvases,
+    emit(next: Partial<PreviewStatus>) {
+      status = { ...status, ...next }
+      for (const l of listeners) l(status)
+    },
+    create: (canvas: HTMLCanvasElement): PreviewStage => {
+      canvases.push(canvas)
+      return {
+        show: (id) => void calls.push(`show:${id}`),
+        onStatus(listener) {
+          listeners.add(listener)
+          listener(status)
+          return () => void listeners.delete(listener)
+        },
+        dispose: () => void calls.push('dispose'),
+      }
+    },
+  }
+}

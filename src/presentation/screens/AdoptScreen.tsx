@@ -1,27 +1,25 @@
 import { useId, useState, type FormEvent } from 'react'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import { InvalidPuppyName } from '@/domain/puppy'
+import AdoptPreview, { type CreatePreview } from '../components/AdoptPreview'
 import UnsavedNotice from '../components/UnsavedNotice'
+import { swatch } from '../swatch'
 
 const BREED_IDS = Object.keys(BREEDS) as BreedId[]
-
-/** A soft swatch of the breed's coat colours. */
-const swatch = (id: BreedId) => {
-  const colours = Object.values(BREEDS[id].palette)
-  return `linear-gradient(135deg, ${colours.join(', ')})`
-}
 
 /** Choose a breed and a name, then adopt. */
 export default function AdoptScreen({
   unsaved,
   onAdopt,
   onBack,
+  createPreview,
 }: {
   unsaved: boolean
   /** Throws `InvalidPuppyName`. */
   onAdopt(input: { name: string; breedId: BreedId }): Promise<void>
   /** Back to the room, when there is someone in it. */
   onBack?: () => void
+  createPreview?: CreatePreview
 }) {
   const [breedId, setBreedId] = useState<BreedId>('dorado')
   const [name, setName] = useState('')
@@ -44,8 +42,8 @@ export default function AdoptScreen({
   }
 
   return (
-    <main className="min-h-dvh bg-[radial-gradient(130%_85%_at_50%_28%,var(--color-ground),var(--color-ground-low))] px-4 py-8 text-ink">
-      <div className="mx-auto flex w-full max-w-md flex-col gap-6">
+    <main className="min-h-dvh bg-[radial-gradient(130%_85%_at_50%_28%,var(--color-ground),var(--color-ground-low))] px-4 pt-4 pb-8 text-ink">
+      <div className="mx-auto flex w-full max-w-md flex-col gap-5">
         {onBack && (
           <button
             type="button"
@@ -55,6 +53,7 @@ export default function AdoptScreen({
             Volver a la sala
           </button>
         )}
+        <AdoptPreview breedId={breedId} createPreview={createPreview} />
         <header className="flex flex-col gap-1">
           <h1 className="font-display text-3xl leading-tight font-semibold">Adopta un cachorro</h1>
           <p className="text-ink-soft">Elige una raza y ponle nombre.</p>

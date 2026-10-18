@@ -1,5 +1,8 @@
 import type { Puppy } from '@/domain/puppy'
 
+/** Shown instead of a stage when the browser has no WebGL. */
+export const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
+
 export type TrickPose = 'sit' | 'lie' | 'belly'
 
 /** What the room tells the screen: the hint, the happiness bar and the ball button. */
