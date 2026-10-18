@@ -10,7 +10,7 @@ import {
   type LegState,
   type MotionState,
 } from '@/engine/motion/locomotion'
-import { POSES, stepPoses } from '@/engine/motion/poses'
+import { POSES, setPose, stepPoses } from '@/engine/motion/poses'
 import {
   approach,
   bedSlots,
@@ -570,15 +570,24 @@ describe('pee and poop', () => {
 
   it('sometimes walks to the garden first, clear of the mud, and leaves nothing there', () => {
     const p = full(pup(0.12, -0.12))
-    run([p], 30, at(12), SPOTS, undefined, undefined, { random: draws(0.1, 0.9) })
+    const squat = p.m.pos.clone()
+    run(
+      [p],
+      30,
+      at(12),
+      SPOTS,
+      () => {
+        if (p.r.routine === 'relieving') squat.copy(p.m.pos)
+      },
+      undefined,
+      { random: draws(0.1, 0.9) },
+    )
     expect(p.seen.slice(0, 3)).toEqual(['toGarden', 'relieving', 'none'])
     expect(p.left).toEqual([])
     expect(p.care.bladder).toBeLessThan(0.01)
     const { center, radius, depth } = SPOTS.garden
-    expect(Math.hypot(p.m.pos.x - center.x, p.m.pos.z - center.z)).toBeLessThan(
-      Math.max(radius, depth),
-    )
-    expect(inMud(SPOTS, p.m.pos.x, p.m.pos.z)).toBe(0)
+    expect(Math.hypot(squat.x - center.x, squat.z - center.z)).toBeLessThan(Math.max(radius, depth))
+    expect(inMud(SPOTS, squat.x, squat.z)).toBe(0)
   })
 
   it('with two messes waiting it always goes to the garden', () => {
@@ -630,6 +639,48 @@ describe('pee and poop', () => {
     run([p], DT, at(12))
     expect(p.r.routine).toBe('none')
     expect(p.left).toHaveLength(1)
+  })
+
+  it('steps away when it is done, so what it left is in view', () => {
+    const p = full(pup(0.12, -0.12))
+    run([p], RELIEF_TIME + 3, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(p.seen).toEqual(['relieving', 'none'])
+    const [mess] = p.left
+    expect(Math.hypot(p.m.pos.x - mess!.x, p.m.pos.z - mess!.z)).toBeGreaterThan(0.55)
+    // Beside it as the camera sees it, not in front of it
+    const side = (x: number, z: number) => playLocal(cam, x, z).side
+    expect(Math.abs(side(p.m.pos.x, p.m.pos.z) - side(mess!.x, mess!.z))).toBeGreaterThan(0.35)
+  })
+
+  it('a trick or a call the player just asked for comes first; it goes afterwards', () => {
+    const sitting = full(pup(0.12, -0.12))
+    setPose(sitting.m, 'sit', 1)
+    run([sitting], 0.5, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect([sitting.r.routine, sitting.m.pose]).toEqual(['none', 'sit'])
+    run([sitting], 1, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(sitting.r.routine).toBe('relieving')
+    const called = full(pup(0.12, -0.12))
+    called.m.goal = called.m.pos.clone().set(0.5, 0, 0.3)
+    run([called], DT, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(called.r.routine).toBe('none')
+    expect(called.m.goal).not.toBeNull()
+    run([called], 8, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    expect(called.left).toHaveLength(1)
+    expect(Math.hypot(called.left[0]!.x - 0.5, called.left[0]!.z - 0.3)).toBeLessThan(0.5)
+  })
+
+  it('a call stops the walk to the garden, and to the mud', () => {
+    const potty = full(pup(0.12, -0.12))
+    run([potty], 0.5, at(12), SPOTS, undefined, undefined, { random: draws(0.1, 0.9) })
+    expect(potty.r.routine).toBe('toGarden')
+    touch(potty.r)
+    expect(potty.r.routine).toBe('none')
+    const mud = pup(0.12, -0.12)
+    mud.r.mudAgo = MUD_EVERY
+    run([mud], 1, at(12), SPOTS, undefined, undefined, { curious: 1, random: () => 0 })
+    expect(mud.r.routine).toBe('toMud')
+    touch(mud.r)
+    expect(mud.r.routine).toBe('none')
   })
 
   it('relieveNow squats at once with the kind asked for', () => {

@@ -171,7 +171,12 @@ export function createMessLayer(scene: THREE.Scene): MessLayer {
     polygonOffset: true,
     polygonOffsetFactor: -2,
   })
-  const poopBase = new THREE.MeshStandardMaterial({ color: POOP_COLOR, roughness: 0.5 })
+  // Transparent from the start: switching it later would not fade it without a new shader
+  const poopBase = new THREE.MeshStandardMaterial({
+    color: POOP_COLOR,
+    roughness: 0.5,
+    transparent: true,
+  })
   const sparkleBase = new THREE.MeshBasicMaterial({
     color: SPARKLE_COLOR,
     transparent: true,
@@ -291,7 +296,6 @@ export function createMessLayer(scene: THREE.Scene): MessLayer {
         s.pee.scale.setScalar(size)
         s.poop.scale.setScalar(size)
         s.pee.material.opacity = PEE_OPACITY * alpha
-        s.poopMat.transparent = alpha < 1
         s.poopMat.opacity = alpha
       }
     },
