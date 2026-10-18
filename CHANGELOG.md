@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/Endika/patitas/compare/v0.2.0...v0.3.0) (2026-10-18)
+
+
+### Features
+
+* preview the chosen puppy on the adoption screen ([f7c4c27](https://github.com/Endika/patitas/commit/f7c4c2702432b9bd84aef89b14577d78b013a14f))
+
+
+### Bug Fixes
+
+* frame the preview puppy and keep adopt in view ([15fc3e7](https://github.com/Endika/patitas/commit/15fc3e744e435bdab5083bd7617eaacf27d58b68))
+* keep a failed puppy's notice while another one loads ([16f43ba](https://github.com/Endika/patitas/commit/16f43ba83c9f636a40cad1b6c87f38f37545bdb1))
+* keep adopt in view with the unsaved notice on small phones ([c6edcb5](https://github.com/Endika/patitas/commit/c6edcb59c11fbf50e8fcdc8d926384b8555831ec))
+* tell the player when a puppy cannot be prepared ([163b70d](https://github.com/Endika/patitas/commit/163b70d959ebf27fb287e94340cb331b673412da))
+
+
+### Performance Improvements
+
+* build puppy meshes in a web worker ([763be0c](https://github.com/Endika/patitas/commit/763be0cd65a82ada89f81fa2e19f1d5dcd1c0162))
+* frame the preview puppy without skinning every shell ([9a51e0b](https://github.com/Endika/patitas/commit/9a51e0b1a136080c5c860d3eb8051fc034fee11a))
+
 ## [0.2.0](https://github.com/Endika/patitas/compare/v0.1.0...v0.2.0) (2026-10-18)
 
 
