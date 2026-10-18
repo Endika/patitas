@@ -167,6 +167,18 @@ describe('stepBehaviour', () => {
     expect(pose.target.distanceTo(input.camera)).toBeLessThan(1e-9)
     expect(tilt).toBeGreaterThan(0.15)
   })
+
+  it('in the puddle it looks down at the mud in front of its paws', () => {
+    const { rig, s, input } = world()
+    input.routine = 'splashing'
+    let pose = stepBehaviour(rig, s, input, DT, 0)
+    for (let f = 1; f <= 120; f++) {
+      input.now = f * DT
+      pose = stepBehaviour(rig, s, input, DT, input.now)
+    }
+    expect(pose.target.y).toBeLessThan(0.1)
+    expect(pose.head[0] + pose.neck[0]).toBeGreaterThan(0.4)
+  })
 })
 
 describe('pickHint', () => {

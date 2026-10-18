@@ -21,6 +21,8 @@ import {
   keepsEating,
   MEAL_TIME,
   mealSpot,
+  MUD_EVERY,
+  SPLASH_TIME,
   stepRoutine,
   touch,
   tuckIn,
@@ -31,7 +33,7 @@ import {
 import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
 import { separate } from '@/engine/room/crowd'
-import { computeSpots, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
+import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.shiba)
@@ -83,6 +85,7 @@ function run(
   spots: Spots = SPOTS,
   each?: () => void,
   places?: number[],
+  more: Partial<RoutineCtx> = {},
 ) {
   for (let n = 0; n < secs / DT; n++) {
     for (const [i, p] of pups.entries()) {
@@ -93,6 +96,7 @@ function run(
         spots,
         place: places?.[i] ?? i,
         bowl: p.bowl,
+        ...more,
       }
       const ev = stepRoutine(p.r, p.m, ctx, DT)
       p.care = ev.care
@@ -421,6 +425,66 @@ describe('meals', () => {
     expect(ev.bowl).toBeGreaterThan(0.7)
     expect(ev.bowl).toBeLessThan(0.95)
     expect(ev.care.hunger).toBeCloseTo(0.2 - 0.7 * (1 - ev.bowl), 3)
+  })
+})
+
+describe('mud', () => {
+  const curious = (curious: number): Partial<RoutineCtx> => ({ curious, random: () => 0 })
+
+  it('a curious puppy wanders into the puddle, stamps about in it and comes out', () => {
+    const p = pup(0.12, -0.12)
+    let deepest = 0,
+      out = Infinity,
+      left = false
+    run(
+      [p],
+      MUD_EVERY + 40,
+      at(12),
+      SPOTS,
+      () => {
+        const depth = inMud(SPOTS, p.m.pos.x, p.m.pos.z)
+        if (p.r.routine === 'splashing') deepest = Math.max(deepest, depth)
+        if (p.seen.includes('splashing') && p.r.routine === 'none') {
+          left = true
+          out = depth
+        }
+      },
+      undefined,
+      curious(0.9),
+    )
+    expect(p.seen).toEqual(['none', 'toMud', 'splashing', 'none'])
+    expect(p.time.splashing).toBeCloseTo(SPLASH_TIME, 1)
+    expect(deepest).toBeGreaterThan(0.8)
+    expect(left).toBe(true)
+    expect(out).toBe(0)
+    expect(p.m.pose).toBe('stand')
+  })
+
+  it('goes at most once every 2 min, never without curiosity, never while playing', () => {
+    expect(MUD_EVERY).toBe(120)
+    const once = pup(0.12, -0.12)
+    run([once], MUD_EVERY * 1.9, at(12), SPOTS, undefined, undefined, curious(1))
+    expect(once.seen.filter((r) => r === 'toMud')).toHaveLength(1)
+    const dull = pup(0.12, -0.12)
+    run([dull], MUD_EVERY * 2, at(12), SPOTS, undefined, undefined, curious(0))
+    expect(dull.seen).toEqual(['none'])
+    const playing = pup(0.12, -0.12)
+    run([playing], MUD_EVERY * 1.5, at(12), SPOTS, undefined, undefined, {
+      ...curious(1),
+      busy: true,
+    })
+    expect(playing.seen).toEqual(['none'])
+  })
+
+  it('food and bed come first', () => {
+    const hungry = pup(0.12, -0.12, 0.8, 0.8, 1)
+    hungry.r.mudAgo = MUD_EVERY
+    run([hungry], 1, at(12), SPOTS, undefined, undefined, curious(1))
+    expect(hungry.r.routine).toBe('toBowl')
+    const night = pup(0.12, -0.12)
+    night.r.mudAgo = MUD_EVERY
+    run([night], 1, at(22), SPOTS, undefined, undefined, curious(1))
+    expect(night.r.routine).toBe('toBed')
   })
 })
 
