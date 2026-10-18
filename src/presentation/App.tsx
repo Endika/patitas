@@ -20,6 +20,8 @@ export default function App({
 }) {
   const game = useGame(openStorage)
   const [adopting, setAdopting] = useState(false)
+  // A puppy adopted into a full room, until the player moves someone
+  const [outside, setOutside] = useState<string | null>(null)
   if (!game.state) return <Blank />
   const { puppies, room, persistent } = game.state
 
@@ -28,7 +30,8 @@ export default function App({
       <AdoptScreen
         unsaved={!persistent}
         onAdopt={async (input) => {
-          await game.adopt(input)
+          const { puppy, entered } = await game.adopt(input)
+          setOutside(entered ? null : puppy.name)
           setAdopting(false)
         }}
         onBack={puppies.length ? () => setAdopting(false) : undefined}
@@ -40,8 +43,15 @@ export default function App({
         puppies={puppies}
         room={room}
         unsaved={!persistent}
-        onEnter={game.enter}
-        onLeave={game.leave}
+        outside={outside}
+        onEnter={(id) => {
+          setOutside(null)
+          return game.enter(id)
+        }}
+        onLeave={(id) => {
+          setOutside(null)
+          return game.leave(id)
+        }}
         onAdoptAnother={() => setAdopting(true)}
         createStage={createStage}
       />

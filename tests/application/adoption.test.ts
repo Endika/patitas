@@ -12,7 +12,8 @@ describe('adoptPuppy', () => {
     const b = await adoptPuppy(storage, { name: 'Kira', breedId: 'dorado' }, deps)
     const c = await adoptPuppy(storage, { name: 'Toby', breedId: 'dorado' }, deps)
 
-    expect(await storage.listPuppies()).toEqual([a, b, c])
-    expect(await storage.loadRoom()).toEqual({ inRoom: [a.id, b.id] })
+    expect([a.entered, b.entered, c.entered]).toEqual([true, true, false])
+    expect(await storage.listPuppies()).toEqual([a.puppy, b.puppy, c.puppy])
+    expect(await storage.loadRoom()).toEqual({ inRoom: [a.puppy.id, b.puppy.id] })
   })
 })

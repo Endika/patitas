@@ -22,6 +22,7 @@ export default function RoomScreen({
   puppies,
   room,
   unsaved,
+  outside = null,
   onEnter,
   onLeave,
   onAdoptAnother,
@@ -30,6 +31,8 @@ export default function RoomScreen({
   puppies: Puppy[]
   room: Room
   unsaved: boolean
+  /** Name of a puppy just adopted that did not fit in the room. */
+  outside?: string | null
   /** False when the room is full. */
   onEnter(id: string): Promise<boolean>
   onLeave(id: string): Promise<void>
@@ -78,6 +81,11 @@ export default function RoomScreen({
         {full && (
           <p role="alert" className="room-note">
             Ya hay dos cachorros en la sala. Saca uno para que entre otro.
+          </p>
+        )}
+        {outside && (
+          <p role="status" className="room-note">
+            {outside} espera fuera: saca a uno para que entre.
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}
