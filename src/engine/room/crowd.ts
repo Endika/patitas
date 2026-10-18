@@ -3,39 +3,48 @@ import type { FetchState } from '@/engine/motion/fetch'
 import type { MotionState } from '@/engine/motion/locomotion'
 import type { BallState } from './ball'
 
+type Clamp = (x: number, z: number) => [number, number]
+
 /**
  * Keeps puppies from standing inside each other: overlapping bodies are pushed apart evenly,
  * and two walking to the same spot get spots `minDist` apart. A walker heading where another
- * stands keeps its goal and nudges that one aside, so a chase can always reach the ball.
+ * stands keeps its goal and nudges that one aside, so a chase can always reach the ball. With
+ * `clamp`, bodies and goals stay in the play area: a puppy pinned against its edge is only
+ * moved along it, and the other one takes the rest of the push.
  */
-export function separate(
-  states: MotionState[],
-  minDist = 0.45,
-  clamp?: (x: number, z: number) => [number, number],
-): void {
+export function separate(states: MotionState[], minDist = 0.45, clamp?: Clamp): void {
   for (let i = 0; i < states.length; i++)
     for (let j = i + 1; j < states.length; j++) {
       const a = states[i]!,
         b = states[j]!
-      push(a.pos, b.pos, minDist, 0.5, 0.5)
-      if (a.goal && b.goal) {
-        push(a.goal, b.goal, minDist, 0.5, 0.5)
-        if (clamp) for (const g of [a.goal, b.goal]) [g.x, g.z] = clamp(g.x, g.z)
-      }
+      push(a.pos, b.pos, minDist, clamp)
+      if (a.goal && b.goal) push(a.goal, b.goal, minDist, clamp)
     }
 }
 
-function push(a: Vec3, b: Vec3, minDist: number, wa: number, wb: number) {
+function move(p: Vec3, dx: number, dz: number, clamp?: Clamp): number {
+  const x0 = p.x,
+    z0 = p.z
+  p.x += dx
+  p.z += dz
+  if (clamp) [p.x, p.z] = clamp(p.x, p.z)
+  return Math.hypot(p.x - x0, p.z - z0)
+}
+
+function push(a: Vec3, b: Vec3, minDist: number, clamp?: Clamp) {
   const dx = b.x - a.x,
     dz = b.z - a.z,
     d = Math.hypot(dx, dz)
   if (d >= minDist) return
   const [nx, nz] = d > 1e-6 ? [dx / d, dz / d] : [1, 0],
-    gap = minDist - d
-  a.x -= nx * gap * wa
-  a.z -= nz * gap * wa
-  b.x += nx * gap * wb
-  b.z += nz * gap * wb
+    half = (minDist - d) / 2
+  const movedA = move(a, -nx * half, -nz * half, clamp),
+    movedB = move(b, nx * half, nz * half, clamp)
+  const left = minDist - Math.hypot(b.x - a.x, b.z - a.z)
+  if (left <= 1e-9) return
+  // One of them is against the edge, so the other takes what is left of the push
+  const [free, s] = movedA >= movedB ? [a, -1] : [b, 1]
+  move(free, s * nx * left, s * nz * left, clamp)
 }
 
 /**

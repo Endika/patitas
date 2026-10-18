@@ -66,12 +66,6 @@ vec3 h33(vec3 p){ p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz
   return m
 }
 
-/** The skin plus `shells` fur layers, sharing one set of uniforms. */
-export function furMaterials(shells: number, f: FurParams): THREE.MeshStandardMaterial[] {
-  const u = furUniforms(f)
-  return Array.from({ length: shells + 1 }, (_, i) => furMaterial(i / shells, u))
-}
-
 /** Moves a shell to height `h` without compiling it again. */
 export function setFurHeight(m: THREE.Material, h: number): void {
   ;(m.userData.uH as { value: number }).value = h
