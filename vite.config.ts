@@ -51,5 +51,13 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { '@': resolve(import.meta.dirname, 'src') } },
-  build: { sourcemap: true, target: 'es2022' },
+  build: {
+    sourcemap: true,
+    target: 'es2022',
+    rolldownOptions: {
+      output: {
+        codeSplitting: { groups: [{ name: 'three', test: /node_modules[\\/]three[\\/]/ }] },
+      },
+    },
+  },
 })
