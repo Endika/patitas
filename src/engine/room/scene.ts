@@ -4,6 +4,7 @@ import { goTo, type MotionState } from '@/engine/motion/locomotion'
 import { BALL_R, type BallState } from './ball'
 import { cameraPosition, clampPlay, createCamera, fitCamera, type FixedCamera } from './camera'
 import { createFpsMeter } from './fpsMeter'
+import { addFurniture, type Furniture } from './furniture'
 
 /** Render budget: fur shells per puppy, device pixel ratio cap and shadow map size. */
 export interface Quality {
@@ -61,6 +62,8 @@ export interface RoomScene {
   cam: FixedCamera
   quality: Quality
   ballMesh: THREE.Mesh
+  /** The bed, bowl, scale and garden; none in the adoption preview. */
+  furniture: Furniture | null
   add(view: SceneView): void
   remove(view: SceneView): void
   resize(): void
@@ -234,6 +237,7 @@ export function createRoomScene(
   canvas: HTMLCanvasElement,
   coarse = matchMedia('(pointer: coarse)').matches,
   frame: (cam: FixedCamera, aspect: number) => void = fitCamera,
+  { furniture: withFurniture = true }: { furniture?: boolean } = {},
 ): RoomScene {
   let quality = pickQuality(1, coarse)
   const renderer = new THREE.WebGLRenderer({
@@ -277,6 +281,7 @@ export function createRoomScene(
   scene.add(floorMesh())
   const ballMesh = tennisBall()
   scene.add(ballMesh)
+  const furniture = withFurniture ? addFurniture(scene, cam) : null
 
   const fpsReadout = fpsOverlay(canvas)
   const views = new Set<SceneView>()
@@ -296,6 +301,7 @@ export function createRoomScene(
     cameraPosition(cam, camera.position)
     camera.lookAt(cam.target)
     camera.updateMatrixWorld()
+    furniture?.layout(cam)
     for (const cb of resizeListeners) cb()
   }
   addEventListener('resize', resize)
@@ -348,6 +354,7 @@ export function createRoomScene(
     cam,
     quality,
     ballMesh,
+    furniture,
     add(view) {
       views.add(view)
       scene.add(view.group)
@@ -396,6 +403,7 @@ export function createRoomScene(
       // Puppy views own their resources and may share cached geometry
       for (const v of views) scene.remove(v.group)
       views.clear()
+      furniture?.dispose()
       for (const h of hearts) h.s.material.dispose()
       heartMap.dispose()
       scene.environment?.dispose()

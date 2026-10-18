@@ -106,10 +106,17 @@ export function playLocal(cam: FixedCamera, x: number, z: number): PlayPoint {
   return { d, side, half: halfAt(camD, d, cam.tanH), fx, fz }
 }
 
+/** Half width of the play area at depth `d`. */
+export const playHalf = (cam: FixedCamera, d: number) => halfAt(playAxes(cam).camD, d, cam.tanH)
+
+/** The floor point at depth `d` and `side` in the play area: the inverse of `playLocal`. */
+export function playWorld(cam: FixedCamera, d: number, side: number): [number, number] {
+  const { fx, fz } = playAxes(cam)
+  return [cam.target.x + fx * d - fz * side, cam.target.z + fz * d + fx * side]
+}
+
 export function clampPlay(cam: FixedCamera, x: number, z: number): [number, number] {
   const q = playLocal(cam, x, z)
   const d = clamp(q.d, PLAY.near, PLAY.far)
-  const half = halfAt(playAxes(cam).camD, d, cam.tanH)
-  const side = clamp(q.side, -half, half)
-  return [cam.target.x + q.fx * d - q.fz * side, cam.target.z + q.fz * d + q.fx * side]
+  return playWorld(cam, d, clamp(q.side, -playHalf(cam, d), playHalf(cam, d)))
 }
