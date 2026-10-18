@@ -70,6 +70,8 @@ export interface RoomScene {
   /** Called after every resize, once the camera and play area are refitted. */
   onResize(cb: () => void): () => void
   emitHeart(at: THREE.Vector3): void
+  /** A «z» rising from a sleeping puppy's head. */
+  emitZ(at: THREE.Vector3): void
   start(tick: (dt: number, t: number) => void): void
   dispose(): void
 }
@@ -194,7 +196,37 @@ function heartTexture(): THREE.CanvasTexture {
   return t
 }
 
-const HEART_LIFE = 1.3
+/** A soft ink «z», drawn blurred so it reads as a breath rather than a letter. */
+function zTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  g.fillStyle = '#22302e'
+  g.font = '600 52px system-ui, sans-serif'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.filter = 'blur(1px)'
+  g.fillText('z', 32, 30)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+interface Floater {
+  s: THREE.Sprite
+  life: number
+  max: number
+  rise: number
+  size: number
+  grow: number
+  drift: number
+  /** Peak opacity. */
+  alpha: number
+  fadeIn: boolean
+}
+
+const HEART = { max: 1.3, rise: 0.22, size: 0.05, grow: 0.03, drift: 0, alpha: 1, fadeIn: false }
+const Z = { max: 2, rise: 0.1, size: 0.06, grow: 0.035, drift: 0.04, alpha: 0.75, fadeIn: true }
 
 /** With `?fps` in the URL: a corner readout of the frame rate, written straight to the DOM. */
 function fpsOverlay(canvas: HTMLCanvasElement) {
@@ -287,8 +319,26 @@ export function createRoomScene(
   const views = new Set<SceneView>()
   const resizeListeners = new Set<() => void>()
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
-  const heartMap = heartTexture()
-  const hearts: { s: THREE.Sprite; life: number }[] = []
+  const heartMap = heartTexture(),
+    zMap = zTexture()
+  const floaters: Floater[] = []
+  const emit = (
+    map: THREE.Texture,
+    at: THREE.Vector3,
+    kind: Omit<Floater, 's' | 'life'>,
+    jitter: number,
+  ) => {
+    if (reduceMotion) return
+    const s = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, opacity: 0 }),
+    )
+    s.position
+      .copy(at)
+      .add(new THREE.Vector3((Math.random() - 0.5) * jitter, 0.04, (Math.random() - 0.5) * jitter))
+    s.scale.setScalar(kind.size)
+    scene.add(s)
+    floaters.push({ s, life: 0, ...kind })
+  }
 
   const resize = () => {
     const w = canvas.clientWidth,
@@ -307,17 +357,20 @@ export function createRoomScene(
   addEventListener('resize', resize)
   resize()
 
-  const tickHearts = (dt: number) => {
-    for (let i = hearts.length - 1; i >= 0; i--) {
-      const h = hearts[i]!
-      h.life += dt
-      h.s.position.y += dt * 0.22
-      h.s.scale.setScalar(0.05 + h.life * 0.03)
-      h.s.material.opacity = Math.max(0, 1 - h.life / HEART_LIFE)
-      if (h.life > HEART_LIFE) {
-        scene.remove(h.s)
-        h.s.material.dispose()
-        hearts.splice(i, 1)
+  const tickFloaters = (dt: number) => {
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      const f = floaters[i]!
+      f.life += dt
+      f.s.position.y += dt * f.rise
+      f.s.position.x += dt * f.drift
+      f.s.scale.setScalar(f.size + f.life * f.grow)
+      // A «z» fades in over the first tenth of its life; both fade out over the rest
+      const k = f.life / f.max
+      f.s.material.opacity = f.alpha * Math.max(0, Math.min(f.fadeIn ? k * 10 : 1, 1 - k))
+      if (f.life > f.max) {
+        scene.remove(f.s)
+        f.s.material.dispose()
+        floaters.splice(i, 1)
       }
     }
   }
@@ -371,18 +424,8 @@ export function createRoomScene(
       resizeListeners.add(cb)
       return () => resizeListeners.delete(cb)
     },
-    emitHeart(at) {
-      if (reduceMotion) return
-      const s = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: heartMap, transparent: true, depthWrite: false }),
-      )
-      s.position
-        .copy(at)
-        .add(new THREE.Vector3((Math.random() - 0.5) * 0.08, 0.04, (Math.random() - 0.5) * 0.08))
-      s.scale.setScalar(0.05)
-      scene.add(s)
-      hearts.push({ s, life: 0 })
-    },
+    emitHeart: (at) => emit(heartMap, at, HEART, 0.08),
+    emitZ: (at) => emit(zMap, at, Z, 0.03),
     start(tick) {
       const clock = new THREE.Clock()
       renderer.setAnimationLoop(() => {
@@ -390,7 +433,7 @@ export function createRoomScene(
           t = clock.elapsedTime
         tick(dt, t)
         follow()
-        tickHearts(dt)
+        tickFloaters(dt)
         renderer.render(scene, camera)
         fpsReadout?.frame(performance.now())
       })
@@ -404,8 +447,9 @@ export function createRoomScene(
       for (const v of views) scene.remove(v.group)
       views.clear()
       furniture?.dispose()
-      for (const h of hearts) h.s.material.dispose()
+      for (const f of floaters) f.s.material.dispose()
       heartMap.dispose()
+      zMap.dispose()
       scene.environment?.dispose()
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh) {

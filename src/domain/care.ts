@@ -16,6 +16,7 @@ export type WeightStatus = 'Un poco flaco' | 'En su peso' | 'Un poco gordito'
 export const HUNGER_PER_HOUR = 0.12
 export const CLEANLINESS_LOSS_PER_HOUR = 0.02
 export const ENERGY_REST_PER_HOUR = 0.25
+export const ENERGY_MOVE_LOSS_PER_HOUR = 0.3
 export const HAPPINESS_DRIFT_PER_HOUR = 0.05
 export const WET_LOSS_PER_SECOND = 1 / 60
 export const MEAL_WEIGHT_KG = 0.02
@@ -137,4 +138,9 @@ export const dry = (care: Care, seconds: number): Care => ({
 export const rest = (care: Care, seconds: number): Care => ({
   ...care,
   energy: unit(care.energy + (ENERGY_REST_PER_HOUR * seconds) / 3600),
+})
+
+export const tire = (care: Care, seconds: number): Care => ({
+  ...care,
+  energy: unit(care.energy - (ENERGY_MOVE_LOSS_PER_HOUR * seconds) / 3600),
 })

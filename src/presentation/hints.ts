@@ -11,6 +11,7 @@ export const HINTS: Record<HintKey, string> = {
   belly: '¡Le encanta que le rasques la barriga!',
   sit: 'Sentado, muy formal.',
   lie: 'Tumbado, descansando. Ráscale el lomo o la barriga.',
+  sleep: 'Duerme en su camita. Tócalo para despertarlo.',
   'belly-up': '¡Panza arriba! Ráscale la barriga.',
   wait: 'Desliza el dedo hacia arriba para lanzarla.',
   chase: '¡Allá va!',

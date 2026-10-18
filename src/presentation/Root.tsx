@@ -14,13 +14,16 @@ function debugBreeds(search: string): BreedId[] | null {
   return [asBreed(params.get('breed')) ?? 'dorado', ...(second ? [second] : [])]
 }
 
-/** The app, or with `?debug=puppy&breed=…[&breed2=…]` one or two puppies for checking the render. */
+/**
+ * The app, or with `?debug=puppy&breed=…[&breed2=…][&now=HH:MM]` one or two puppies for checking
+ * the render, with the clock set to that time.
+ */
 export default function Root({ search }: { search: string }) {
   const breeds = debugBreeds(search)
   if (!breeds) return <App />
   return (
     <Suspense>
-      <DebugPuppy breedIds={breeds} />
+      <DebugPuppy breedIds={breeds} at={new URLSearchParams(search).get('now')} />
     </Suspense>
   )
 }

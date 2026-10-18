@@ -28,6 +28,18 @@ export interface Circle {
   r: number
 }
 
+/**
+ * Where each puppy starts, for one or two: right of the middle, so in portrait the puddle on the
+ * left is not hidden behind the left one.
+ */
+export const START_PLACES: readonly (readonly { x: number; z: number; heading?: number }[])[] = [
+  [{ x: 0.12, z: -0.12 }],
+  [
+    { x: -0.02, z: -0.12, heading: 0.25 },
+    { x: 0.42, z: -0.12, heading: -0.25 },
+  ],
+]
+
 /** The bed's ring is 0.6 across its long side, which faces the screen. */
 const BED = { radius: 0.6, depth: 0.47 },
   BOWL = { radius: 0.13, depth: 0.13 },

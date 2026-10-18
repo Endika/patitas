@@ -4,12 +4,14 @@ import {
   catchUp,
   createCare,
   dry,
+  ENERGY_MOVE_LOSS_PER_HOUR,
   exercise,
   feed,
   health,
   isNight,
   rest,
   soil,
+  tire,
   wash,
   weightStatus,
   type Care,
@@ -167,5 +169,10 @@ describe('actions', () => {
   it('rest recovers a quarter of the energy per hour', () => {
     expect(rest({ ...care, energy: 0.2 }, 3600).energy).toBeCloseTo(0.45)
     expect(rest(care, 36000).energy).toBe(1)
+  })
+
+  it('tire spends energy slowly while the puppy moves about', () => {
+    expect(tire({ ...care, energy: 0.8 }, 3600).energy).toBeCloseTo(0.8 - ENERGY_MOVE_LOSS_PER_HOUR)
+    expect(tire(care, 360000).energy).toBe(0)
   })
 })

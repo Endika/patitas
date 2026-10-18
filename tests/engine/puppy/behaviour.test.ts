@@ -4,10 +4,13 @@ import { describe, expect, it } from 'vitest'
 import { BREEDS, type Persona } from '@/domain/breeds'
 import { createFetchState, type FetchTask } from '@/engine/motion/fetch'
 import { createMotionState, type BodyPose } from '@/engine/motion/locomotion'
+import { setPose } from '@/engine/motion/poses'
 import { anatomy, type ZoneId } from '@/engine/puppy/anatomy'
 import {
   behaviourRig,
   createBehaviourState,
+  LID_SHUT,
+  pickHint,
   movePet,
   startPet,
   stepBehaviour,
@@ -96,5 +99,41 @@ describe('stepBehaviour', () => {
     }
     expect(s.yaw.x * sign).toBeCloseTo(1.1, 2)
     expect(most).toBeLessThan(1.1 * 1.02)
+  })
+
+  it('sleeps curled up: lids shut, head turned onto the paws, tail round the body, slow breath', () => {
+    const run = (sleep: boolean) => {
+      const { rig, s, input } = world()
+      if (sleep) setPose(input.motion, 'sleep')
+      input.motion.sleepW = sleep ? 1 : 0
+      input.motion.fk = sleep ? 1 : 0
+      let lid = -Infinity
+      let pose = stepBehaviour(rig, s, input, DT, 0)
+      for (let f = 1; f <= 600; f++) {
+        input.now = f * DT
+        pose = stepBehaviour(rig, s, input, DT, input.now)
+        lid = Math.max(lid, pose.lid)
+      }
+      return { s, pose, lid }
+    }
+    const awake = run(false),
+      asleep = run(true)
+    expect(asleep.pose.lid).toBeCloseTo(LID_SHUT, 5)
+    expect(asleep.pose.jaw).toBeLessThan(0.01)
+    expect(asleep.pose.head[1] + asleep.pose.neck[1]).toBeGreaterThan(0.4)
+    expect(asleep.pose.head[0] + asleep.pose.neck[0]).toBeGreaterThan(0.3)
+    expect(asleep.pose.tail[0][1]).toBeGreaterThan(0.8)
+    expect(asleep.s.breath).toBeLessThan(awake.s.breath * 0.5)
+    expect(asleep.s.breath / 10).toBeCloseTo(0.7, 1)
+  })
+})
+
+describe('pickHint', () => {
+  it('says the puppy is asleep', () => {
+    const motion = createMotionState()
+    setPose(motion, 'sleep')
+    expect(
+      pickHint('idle', { fetch: createFetchState(), motion, zone: null, scratch: 0, sincePet: 9 }),
+    ).toBe('sleep')
   })
 })

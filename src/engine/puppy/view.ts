@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { BREEDS, type Breed } from '@/domain/breeds'
+import { createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -12,14 +13,16 @@ import { legRigs, solveTwoBone } from '@/engine/motion/ik'
 import {
   createLegStates,
   createMotionState,
+  goTo,
   stepLocomotion,
   type BodyPose,
   type LegState,
   type MotionState,
 } from '@/engine/motion/locomotion'
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
+import { createRoutineState, stepRoutine, touch, type RoutineState } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
-import { cameraPosition, clampPlay } from '@/engine/room/camera'
+import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
 import type { Quality, RoomScene, SceneView } from '@/engine/room/scene'
@@ -30,6 +33,7 @@ import {
   LID_OPEN,
   LOW_LID,
   stepBehaviour,
+  yawn,
   type BehaviourPose,
   type BehaviourRig,
   type BehaviourState,
@@ -88,6 +92,11 @@ export interface PuppyView extends BehaviourRig, SceneView {
   motion: MotionState
   fetch: FetchState
   behaviour: BehaviourState
+  routine: RoutineState
+  /** Kept in memory while the room is open. */
+  care: Care
+  /** Seconds to the next «z» while asleep. */
+  snoreT: number
   /** Where a held ball sits, in the jaw's frame. */
   mouth: THREE.Vector3
   /** How far in front of the body the mouth picks up the ball. */
@@ -121,6 +130,7 @@ export function mountPuppyView(
   built: PuppyGeometry,
   quality: Quality,
   place: { x: number; z: number; heading?: number } = { x: 0, z: 0 },
+  care: Care = createCare(BREEDS[puppy.breedId], 0),
 ): PuppyView {
   const breed = BREEDS[puppy.breedId]
   const { geometry, anatomy: A } = built
@@ -260,6 +270,9 @@ export function mountPuppyView(
     motion,
     fetch: createFetchState(),
     behaviour: createBehaviourState(),
+    routine: createRoutineState(),
+    care,
+    snoreT: 0,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
     setQuality: (q) => setShells(q.shells),
@@ -289,7 +302,7 @@ export function hitZone(
   view: Pick<PuppyView, 'motion' | 'zones'>,
   ray: THREE.Ray,
 ): { zone: ZoneId; point: THREE.Vector3; distance: number } | null {
-  const lying = view.motion.pose === 'lie' || view.motion.pose === 'belly'
+  const lying = view.motion.pose !== 'stand' && view.motion.pose !== 'sit'
   let best: ZoneRig | null = null,
     bt = Infinity
   for (const z of view.zones) {
@@ -344,6 +357,8 @@ export interface PuppyTickCtx {
   now: number
   /** The puppy the finger is stroking, if any. */
   petting: PuppyView | null
+  /** Wall-clock milliseconds for bedtime; without it, or without furniture, no routines run. */
+  clock?: number
   random?: () => number
 }
 
@@ -352,10 +367,13 @@ export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
 
 /** Smallest distance kept between two puppies' bodies. */
 const PERSONAL_SPACE = 0.45
+const SNORE = 1.2
+/** Just woken, a puppy walks this far in front of the room's middle to say hello. */
+const HELLO = 0.35
 
 /**
- * One frame of the puppies in the room: fetch, poses and steps for each, then they are kept
- * apart, then character and bones. A ball in a mouth is placed again after the bones move so it
+ * One frame of the puppies in the room: fetch, routine, poses and steps for each, then they are
+ * kept apart, then character and bones. A ball in a mouth is placed again after the bones move so it
  * does not trail the jaw by a frame. Returns each puppy's fetch events, in order.
  */
 export function tickPuppies(
@@ -381,6 +399,33 @@ export function tickPuppies(
       },
       dt,
     )
+    const spots = room.furniture?.spots
+    if (spots && ctx.clock != null) {
+      const r = stepRoutine(
+        view.routine,
+        M,
+        {
+          now: ctx.clock,
+          care: view.care,
+          spots,
+          others: views.flatMap((o) => (o === view ? [] : [o.motion])),
+          clamp: (x, z) => clampPlay(room.cam, x, z),
+          busy: view.fetch.task !== 'free',
+        },
+        dt,
+      )
+      view.care = r.care
+      if (r.yawn) yawn(view.behaviour)
+      if (r.woke) {
+        const { fx, fz } = playAxes(room.cam)
+        goTo(M, room.cam.target.x - fx * HELLO, room.cam.target.z - fz * HELLO, {
+          happy: view.behaviour.happy,
+          energy: view.persona.energy,
+          clamp: (x, z) => clampPlay(room.cam, x, z),
+          ...(ctx.random && { random: ctx.random }),
+        })
+      }
+    }
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
@@ -418,6 +463,14 @@ export function tickPuppies(
     applyPose(view, pose, body, dt, t)
     view.group.updateMatrixWorld(true)
     if (view.fetch.holding) mouthWorld(view, ball.pos)
+    if (M.pose === 'sleep' && M.sleepW > 0.8) {
+      view.snoreT -= dt
+      if (view.snoreT <= 0) {
+        view.snoreT = SNORE
+        headWorld(view, tmp).y += 0.14
+        room.emitZ(tmp)
+      }
+    } else view.snoreT = 0
   })
   return moved.map((m) => m.ev)
 }
@@ -530,9 +583,9 @@ export function throwBall(views: PuppyView[], ball: BallState, vel: Vec3): void 
   )
 }
 
-/** Asks for a trick; only while the puppy is not playing ball. */
-export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand'>): boolean {
-  if (view.fetch.task !== 'free') return false
+/** Asks for a trick; only while the puppy is not playing ball. A sleeping one wakes instead. */
+export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
+  if (touch(view.routine) || view.fetch.task !== 'free') return false
   setPose(view.motion, pose)
   view.behaviour.happy = Math.min(1, view.behaviour.happy + 0.05)
   return true
