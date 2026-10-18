@@ -3,6 +3,7 @@ import { MAX_DT } from '@/engine/math'
 import { goTo, type MotionState } from '@/engine/motion/locomotion'
 import { BALL_R, type BallState } from './ball'
 import { cameraPosition, clampPlay, createCamera, fitCamera, type FixedCamera } from './camera'
+import { createFpsMeter } from './fpsMeter'
 
 /** Render budget: fur shells per puppy, device pixel ratio cap and shadow map size. */
 export interface Quality {
@@ -192,6 +193,39 @@ function heartTexture(): THREE.CanvasTexture {
 
 const HEART_LIFE = 1.3
 
+/** With `?fps` in the URL: a corner readout of the frame rate, written straight to the DOM. */
+function fpsOverlay(canvas: HTMLCanvasElement) {
+  const host = canvas.parentElement
+  if (!host || !new URLSearchParams(location.search).has('fps')) return null
+  const meter = createFpsMeter()
+  const el = document.createElement('div')
+  Object.assign(el.style, {
+    position: 'absolute',
+    right: '8px',
+    bottom: '8px',
+    padding: '2px 6px',
+    borderRadius: '6px',
+    background: 'rgba(0, 0, 0, 0.55)',
+    color: '#fff',
+    font: '12px/1.4 system-ui, sans-serif',
+    fontVariantNumeric: 'tabular-nums',
+    pointerEvents: 'none',
+    zIndex: '5',
+  })
+  el.textContent = '-- fps'
+  host.append(el)
+  let shown = 0
+  return {
+    frame(now: number) {
+      meter.frame(now)
+      if (now - shown < 500) return
+      shown = now
+      el.textContent = `${Math.round(meter.fps())} fps`
+    },
+    remove: () => el.remove(),
+  }
+}
+
 /** Throws when the browser has no WebGL. `coarse` is a touch screen. */
 export function createRoomScene(
   canvas: HTMLCanvasElement,
@@ -240,6 +274,7 @@ export function createRoomScene(
   const ballMesh = tennisBall()
   scene.add(ballMesh)
 
+  const fpsReadout = fpsOverlay(canvas)
   const views = new Set<SceneView>()
   const resizeListeners = new Set<() => void>()
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -346,10 +381,12 @@ export function createRoomScene(
         follow()
         tickHearts(dt)
         renderer.render(scene, camera)
+        fpsReadout?.frame(performance.now())
       })
     },
     dispose() {
       renderer.setAnimationLoop(null)
+      fpsReadout?.remove()
       removeEventListener('resize', resize)
       resizeListeners.clear()
       // Puppy views own their resources and may share cached geometry
