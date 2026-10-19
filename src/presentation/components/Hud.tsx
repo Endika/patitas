@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 import type { StageStatus, TrickPose } from '../roomStage'
-import { useDismiss } from './useDismiss'
+import { useFleeting } from '../useFleeting'
+import { useDismiss, type Dismissal } from './useDismiss'
 
 const TRICKS: [TrickPose, string][] = [
   ['sit', 'Sentado'],
@@ -42,53 +43,47 @@ export default function Hud({
   mode?: ReactNode
 }) {
   const [tray, setTray] = useState<'care' | 'tricks' | null>(null)
-  const [expired, setExpired] = useState<string | null>(null)
   const footer = useRef<HTMLElement>(null)
+  const careButton = useRef<HTMLButtonElement>(null),
+    tricksButton = useRef<HTMLButtonElement>(null)
   const careId = useId(),
     tricksId = useId()
-  const close = useCallback(() => setTray(null), [])
+  // The button that opened the tray gets focus back, unless the player pressed somewhere else
+  const close = useCallback(
+    (how: Dismissal | 'chosen') => {
+      if (how !== 'outside') (tray === 'care' ? careButton : tricksButton).current?.focus()
+      setTray(null)
+    },
+    [tray],
+  )
   useDismiss(footer, tray !== null, close)
 
-  const hint = status.hint
+  const hint = useFleeting(status.hint || null, HINT_MS)
+
+  const open = mode ? null : tray
   useEffect(() => {
-    if (!hint) return
-    const timer = setTimeout(() => setExpired(hint), HINT_MS)
-    return () => clearTimeout(timer)
-  }, [hint])
+    if (open) footer.current?.querySelector<HTMLElement>('.room-tray button')?.focus()
+  }, [open])
 
   const toggle = (which: 'care' | 'tricks') => setTray((t) => (t === which ? null : which))
   // Choosing in a tray is done with it
   const chose = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) close()
+    if ((e.target as HTMLElement).closest('button')) close('chosen')
   }
-  const open = mode ? null : tray
 
   return (
     <footer ref={footer} className="room-bottom">
       <p className="room-hint" aria-live="polite">
-        {hint !== expired ? hint : ''}
+        {hint}
       </p>
-      {open === 'care' && (
-        <nav id={careId} className="room-tray" aria-label="Cuidados" onClick={chose}>
-          {care}
-        </nav>
-      )}
-      {open === 'tricks' && (
-        <nav id={tricksId} className="room-tray" aria-label="Trucos" onClick={chose}>
-          {TRICKS.map(([pose, label]) => (
-            <button key={pose} type="button" onClick={() => onTrick(pose)}>
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
       {mode ?? (
         <div className="room-actions">
           {care && (
             <button
               type="button"
+              ref={careButton}
               aria-expanded={open === 'care'}
-              aria-controls={careId}
+              aria-controls={open === 'care' ? careId : undefined}
               disabled={idle}
               onClick={() => toggle('care')}
             >
@@ -105,14 +100,29 @@ export default function Hud({
           </button>
           <button
             type="button"
+            ref={tricksButton}
             aria-expanded={open === 'tricks'}
-            aria-controls={tricksId}
+            aria-controls={open === 'tricks' ? tricksId : undefined}
             disabled={idle}
             onClick={() => toggle('tricks')}
           >
             Trucos
           </button>
         </div>
+      )}
+      {open === 'care' && (
+        <nav id={careId} className="room-tray" aria-label="Cuidados" onClick={chose}>
+          {care}
+        </nav>
+      )}
+      {open === 'tricks' && (
+        <nav id={tricksId} className="room-tray" aria-label="Trucos" onClick={chose}>
+          {TRICKS.map(([pose, label]) => (
+            <button key={pose} type="button" onClick={() => onTrick(pose)}>
+              {label}
+            </button>
+          ))}
+        </nav>
       )}
     </footer>
   )

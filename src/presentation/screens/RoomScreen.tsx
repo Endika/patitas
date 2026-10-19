@@ -3,14 +3,15 @@ import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
-import { CareActions, CareMode } from '../components/CareBar'
+import { CareActions, CareMode } from '../components/Care'
 import Hud from '../components/Hud'
 import NeedsPanel from '../components/NeedsPanel'
 import Roster from '../components/Roster'
 import UnsavedNotice from '../components/UnsavedNotice'
-import { useDismiss } from '../components/useDismiss'
+import { useDismiss, type Dismissal } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
+import { useFleeting } from '../useFleeting'
 import { useRoomStage } from '../useRoomStage'
 import '../room.css'
 
@@ -22,6 +23,9 @@ const WAITING: StageStatus = {
   touched: null,
   cleaned: false,
 }
+
+/** How long a notice about who can come in stays up, in milliseconds. */
+export const NOTICE_MS = 8000
 
 /** How often the care in the room is saved while it is open, in milliseconds. */
 const SAVE_EVERY = 30_000
@@ -71,11 +75,18 @@ export default function RoomScreen({
   )
   const { hostRef, stageRef, status: reported } = useRoomStage(createStage, keep)
   const status = reported ?? WAITING
-  const [full, setFull] = useState(false)
+  // Counts the refusals, so each one says so again
+  const [refused, setRefused] = useState(0)
+  const full = useFleeting(refused || null, NOTICE_MS)
+  const waiting = useFleeting(outside, NOTICE_MS)
   const [castOpen, setCastOpen] = useState(false)
+  const castButton = useRef<HTMLButtonElement>(null)
   const cast = useRef<HTMLDivElement>(null)
   const castId = useId()
-  const closeCast = useCallback(() => setCastOpen(false), [])
+  const closeCast = useCallback((how: Dismissal) => {
+    if (how === 'escape') castButton.current?.focus()
+    setCastOpen(false)
+  }, [])
   useDismiss(cast, castOpen, closeCast)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
   const [unloaded, setUnloaded] = useState<ReadonlySet<string>>(() => new Set())
@@ -178,11 +189,16 @@ export default function RoomScreen({
   const toggle = async (puppy: Puppy, isIn: boolean) => {
     if (isIn) {
       await onLeave(puppy.id)
-      setFull(false)
-    } else setFull(!(await onEnter(puppy.id)))
+      setRefused(0)
+    } else if (await onEnter(puppy.id)) setRefused(0)
+    else setRefused((n) => n + 1)
   }
 
   const empty = !inRoom.length
+  const breedOf = (id: string) => {
+    const puppy = puppies.find((p) => p.id === id)
+    return puppy ? BREEDS[puppy.breedId].label : ''
+  }
   const stage = () => stageRef.current
   const busy = status.needs.some((n) => n.mode === 'bath' || n.mode === 'brush')
 
@@ -199,6 +215,7 @@ export default function RoomScreen({
             needs={status.needs}
             selected={selected}
             onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
+            breedOf={breedOf}
           />
           {/* With nobody in the room, who to bring in is the only thing to do */}
           <div ref={cast} className="room-cast">
@@ -206,8 +223,9 @@ export default function RoomScreen({
               <button
                 type="button"
                 className="room-cast-toggle"
+                ref={castButton}
                 aria-expanded={castOpen}
-                aria-controls={castId}
+                aria-controls={castOpen ? castId : undefined}
                 onClick={() => setCastOpen((o) => !o)}
               >
                 Cachorros
@@ -228,9 +246,9 @@ export default function RoomScreen({
             Ya hay dos cachorros en la sala. Saca uno para que entre otro.
           </p>
         )}
-        {outside && (
+        {waiting && (
           <p role="status" className="room-note">
-            {outside} espera fuera: saca a uno para que entre.
+            {waiting} espera fuera: saca a uno para que entre.
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}

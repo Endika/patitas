@@ -43,6 +43,41 @@ describe('Hud', () => {
     expect(screen.getByText('¡Allá va!')).toBeInTheDocument()
   })
 
+  it('shows a hint again after the room had none', () => {
+    vi.useFakeTimers()
+    const hud = (hint: string) => (
+      <Hud status={status(hint)} idle={false} onBall={() => {}} onTrick={() => {}} />
+    )
+    const { rerender } = render(hud('Toca el suelo.'))
+    act(() => vi.advanceTimersByTime(HINT_MS))
+    expect(screen.queryByText('Toca el suelo.')).not.toBeInTheDocument()
+    rerender(hud(''))
+    rerender(hud('Toca el suelo.'))
+    expect(screen.getByText('Toca el suelo.')).toBeInTheDocument()
+  })
+
+  it('puts a tray after the buttons, starts on its first action and gives focus back', async () => {
+    const user = userEvent.setup()
+    show()
+    const cuidar = screen.getByRole('button', { name: 'Cuidar' })
+    const trucos = screen.getByRole('button', { name: 'Trucos' })
+    expect(cuidar).not.toHaveAttribute('aria-controls')
+
+    cuidar.focus()
+    await user.keyboard('{Enter}')
+    const tray = screen.getByRole('navigation', { name: 'Cuidados' })
+    expect(cuidar).toHaveAttribute('aria-controls', tray.id)
+    expect(trucos.compareDocumentPosition(tray) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Comida' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(tray).not.toBeInTheDocument()
+    expect(cuidar).toHaveFocus()
+
+    await user.click(trucos)
+    await user.keyboard('{Escape}')
+    expect(trucos).toHaveFocus()
+  })
+
   it('opens one tray at a time and closes it once something in it is chosen', async () => {
     const user = userEvent.setup()
     const { tricks } = show()
