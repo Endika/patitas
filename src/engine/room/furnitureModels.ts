@@ -396,9 +396,11 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   const beds = spots.beds.map((s) => bed(shade, s)),
     bowls = spots.bowls.map(() => bowl(shade)),
     mat = bowlMat(spots.bowls.length),
+    // Bowls set apart one in front of the other each stand on a mat of their own
+    ownMats = spots.bowls.length > 1 ? spots.bowls.map(() => bowlMat(1)) : [],
     scaleParts = scale(shade),
     gardenG = garden()
-  group.add(...beds, mat, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
+  group.add(...beds, mat, ...ownMats, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
   scene.add(group)
 
   const placed: [THREE.Object3D, Spot][] = [
@@ -431,6 +433,14 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       for (const b of spots.bowls) mat.position.add(b.center)
       mat.position.divideScalar(spots.bowls.length).setY(MAT_Y)
       mat.rotation.y = next.az
+      const [a, b] = spots.bowls
+      const inRow = !b || Math.abs(a!.center.distanceTo(b.center) - BOWL_STEP) < 1e-6
+      mat.visible = inRow
+      ownMats.forEach((m, i) => {
+        m.visible = !inRow
+        m.position.copy(spots.bowls[i]!.center).setY(MAT_Y)
+        m.rotation.y = next.az
+      })
       gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
     },
     bowlFill(place, level) {
