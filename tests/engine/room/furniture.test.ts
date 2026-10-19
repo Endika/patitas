@@ -10,6 +10,7 @@ import {
   createScaleDisplay,
   formatKg,
   READING_HOLD,
+  scaleReadout,
   showScale,
   showBowls,
   furnitureObstacles,
@@ -364,6 +365,30 @@ describe('showScale', () => {
     expect(f.drawn).toEqual(['4,31 kg', '4,36 kg'])
     showScale(d, g, 4.36, DT)
     expect(g.drawn).toEqual(['4,36 kg'])
+  })
+})
+
+describe('scaleReadout', () => {
+  it('uploads the display again only when the text it shows changes', () => {
+    const screen = {
+      width: 240,
+      height: 80,
+      getContext: () => null,
+    } as unknown as HTMLCanvasElement
+    const readout = scaleReadout(screen)
+    // A new CanvasTexture is already due one upload
+    const first = readout.map.version
+    const uploads = () => readout.map.version - first
+    readout.show(null)
+    expect(uploads()).toBe(1)
+    for (let i = 0; i < 120; i++) readout.show(null)
+    expect(uploads()).toBe(1)
+    for (let i = 0; i < 120; i++) readout.show(4.261 + i * 0.00003)
+    expect(uploads()).toBe(2)
+    readout.show(4.27)
+    readout.show(null)
+    readout.show(null)
+    expect(uploads()).toBe(4)
   })
 })
 

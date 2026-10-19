@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { clamp, type Vec3 } from '@/engine/math'
 import { playAxes, playHalf, playWorld, type FixedCamera } from './camera'
 
@@ -311,24 +312,59 @@ function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: numbe
   return m
 }
 
+/** The bed's bolster: the tube's half thickness, and its height over that. */
+const BOLSTER = { tube: 0.1, squash: 0.78 }
+/** The fabric base the bolster sits on. */
+const BED_BASE = 0.03
+
+/**
+ * A round bed built on a circle of `radius` and pressed to `depth` along the view: a fabric base,
+ * a thick bolster all round and a cushion sunk in the middle.
+ */
 function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
   const g = new THREE.Group()
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(radius - 0.09, 0.09, 18, 64),
-    new THREE.MeshStandardMaterial({ color: '#d77d69', roughness: 0.95 }),
+  const { tube, squash } = BOLSTER
+  const lathe = (points: number[][], color: string) =>
+    new THREE.Mesh(
+      new THREE.LatheGeometry(
+        points.map(([x, y]) => new THREE.Vector2(x, y)),
+        64,
+      ),
+      new THREE.MeshStandardMaterial({ color, roughness: 1 }),
+    )
+  const base = lathe(
+    [
+      [0, 0],
+      [radius - 0.02, 0],
+      [radius, 0.012],
+      [radius - 0.004, BED_BASE + 0.012],
+      [0, BED_BASE + 0.012],
+    ],
+    '#b9765b',
   )
-  ring.rotation.x = -Math.PI / 2
-  ring.scale.set(1, 0.82, 0.78)
-  ring.position.y = 0.09 * 0.78
-  ring.castShadow = ring.receiveShadow = true
-  const pad = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 40, 12),
-    new THREE.MeshStandardMaterial({ color: '#f3d9cb', roughness: 1 }),
+  base.receiveShadow = true
+  const bolster = new THREE.Mesh(
+    new THREE.TorusGeometry(radius - tube, tube, 20, 72),
+    new THREE.MeshStandardMaterial({ color: '#e39a7c', roughness: 0.95 }),
   )
-  pad.scale.set(radius - 0.1, 0.04, 0.8 * (radius - 0.1))
-  pad.position.y = 0.025
-  pad.receiveShadow = true
-  g.add(ring, pad, contact(shade, radius, depth, 0.35))
+  bolster.rotation.x = -Math.PI / 2
+  bolster.scale.z = squash
+  bolster.position.y = BED_BASE + tube * squash
+  bolster.castShadow = bolster.receiveShadow = true
+  // Lowest in the middle, rising to tuck under the bolster; drawn from the rim in, so it faces up
+  const inner = radius - tube
+  const cushion = lathe(
+    [
+      [inner + 0.02, BED_BASE + 0.07],
+      [0.85 * inner, BED_BASE + 0.05],
+      [0.5 * inner, BED_BASE + 0.028],
+      [0, BED_BASE + 0.022],
+    ],
+    '#f6dccd',
+  )
+  cushion.receiveShadow = true
+  g.add(base, bolster, cushion, contact(shade, radius, radius, 0.35))
+  g.scale.z = depth / radius
   return g
 }
 
@@ -383,73 +419,139 @@ export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.
   })
   // Three caches the sphere on the first draw; bowlFill(…, 0) would leave it empty and cull the kibble for good
   kibble.computeBoundingSphere()
-  g.add(dish, kibble, contact(shade, BOWL.radius, BOWL.depth, 0.45))
+  // Over the mat the bowls stand on
+  const shadow = contact(shade, BOWL.radius, BOWL.depth, 0.45)
+  shadow.position.y = 2 * MAT_Y
+  g.add(dish, kibble, shadow)
   return { group: g, kibble }
 }
 
-function scale(shade: THREE.Texture): {
-  group: THREE.Group
-  screen: HTMLCanvasElement
-  map: THREE.CanvasTexture
-} {
-  const g = new THREE.Group()
-  // An oval platform with a rounded edge, a soft mat on top and a pill for the display
-  const edge = [
-    [0, 0],
-    [0.17, 0],
-    [0.192, 0.006],
-    [0.2, 0.02],
-    [0.196, 0.033],
-    [0.184, 0.04],
-    [0, 0.04],
-  ].map(([x, y]) => new THREE.Vector2(x, y))
-  const body = new THREE.Mesh(
-    new THREE.LatheGeometry(edge, 48),
-    new THREE.MeshStandardMaterial({ color: '#f2efe6', roughness: 0.5 }),
+/** The mat's height over the floor, and how far it reaches past the bowls on it. */
+const MAT_Y = 0.002,
+  MAT = { side: 0.18, depth: 0.15, corner: 0.08 }
+
+/** A flat rounded mat under a row of `n` bowls `BOWL_STEP` apart. */
+function bowlMat(n: number): THREE.Mesh {
+  const hx = ((n - 1) * BOWL_STEP) / 2 + MAT.side,
+    hz = MAT.depth,
+    r = MAT.corner
+  const shape = new THREE.Shape()
+  shape.moveTo(-hx + r, -hz)
+  shape.lineTo(hx - r, -hz)
+  shape.quadraticCurveTo(hx, -hz, hx, -hz + r)
+  shape.lineTo(hx, hz - r)
+  shape.quadraticCurveTo(hx, hz, hx - r, hz)
+  shape.lineTo(-hx + r, hz)
+  shape.quadraticCurveTo(-hx, hz, -hx, hz - r)
+  shape.lineTo(-hx, -hz + r)
+  shape.quadraticCurveTo(-hx, -hz, -hx + r, -hz)
+  const m = new THREE.Mesh(
+    new THREE.ShapeGeometry(shape, 6),
+    new THREE.MeshStandardMaterial({ color: '#8fb3a6', roughness: 0.95 }),
   )
-  body.scale.z = 0.8
-  body.castShadow = body.receiveShadow = true
-  const mat = new THREE.Mesh(
-    new THREE.CircleGeometry(0.16, 40),
-    new THREE.MeshStandardMaterial({ color: '#9fbfae', roughness: 0.85 }),
-  )
-  mat.rotation.x = -Math.PI / 2
-  mat.scale.y = 0.6
-  mat.position.set(0, 0.0405, -0.03)
-  mat.receiveShadow = true
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 24, 12),
-    new THREE.MeshStandardMaterial({ color: '#e6e1d4', roughness: 0.5 }),
-  )
-  head.scale.set(0.12, 0.04, 0.03)
-  head.position.set(0, 0.04, 0.12)
-  head.castShadow = true
-  const screen = document.createElement('canvas')
-  screen.width = 240
-  screen.height = 80
-  const map = new THREE.CanvasTexture(screen)
-  map.colorSpace = THREE.SRGBColorSpace
-  const display = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.22, 0.073),
-    new THREE.MeshBasicMaterial({ map, toneMapped: false }),
-  )
-  display.position.set(0, 0.055, 0.157)
-  display.rotation.x = -0.35
-  g.add(body, mat, head, display, contact(shade, SCALE.radius, SCALE.depth, 0.35))
-  return { group: g, screen, map }
+  m.geometry.rotateX(-Math.PI / 2)
+  m.position.y = MAT_Y
+  m.receiveShadow = true
+  return m
 }
 
+/** The scale's readout: the canvas it is drawn on and the face that shows it. */
+const SCREEN = { width: 240, height: 80, face: [0.13, 0.043] as const }
+
+/**
+ * A vet's platform scale on the `SCALE` footprint: a low rounded platform with a dark rubber top,
+ * and at its front right a short mast holding the display, so the puppy on it does not hide it.
+ */
+function scale(shade: THREE.Texture): { group: THREE.Group; readout: ScaleReadout } {
+  const g = new THREE.Group()
+  const w = 2 * SCALE.radius,
+    d = 2 * SCALE.depth,
+    h = 0.05
+  const platform = new THREE.Mesh(
+    new RoundedBoxGeometry(w, h, d, 3, 0.02),
+    new THREE.MeshStandardMaterial({ color: '#d9dfdd', roughness: 0.55 }),
+  )
+  platform.position.y = h / 2
+  platform.castShadow = platform.receiveShadow = true
+  const rubber = new THREE.Mesh(
+    new RoundedBoxGeometry(w - 0.05, 0.012, d - 0.05, 2, 0.005),
+    new THREE.MeshStandardMaterial({ color: '#3d4a47', roughness: 0.95 }),
+  )
+  rubber.position.y = h
+  rubber.receiveShadow = true
+  const post = { x: 0.125, z: SCALE.depth - 0.035, height: 0.085 }
+  const mast = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.011, 0.013, post.height, 12),
+    new THREE.MeshStandardMaterial({ color: '#9aa3a0', roughness: 0.5 }),
+  )
+  mast.position.set(post.x, h + post.height / 2, post.z)
+  const head = new THREE.Group()
+  head.position.set(post.x, h + post.height + 0.03, post.z)
+  // Tipped back a little towards the camera, which looks down on it
+  head.rotation.x = -0.3
+  const box = new THREE.Mesh(
+    new RoundedBoxGeometry(0.155, 0.062, 0.035, 2, 0.008),
+    new THREE.MeshStandardMaterial({ color: '#24302c', roughness: 0.6 }),
+  )
+  box.castShadow = true
+  const screen = document.createElement('canvas')
+  screen.width = SCREEN.width
+  screen.height = SCREEN.height
+  const readout = scaleReadout(screen)
+  const display = new THREE.Mesh(
+    new THREE.PlaneGeometry(...SCREEN.face),
+    new THREE.MeshBasicMaterial({ map: readout.map, toneMapped: false }),
+  )
+  display.name = 'scale-display'
+  display.position.z = 0.0185
+  head.add(box, display)
+  g.add(platform, rubber, mast, head, contact(shade, SCALE.radius, SCALE.depth, 0.35))
+  return { group: g, readout }
+}
+
+export interface ScaleReadout {
+  map: THREE.CanvasTexture
+  /** Shows `kg`, or nothing; the texture is drawn and uploaded again only when the text changes. */
+  show(kg: number | null): void
+}
+
+/** The scale's display drawn on `screen`, blank to start with. */
+export function scaleReadout(screen: HTMLCanvasElement): ScaleReadout {
+  const map = new THREE.CanvasTexture(screen)
+  map.colorSpace = THREE.SRGBColorSpace
+  let shown: string | null = null
+  return {
+    map,
+    show(kg) {
+      const text = formatKg(kg)
+      if (text === shown) return
+      shown = text
+      drawReading(screen, text)
+      map.needsUpdate = true
+    },
+  }
+}
+
+/** Green digits on the dark display while weighing, «5,24» with a small «kg»; dark otherwise. */
 function drawReading(screen: HTMLCanvasElement, text: string) {
   const g = screen.getContext('2d')
   if (!g) return
-  // With nobody on it the display is off, a pale screen rather than a dark one
-  g.fillStyle = text ? INK : '#b9c7c1'
-  g.fillRect(0, 0, screen.width, screen.height)
-  g.fillStyle = '#cdeedb'
-  g.font = '700 62px system-ui, sans-serif'
-  g.textAlign = 'center'
-  g.textBaseline = 'middle'
-  g.fillText(text, screen.width / 2, screen.height / 2 + 2)
+  const { width, height } = screen
+  g.fillStyle = text ? '#1f2b29' : '#182220'
+  g.fillRect(0, 0, width, height)
+  if (!text) return
+  const [digits = '', unit = ''] = text.split(' ')
+  g.fillStyle = '#9be3c4'
+  g.textBaseline = 'alphabetic'
+  g.font = '700 60px ui-monospace, Menlo, Consolas, monospace'
+  const big = g.measureText(digits).width
+  g.font = '700 24px ui-monospace, Menlo, Consolas, monospace'
+  const small = g.measureText(unit).width
+  const left = (width - big - 8 - small) / 2,
+    base = height / 2 + 21
+  g.fillText(unit, left + big + 8, base)
+  g.font = '700 60px ui-monospace, Menlo, Consolas, monospace'
+  g.fillText(digits, left, base)
 }
 
 /**
@@ -542,9 +644,10 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   const spots = computeSpots(cam, puppies)
   const beds = spots.beds.map((s) => bed(shade, s)),
     bowls = spots.bowls.map(() => bowl(shade)),
+    mat = bowlMat(spots.bowls.length),
     scaleParts = scale(shade),
     gardenG = garden()
-  group.add(...beds, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
+  group.add(...beds, mat, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
   scene.add(group)
 
   const placed: [THREE.Object3D, Spot][] = [
@@ -571,16 +674,17 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
         o.position.copy(s.center)
         o.rotation.y = next.az
       }
+      mat.position.set(0, MAT_Y, 0)
+      for (const b of spots.bowls) mat.position.add(b.center)
+      mat.position.divideScalar(spots.bowls.length).setY(MAT_Y)
+      mat.rotation.y = next.az
       gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
     },
     bowlFill(place, level) {
       const parts = bowls[place]
       if (parts) parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
     },
-    scaleReading(kg) {
-      drawReading(scaleParts.screen, formatKg(kg))
-      scaleParts.map.needsUpdate = true
-    },
+    scaleReading: (kg) => scaleParts.readout.show(kg),
     inMud: (x, z) => inMud(spots, x, z),
     dispose() {
       scene.remove(group)
