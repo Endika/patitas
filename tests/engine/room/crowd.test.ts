@@ -64,6 +64,7 @@ describe('separate', () => {
       happy: 0.5,
       energy: 0.5,
       clamp: (x: number, z: number): [number, number] => [x, z],
+      random: seeded(2),
     }
     goTo(a.m, 0, 0.4, opts)
     goTo(b.m, 0, 0.4, opts)
@@ -119,7 +120,7 @@ describe('separate at the edge of the play area', () => {
       const idle = puppy(ex, ez),
         walker = puppy(wx, wz)
       const goal = idle.m.pos.clone()
-      goTo(walker.m, goal.x, goal.z, { happy: 0.5, energy: 0.5, clamp })
+      goTo(walker.m, goal.x, goal.z, { happy: 0.5, energy: 0.5, clamp, random: seeded(3) })
       let nearest = Infinity
       for (let n = 0; n < 60 * 10; n++) {
         for (const p of [idle, walker]) {

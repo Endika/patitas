@@ -232,8 +232,7 @@ function enter(r: RoutineState, next: Routine) {
 /**
  * A touch or a call: the idle count starts again, a walk to the bed, the garden, the mud or the
  * scale is dropped (and a weighing it is stretching for), and a sleeping puppy wakes with a
- * stretch. Returns true
- * when it was asleep, so the touch does nothing else.
+ * stretch. Returns true when it was asleep, so the touch does nothing else.
  */
 export function touch(r: RoutineState): boolean {
   r.idle = 0
