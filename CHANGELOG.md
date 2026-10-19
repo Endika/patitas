@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.1](https://github.com/Endika/patitas/compare/v0.4.0...v0.4.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **room:** bounce the ball off the puppies and keep their bodies apart ([2e57bfe](https://github.com/Endika/patitas/commit/2e57bfed6783ee89bea92deecde903be91a0b6d4))
+* **room:** call only the selected puppy on a floor tap and centre its ring on the body ([854557c](https://github.com/Endika/patitas/commit/854557c6d6796cfa29ab755c0773ea0c1137b6f5))
+* **room:** free a fetch held up by another puppy's body ([8df8b64](https://github.com/Endika/patitas/commit/8df8b644768cc1791493dd55ab244da417bf48c6))
+* **room:** give tricks to the selected puppy and ring it on the floor ([e616004](https://github.com/Endika/patitas/commit/e616004c7a866c77b45c9aff37a079e09c6431b2))
+* **room:** keep focus in the care controls, show a repeated hint and weigh to two decimals ([aa433da](https://github.com/Endika/patitas/commit/aa433dab8c9daa835f69396aa1ec4a012c5e8773))
+* **room:** keep the kibble from being culled and make the mound readable ([4f8340c](https://github.com/Endika/patitas/commit/4f8340cb838fc3746c93f6cb4a164eaa9f1252c1))
+* **room:** move a puppy off the scale a step at a time and test the select ring ([bbcb0ce](https://github.com/Endika/patitas/commit/bbcb0ce3bdc3c0ad3ad64a0388b7308baa1f8a02))
+* **room:** move the fps overlay to the top-left over the HUD ([a856065](https://github.com/Endika/patitas/commit/a8560652c63221380d24f40b0c4b184814c85eee))
+* **room:** part puppies a step at a time and leave busy ones in place ([d2a7e70](https://github.com/Endika/patitas/commit/d2a7e701ff0435fcc32736d3db7e87b95e9f3c25))
+* **storage:** say when another tab blocks the upgrade and reload when it needs one ([0aa8f3e](https://github.com/Endika/patitas/commit/0aa8f3e63f9b52c1275cfcffaaf9e2932a43d78a))
+
 ## [0.4.0](https://github.com/Endika/patitas/compare/v0.3.0...v0.4.0) (2026-10-19)
 
 
