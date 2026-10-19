@@ -16,8 +16,11 @@ export default function App({
   openStorage = openGameStorage,
   createStage,
   createPreview,
+  now,
 }: {
   openStorage?: () => Promise<GameStorage>
+  /** Wall-clock milliseconds, for the time a puppy was away. */
+  now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   createPreview?: CreatePreview
 }) {
@@ -57,6 +60,9 @@ export default function App({
           return game.leave(id)
         }}
         onAdoptAnother={() => setAdopting(true)}
+        loadCare={game.loadCare}
+        saveCare={game.saveCare}
+        now={now}
         createStage={createStage}
       />
     </Suspense>

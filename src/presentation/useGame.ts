@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
+import type { Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
 import type { GameStorage } from '@/infrastructure/storage'
@@ -19,6 +20,9 @@ export interface Game {
   /** False when the room is full. */
   enter(id: string): Promise<boolean>
   leave(id: string): Promise<void>
+  /** The care saved for a puppy, as it was when last seen. */
+  loadCare(id: string): Promise<Care | undefined>
+  saveCare(id: string, care: Care): Promise<void>
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
@@ -70,5 +74,8 @@ export function useGame(openStorage: () => Promise<GameStorage>): Game {
 
   const leave = useCallback((id: string) => saveRoom((room) => leaveRoom(room, id)), [saveRoom])
 
-  return { state, adopt, enter, leave }
+  const loadCare = useCallback((id: string) => storage.current!.loadCare(id), [])
+  const saveCare = useCallback((id: string, care: Care) => storage.current!.saveCare(id, care), [])
+
+  return { state, adopt, enter, leave, loadCare, saveCare }
 }

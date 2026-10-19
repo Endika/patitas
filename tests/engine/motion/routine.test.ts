@@ -301,6 +301,22 @@ describe('stepRoutine', () => {
     expect(stepRoutine(awake.r, awake.m, day, 60).care.energy).toBe(0.5)
   })
 
+  it('gets hungry awake or asleep and loses a little weight on the move, every few seconds', () => {
+    const sleeper = pup(0, 0, 0.5, 0.3)
+    tuckIn(sleeper.r, sleeper.m)
+    const night = { ...base, now: at(23), care: sleeper.care, spots: SPOTS, place: 0, bowl: 0 }
+    const once = stepRoutine(sleeper.r, sleeper.m, night, 1).care
+    expect(once.hunger).toBe(0.3)
+    expect(
+      stepRoutine(sleeper.r, sleeper.m, { ...night, care: once }, 3599).care.hunger,
+    ).toBeCloseTo(0.42)
+    const walker = pup(0, 0, 0.8, 0.3)
+    walker.m.speed = 0.3
+    const day = { ...night, now: at(12), care: walker.care }
+    const walked = stepRoutine(walker.r, walker.m, day, 600).care
+    expect(walked.weightKg).toBeCloseTo(walker.care.weightKg - 0.04)
+  })
+
   it('gives way to play: a busy puppy leaves the bed and starts counting again', () => {
     const p = pup(0, 0)
     tuckIn(p.r, p.m)
@@ -384,7 +400,7 @@ describe('meals', () => {
       expect(worst[i]).toBeLessThan(0.03)
     })
     expect(a.care.hunger).toBeCloseTo(0.1)
-    expect(b.care.hunger).toBe(0)
+    expect(b.care.hunger).toBeCloseTo(0, 2)
   })
 
   it('leaves the food when it is not hungry', () => {

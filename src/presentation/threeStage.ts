@@ -1,5 +1,5 @@
 import { BREEDS } from '@/domain/breeds'
-import { cleanMess, createCare, isNight } from '@/domain/care'
+import { cleanMess, createCare, health, isNight, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
@@ -41,26 +41,42 @@ import {
   tuckIn,
   weighing,
 } from '@/engine/motion/routine'
-import { createScaleDisplay, formatKg, showScale, START_PLACES } from '@/engine/room/furniture'
-import { createMessLayer } from '@/engine/room/messes'
+import {
+  computeSpots,
+  createScaleDisplay,
+  formatKg,
+  showScale,
+  START_PLACES,
+} from '@/engine/room/furniture'
+import { createMessLayer, placeAccident } from '@/engine/room/messes'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
-import { HINTS } from './hints'
+import { HINTS, hintText, NIGHT_HINT } from './hints'
 import {
   NO_3D,
+  type BathStep,
   type CareMode,
   type PuppyNeeds,
   type RoomStage,
   type StageStatus,
 } from './roomStage'
 
-const IDLE_HAPPINESS = 0.25
+/** How often the needs are told while they only drift, in seconds. */
+const NEEDS_EVERY = 0.25
+/** Seconds «¡Limpio!» stays up after a mess is cleaned. */
+const CLEANED_TIME = 1.2
 
 const hundredths = (x: number) => Math.round(x * 100) / 100
 
 const modeOf = (v: PuppyView): CareMode | null =>
   v.bath.phase !== 'off' ? 'bath' : v.brush.on ? 'brush' : weighing(v.routine) ? 'weigh' : null
 
+const bathStep = (v: PuppyView): BathStep | null =>
+  v.bath.phase === 'off' ? null : v.bath.phase === 'scrub' ? 'scrub' : 'rinsed'
+
+const asleep = (v: PuppyView) => v.routine.routine === 'sleeping'
+
 const needsOf = (v: PuppyView): PuppyNeeds => ({
+  id: v.puppy.id,
   name: v.puppy.name,
   hunger: hundredths(v.care.hunger),
   energy: hundredths(v.care.energy),
@@ -71,13 +87,33 @@ const needsOf = (v: PuppyView): PuppyNeeds => ({
   wet: hundredths(v.care.wet),
   shine: hundredths(v.care.shine),
   mode: modeOf(v),
+  bath: bathStep(v),
+  dryer: v.bath.dryer,
+  health: health(v.care, v.breed),
+  asleep: asleep(v),
   reading: v.weighed && formatKg(v.weighed.kg),
   weightStatus: v.weighed?.status ?? null,
 })
 
 const sameNeeds = (a: PuppyNeeds[], b: PuppyNeeds[]) =>
-  a.length === b.length &&
-  a.every((n, i) => (Object.keys(n) as (keyof PuppyNeeds)[]).every((k) => n[k] === b[i]![k]))
+  a === b ||
+  (a.length === b.length &&
+    a.every((n, i) => (Object.keys(n) as (keyof PuppyNeeds)[]).every((k) => n[k] === b[i]![k])))
+
+/** What the care bar follows has changed since `needs`: it is told at once, not on the next beat. */
+const shifted = (needs: PuppyNeeds[], views: PuppyView[]) =>
+  needs.length !== views.length ||
+  views.some((v, i) => {
+    const n = needs[i]!
+    return (
+      n.id !== v.puppy.id ||
+      n.mode !== modeOf(v) ||
+      n.bath !== bathStep(v) ||
+      n.dryer !== v.bath.dryer ||
+      n.asleep !== asleep(v) ||
+      !n.reading !== !v.weighed
+    )
+  })
 
 function statusHub(initial: StageStatus) {
   let status = initial
@@ -88,8 +124,9 @@ function statusHub(initial: StageStatus) {
       const merged = { ...status, ...next }
       if (
         merged.hint === status.hint &&
-        merged.happiness === status.happiness &&
         merged.notice === status.notice &&
+        merged.cleaned === status.cleaned &&
+        merged.touched?.count === status.touched?.count &&
         merged.ball.inHand === status.ball.inHand &&
         merged.ball.disabled === status.ball.disabled &&
         sameNeeds(merged.needs, status.needs)
@@ -117,10 +154,11 @@ export function createThreeStage(
 ): RoomStage {
   const hub = statusHub({
     hint: HINTS.idle,
-    happiness: IDLE_HAPPINESS,
     ball: { inHand: false, disabled: false },
     notice: null,
     needs: [],
+    touched: null,
+    cleaned: false,
   })
   let room: RoomScene
   try {
@@ -129,6 +167,8 @@ export function createThreeStage(
     hub.set({ notice: NO_3D })
     return {
       setPuppies() {},
+      cares: () => new Map(),
+      placeAccidents: () => undefined,
       takeBall() {},
       stowBall() {},
       trick() {},
@@ -154,9 +194,15 @@ export function createThreeStage(
   /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
   const failed = new Set<string>()
   let wanted: Puppy[] = []
+  /** The care each puppy coming in starts from, until it is mounted. */
+  const incoming = new Map<string, Care>()
   let views: PuppyView[] = []
   let petView: PuppyView | null = null
   let hintNow: HintKey = 'idle'
+  let needs: PuppyNeeds[] = []
+  let needsT = 0
+  let cleanT = 0
+  let touches = 0
   let disposed = false
   const now = () => performance.now() / 1000
   const free = () => views.every((v) => v.fetch.task === 'free')
@@ -216,7 +262,8 @@ export function createThreeStage(
       const built = peekPuppyGeometry(p.breedId)
       if (!built) return
       added = true
-      const care = createCare(BREEDS[p.breedId], clock())
+      const care = incoming.get(p.id) ?? createCare(BREEDS[p.breedId], clock())
+      incoming.delete(p.id)
       const view = mountPuppyView(room, p, built, room.quality, places[i], care)
       const bed = beds?.[i]
       if (bed) tuckIn(view.routine, view.motion, bed.side)
@@ -249,6 +296,7 @@ export function createThreeStage(
     petStart(hit, t) {
       if (hit.bathZone) return rubCoat(hit.view, hit.bathZone, hit.point)
       petView = hit.view
+      hub.set({ touched: { id: hit.view.puppy.id, count: ++touches } })
       touch(hit.view.routine)
       startPet(hit.view.behaviour, hit.zone, hit.point, t)
       if (hit.view.fetch.task === 'free') hit.view.motion.goal = null
@@ -293,6 +341,7 @@ export function createThreeStage(
       const mess = messes.hit(room.camera, x, y, w, h)
       if (!mess) return false
       for (const v of views) v.care = cleanMess(v.care, mess)
+      cleanT = CLEANED_TIME
       return true
     },
   })
@@ -327,13 +376,19 @@ export function createThreeStage(
     syncBallMesh(room, ball)
     // The hint and the ball button follow whichever puppy is playing
     const v = views.find((w) => w.fetch.task !== 'free') ?? views[0]
-    const needs = views.map(needsOf)
+    needsT += dt
+    if (needsT >= NEEDS_EVERY || shifted(needs, views)) {
+      needs = views.map(needsOf)
+      needsT = 0
+    }
+    cleanT = Math.max(0, cleanT - dt)
+    const cleaned = cleanT > 0
     if (!v) {
       hintNow = 'idle'
       hub.set({
         needs,
+        cleaned,
         hint: '',
-        happiness: IDLE_HAPPINESS,
         ball: { inHand: ball.state === 'hand', disabled: true },
       })
       return
@@ -347,10 +402,11 @@ export function createThreeStage(
       scratch: s.scratch,
       sincePet: now() - s.petLast,
     })
+    const night = isNight(clock()) && views.every(asleep)
     hub.set({
       needs,
-      hint: HINTS[hintNow],
-      happiness: Math.round(s.happy * 100) / 100,
+      cleaned,
+      hint: night ? NIGHT_HINT : hintText(hintNow, v.puppy.name),
       ball: {
         inHand: ball.state === 'hand',
         disabled: v.fetch.task !== 'free' && v.fetch.task !== 'wait',
@@ -359,9 +415,14 @@ export function createThreeStage(
   })
 
   return {
-    setPuppies(puppies) {
+    setPuppies(puppies, cares) {
       wanted = puppies.slice(0, ROOM_CAPACITY)
       failed.clear()
+      for (const id of incoming.keys()) if (!wanted.some((p) => p.id === id)) incoming.delete(id)
+      for (const p of wanted) {
+        const care = cares?.get(p.id)
+        if (care && !mounted.has(p.id)) incoming.set(p.id, care)
+      }
       for (const [id, view] of mounted) {
         if (wanted.some((p) => p.id === id)) continue
         // A puppy leaving with the ball in its mouth takes it out of play
@@ -383,6 +444,15 @@ export function createThreeStage(
             showNotice()
           })
     },
+    cares() {
+      const all = new Map(incoming)
+      for (const v of views) all.set(v.puppy.id, v.care)
+      return all
+    },
+    placeAccidents(count) {
+      if (!room.furniture) return undefined
+      return placeAccident(room.cam, computeSpots(room.cam, count > 1 ? 2 : 1))
+    },
     takeBall() {
       if (views.length && ball.state !== 'hand' && free()) offerBall(views, ball)
     },
@@ -392,12 +462,14 @@ export function createThreeStage(
     trick(pose) {
       for (const v of views) askTrick(v, pose)
     },
-    feed() {
-      for (const v of views) v.bowl = 1
+    feed(index) {
+      for (const [i, v] of views.entries()) if (index === undefined || i === index) v.bowl = 1
     },
     bath(index) {
       const v = views[index]
-      if (v && !inBath() && !brushed()) bathe(v)
+      if (!v || inBath() || brushed()) return
+      if (ball.state === 'hand') putBallAway(views, ball)
+      bathe(v)
     },
     rinse() {
       const v = inBath()

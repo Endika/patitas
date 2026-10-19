@@ -17,6 +17,7 @@ import { legRigs } from '@/engine/motion/ik'
 import { anatomy } from '@/engine/puppy/anatomy'
 import {
   brushPuppy,
+  cheerUp,
   coatWork,
   disposeOwn,
   hitCoat,
@@ -249,5 +250,40 @@ describe('soilingDepth', () => {
     expect(soilingDepth({ routine, motion, legs }, spots, [])).toBeGreaterThan(0.5)
     routine.held = 'bathing'
     expect(soilingDepth({ routine, motion, legs }, spots, [])).toBe(0)
+  })
+})
+
+describe('cheerUp', () => {
+  const cheery = () => ({
+    behaviour: createBehaviourState(),
+    brush: createBrush(),
+    care: { ...createCare(BREEDS.shiba, 0), happiness: 0.5 },
+    moodWas: 0.25,
+    joy: 0,
+  })
+
+  it('keeps a share of each rise in mood as happiness, and nothing of a fall', () => {
+    const v = cheery()
+    v.behaviour.happy = 0.65
+    cheerUp(v)
+    expect(v.care.happiness).toBeCloseTo(0.6)
+    const before = v.care
+    v.behaviour.happy = 0.3
+    cheerUp(v)
+    expect(v.care).toBe(before)
+  })
+
+  it('writes small rises once they add up, and leaves brushing to the brush', () => {
+    const v = cheery()
+    v.behaviour.happy = 0.27
+    cheerUp(v)
+    expect(v.care.happiness).toBe(0.5)
+    v.behaviour.happy = 0.31
+    cheerUp(v)
+    expect(v.care.happiness).toBeCloseTo(0.515)
+    v.brush.on = true
+    v.behaviour.happy = 0.9
+    cheerUp(v)
+    expect(v.care.happiness).toBeCloseTo(0.515)
   })
 })

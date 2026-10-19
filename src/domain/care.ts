@@ -178,6 +178,27 @@ function holdOn(care: Care, now: number, place: PlaceAccident | undefined, rando
   return { bladder: unit(bladder), added }
 }
 
+/** Of the cleanliness an absence takes, the share that comes back as dirt in the coat. */
+export const ABSENCE_DIRT_SHOWN = 0.5
+
+/**
+ * The care a puppy comes back to the room with: `catchUp`, keeping only ABSENCE_DIRT_SHOWN of the
+ * cleanliness it lost to time. In the room the coat's dirt is the cleanliness, and days away
+ * should read as dusty paws and belly, not mud up the back.
+ */
+export function comeBack(
+  care: Care,
+  breed: Breed,
+  now: number,
+  place?: PlaceAccident,
+  random?: () => number,
+): Care {
+  const back = catchUp(care, breed, now, place, random)
+  const lost = care.cleanliness - back.cleanliness - (messPenalty(back) - messPenalty(care))
+  if (lost <= 0) return back
+  return { ...back, cleanliness: back.cleanliness + lost * (1 - ABSENCE_DIRT_SHOWN) }
+}
+
 export function weightStatus(care: Care, breed: Breed): WeightStatus {
   if (care.weightKg < breed.weightKg.min) return 'Un poco flaco'
   if (care.weightKg > breed.weightKg.max) return 'Un poco gordito'
@@ -248,6 +269,17 @@ export const dull = (care: Care, seconds: number): Care =>
   care.shine > 0
     ? { ...care, shine: unit(care.shine - (SHINE_LOSS_PER_HOUR * seconds) / 3600) }
     : care
+
+export const getHungry = (care: Care, seconds: number): Care => ({
+  ...care,
+  hunger: unit(care.hunger + (HUNGER_PER_HOUR * seconds) / 3600),
+})
+
+/** Play, petting, a meal or a bath it likes: `amount` more happiness. */
+export const cheer = (care: Care, amount: number): Care => ({
+  ...care,
+  happiness: unit(care.happiness + amount),
+})
 
 export const rest = (care: Care, seconds: number): Care => ({
   ...care,
