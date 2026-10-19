@@ -52,12 +52,16 @@ const TREMBLE = 0.02,
 /** Asking for food: the head tips to one side, then the other. */
 const BEG_TILT = 0.24
 /** Asleep: the head turns onto the front paws and the tail wraps round the body. */
-const SLEEP = {
+export const SLEEP = {
   neck: [0.35, 0.25],
   head: [0.25, 0.3],
   tail: [1, 1, 0.75, 0.55],
   breath: 0.7,
 } as const
+
+/** The share of the body's pitch the neck and the head turn back, so the gaze stays level. */
+export const NECK_LEVEL = 0.4,
+  HEAD_LEVEL = 0.3
 
 /** What behaviour needs to know about a puppy besides its state. */
 export interface BehaviourRig {
@@ -440,12 +444,12 @@ export function stepBehaviour(
     fk = M.fk
   const aw = 1 - sw
   const neck: Rot = [
-    (s.pitch.x * 0.4 - body.pitch * 0.4) * aw + br * 0.01 + 1.05 * bw + SLEEP.neck[0] * sw,
+    (s.pitch.x * 0.4 - body.pitch * NECK_LEVEL) * aw + br * 0.01 + 1.05 * bw + SLEEP.neck[0] * sw,
     s.yaw.x * 0.35 * (1 - bw) * aw + SLEEP.neck[1] * M.sleepSide * sw,
     s.roll.x * 0.3 * aw,
   ]
   const head: Rot = [
-    (s.pitch.x * 0.6 * (1 - bw) + sniffNod - body.pitch * 0.3) * aw + SLEEP.head[0] * sw,
+    (s.pitch.x * 0.6 * (1 - bw) + sniffNod - body.pitch * HEAD_LEVEL) * aw + SLEEP.head[0] * sw,
     (s.yaw.x * 0.6 * (1 - bw) + 0.55 * bw) * aw + SLEEP.head[1] * M.sleepSide * sw,
     s.roll.x * 0.7 * aw,
   ]

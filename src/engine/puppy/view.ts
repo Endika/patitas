@@ -43,7 +43,7 @@ import {
   type BedSlot,
   type RoutineState,
 } from '@/engine/motion/routine'
-import type { BallState } from '@/engine/room/ball'
+import { bounceOff, type BallState } from '@/engine/room/ball'
 import {
   bathReach,
   bathSpheres,
@@ -67,6 +67,7 @@ import {
   stepBrush,
   type Brush,
 } from '@/engine/room/brush'
+import { bodyOf, bodyShape, createBody, type Body, type BodyShape } from '@/engine/room/bodies'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, keepOff, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
@@ -193,6 +194,10 @@ export interface PuppyView extends BehaviourRig, SceneView {
   mouth: THREE.Vector3
   /** How far in front of the body the mouth picks up the ball. */
   reach: number
+  /** The spheres the ball and the other puppies meet, where they were this frame. */
+  body: Body
+  /** Its breed's spheres in its own frame, pose by pose. */
+  shape: BodyShape
   /** Shows `q.shells` fur layers. */
   setQuality(q: Quality): void
   dispose(): void
@@ -215,8 +220,9 @@ const GLINTS: [Tuple3, number, number][] = [
 
 const Z = new THREE.Vector3(0, 0, 1)
 
-/** The puppies' motions, gathered each frame without a new array. */
+/** The puppies' motions and bodies, gathered each frame without a new array. */
 const crowd: MotionState[] = []
+const bodies: Body[] = []
 const clamps = new WeakMap<RoomScene, (x: number, z: number) => [number, number]>()
 
 /** One clamp to the play area per room, rather than a closure each frame. */
@@ -458,6 +464,8 @@ export function mountPuppyView(
     weighed: null,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
+    body: createBody(),
+    shape: bodyShape(A),
     setQuality: (q) => setShells(q.shells),
     dispose() {
       room.remove(view)
@@ -751,7 +759,7 @@ const NOTHING_UNDERFOOT: readonly Underfoot[] = []
 export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
   view.bones.jaw!.localToWorld(out.copy(view.mouth))
 
-/** Smallest distance kept between two puppies' bodies. */
+/** Smallest distance kept between where two puppies are headed; their bodies part by spheres. */
 const PERSONAL_SPACE = 0.45
 /** How far from the scale's middle the others keep while one is weighed: a body's room and a step. */
 const SCALE_CLEAR = PERSONAL_SPACE + 0.05
@@ -765,8 +773,9 @@ const FED_HAPPY = 0.35
 
 /**
  * One frame of the puppies in the room: fetch, routine, poses and steps for each, then they are
- * kept apart, then character and bones. A ball in a mouth is placed again after the bones move so it
- * does not trail the jaw by a frame. Returns each puppy's fetch events, in order.
+ * kept apart and a loose ball bounces off them, then character and bones. A ball in a mouth is
+ * placed again after the bones move so it does not trail the jaw by a frame. Returns each puppy's
+ * fetch events, in order.
  */
 export function tickPuppies(
   views: PuppyView[],
@@ -866,20 +875,25 @@ export function tickPuppies(
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
   if (room.furniture) showBowls(room.furniture, views)
-  if (views.length > 1) {
-    const motions = crowd
-    motions.length = 0
-    let owner: MotionState | null = null
-    for (const v of views) {
-      motions.push(v.motion)
-      if (weighing(v.routine)) owner = v.motion
-    }
-    const inPlay = clampIn(room)
-    // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
-    if (owner && spots)
-      keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
-    separate(motions, PERSONAL_SPACE, inPlay)
+  const motions = crowd
+  motions.length = 0
+  bodies.length = 0
+  let owner: MotionState | null = null,
+    catcher = -1
+  for (let i = 0; i < views.length; i++) {
+    const v = views[i]!
+    motions.push(v.motion)
+    if (weighing(v.routine)) owner = v.motion
+    // The ball goes through the puppy catching it, carrying it or just letting it go
+    if (v.fetch.holding || v.fetch.task === 'grab' || v.fetch.task === 'present') catcher = i
   }
+  const inPlay = clampIn(room)
+  // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
+  if (views.length > 1 && owner && spots)
+    keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
+  for (const v of views) bodies.push(placeBody(v))
+  if (views.length > 1) separate(motions, PERSONAL_SPACE, inPlay, bodies)
+  bounceOff(ball, bodies, catcher)
   cameraPosition(room.cam, camPos)
   views.forEach((view, i) => {
     const s = view.behaviour,
@@ -923,6 +937,13 @@ export function tickPuppies(
     } else view.snoreT = 0
   })
   return moved.map((m) => m.ev)
+}
+
+/** Its spheres where it stands now; sitting to present the ball counts as sitting. */
+function placeBody(view: Pick<PuppyView, 'motion' | 'shape' | 'body'>): Body {
+  const M = view.motion
+  const pose = M.pose === 'stand' && M.sit > 0.5 ? 'sit' : M.pose
+  return bodyOf(M.pos, M.heading, pose, view.shape, view.body)
 }
 
 /** The share of a rise in mood that lasts as happiness, and the least written to the care at once. */

@@ -14,9 +14,25 @@ import {
 } from '@/engine/motion/locomotion'
 import { setPose, stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
-import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
-import { clampPlay, createCamera, fitCamera, playLocal, PLAY } from '@/engine/room/camera'
+import {
+  BALL_R,
+  bounceOff,
+  createBall,
+  stepBall,
+  throwVelocity,
+  type BallState,
+} from '@/engine/room/ball'
+import { bodyOf, bodyShape, createBody, sphereAt, SPHERES, type Body } from '@/engine/room/bodies'
+import {
+  clampPlay,
+  createCamera,
+  fitCamera,
+  playLocal,
+  playWorld,
+  PLAY,
+} from '@/engine/room/camera'
 import { claimBall, keepOff, separate } from '@/engine/room/crowd'
+import { seeded } from '../seeded'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.beagle)
@@ -101,6 +117,159 @@ describe('separate', () => {
   })
 })
 
+const SHAPE = bodyShape(A)
+
+const placed = (m: MotionState, out: Body = createBody()) =>
+  bodyOf(m.pos, m.heading, m.pose, SHAPE, out)
+
+/** How far the nearest spheres of two bodies are from touching: negative while overlapping. */
+function clearance(a: Body, b: Body) {
+  let least = Infinity
+  for (let i = 0; i < SPHERES; i++)
+    for (let k = 0; k < SPHERES; k++) {
+      const p = sphereAt(a, i),
+        q = sphereAt(b, k)
+      least = Math.min(least, Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z) - p.r - q.r)
+    }
+  return least
+}
+
+describe('separate with bodies', () => {
+  const starts: [string, [number, number, number], [number, number, number]][] = [
+    ['head to tail', [0, 0, 0], [0, 0.45, 0]],
+    ['side by side', [0, 0, 0], [0.1, 0.05, 0]],
+    ['nose to nose', [0, 0, 0], [0.05, 0.6, Math.PI]],
+    ['crossing', [0, 0, 0], [0.2, 0.3, Math.PI / 2]],
+    ['on the same spot', [0, 0, 0], [0, 0, 0]],
+  ]
+
+  it.each(starts)(
+    'parts two puppies standing %s until no sphere overlaps',
+    (_, [ax, az, ah], [bx, bz, bh]) => {
+      const a = createMotionState(),
+        b = createMotionState()
+      a.pos.set(ax, 0, az)
+      a.heading = ah
+      b.pos.set(bx, 0, bz)
+      b.heading = bh
+      const bodies = [placed(a), placed(b)]
+      expect(clearance(bodies[0]!, bodies[1]!)).toBeLessThan(0)
+      separate([a, b], 0.45, undefined, bodies)
+      expect(clearance(bodies[0]!, bodies[1]!)).toBeGreaterThanOrEqual(0)
+      // The bodies moved with them: placed again, they are still apart
+      expect(clearance(placed(a), placed(b))).toBeGreaterThanOrEqual(0)
+    },
+  )
+
+  it('lets two puppies stand closer side by side than head to tail', () => {
+    const gapAfter = (bx: number, bz: number) => {
+      const a = createMotionState(),
+        b = createMotionState()
+      b.pos.set(bx, 0, bz)
+      separate([a, b], 0.45, undefined, [placed(a), placed(b)])
+      return flat(a, b)
+    }
+    expect(gapAfter(0.05, 0)).toBeLessThan(0.45)
+    expect(gapAfter(0, 0.05)).toBeGreaterThan(0.45)
+  })
+
+  it('leaves a sleeper in its place and pushes the awake one clear of it', () => {
+    const sleeper = createMotionState(),
+      awake = createMotionState()
+    setPose(sleeper, 'sleep')
+    awake.pos.set(0.2, 0, 0.1)
+    awake.heading = -Math.PI / 2
+    const bodies = [placed(awake), placed(sleeper)]
+    separate([awake, sleeper], 0.45, undefined, bodies)
+    expect(sleeper.pos.length()).toBe(0)
+    expect(clearance(placed(awake), placed(sleeper))).toBeGreaterThanOrEqual(0)
+  })
+
+  it('never lets two puppies chasing the ball for 10 minutes overlap', () => {
+    const { worst, throws, grabbed } = play(10, false, 1)
+    expect(worst).toBeGreaterThanOrEqual(-1e-6)
+    expect(throws).toBeGreaterThan(40)
+    expect(grabbed).toBeGreaterThan(throws * 0.8)
+  })
+
+  it('never moves a sleeper the chase goes past, nor lets the chaser into it', () => {
+    const { worst, throws, sleeperMoved } = play(10, true, 1)
+    expect(worst).toBeGreaterThanOrEqual(-1e-6)
+    expect(sleeperMoved).toBe(0)
+    expect(throws).toBeGreaterThan(40)
+  })
+})
+
+/**
+ * Seeded fetch games for `minutes` in a portrait room: two puppies chase every throw and one
+ * brings it back, or with `sleeper` one chases while the other sleeps at the far edge. The next
+ * throw comes once the chasers are free and the ball lies still. `worst` is the closest any two
+ * bodies came (negative: overlapping).
+ */
+function play(minutes: number, sleeper: boolean, seed: number) {
+  const cam = fitCamera(createCamera(), 0.46)
+  const clamp = (x: number, z: number) => clampPlay(cam, x, z)
+  const random = seeded(seed)
+  const chasers = [puppy(...playWorld(cam, 0.3, -0.3))]
+  if (!sleeper) chasers.push(puppy(...playWorld(cam, 0.3, 0.3)))
+  const dogs = sleeper ? [...chasers, puppy(...playWorld(cam, PLAY.far, 0))] : chasers
+  const bed = dogs[1]?.m.pos.clone()
+  if (sleeper) setPose(dogs[1]!.m, 'sleep')
+  const motions = dogs.map((p) => p.m),
+    bodies = dogs.map((p) => placed(p.m))
+  const ball = createBall()
+  let worst = Infinity,
+    grabbed = 0,
+    throws = 0,
+    sleeperMoved = 0
+  for (let n = 0; n < 60 * 60 * minutes; n++) {
+    const still = ball.state === 'none' || (ball.state === 'air' && ball.vel.length() < 0.05)
+    if (still && chasers.every((p) => p.f.task === 'free')) {
+      const [hx, hz] = playWorld(cam, PLAY.near + 0.1, 0)
+      ball.pos.set(hx, 0.3, hz)
+      ball.vel.copy(throwVelocity(cam, { vx: (random() - 0.5) * 900, vy: 400 + random() * 1600 })!)
+      ball.state = 'air'
+      for (const p of chasers) {
+        p.f.task = 'chase'
+        p.f.taskT = 0
+      }
+      claimBall(
+        chasers.map((p) => p.f),
+        chasers.map((p) => p.m),
+        ball,
+        { random, energies: [0.5, 0.8], mouths: chasers.map((p) => p.mouth(new THREE.Vector3())) },
+      )
+      throws++
+    }
+    let catcher = -1
+    chasers.forEach((p, i) => {
+      const ctx = {
+        reach: REACH,
+        cam,
+        mouthWorld: p.mouth,
+        mood: { happy: 0.5 },
+        energy: 0.5,
+        random,
+      }
+      if (stepFetch(p.f, p.m, ball, ctx, DT).grabbed) grabbed++
+      if (p.f.holding || p.f.task === 'grab' || p.f.task === 'present') catcher = i
+    })
+    for (const p of dogs) {
+      stepPoses(p.m, DT)
+      stepLocomotion(p.m, p.legs, DT)
+    }
+    dogs.forEach((p, i) => placed(p.m, bodies[i]))
+    separate(motions, 0.45, clamp, bodies)
+    stepBall(ball, cam, DT)
+    bounceOff(ball, bodies, catcher)
+    for (let i = 0; i < dogs.length; i++)
+      for (let j = i + 1; j < dogs.length; j++)
+        worst = Math.min(worst, clearance(placed(dogs[i]!.m), placed(dogs[j]!.m)))
+    if (sleeper && bed) sleeperMoved = Math.max(sleeperMoved, dogs[1]!.m.pos.distanceTo(bed))
+  }
+  return { worst, throws, grabbed, sleeperMoved }
+}
+
 describe('separate at the edge of the play area', () => {
   const cam = fitCamera(createCamera(), 0.46)
   const clamp = (x: number, z: number) => clampPlay(cam, x, z)
@@ -142,16 +311,6 @@ describe('separate at the edge of the play area', () => {
 
 /** Never races (the roll is above 0.3) and picks the first chaser that outweighs a third. */
 const calm = { random: () => 0.31 }
-
-function seeded(seed: number) {
-  let a = seed
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 function throws(n: number, energies: number[], random: () => number) {
   const wins = [0, 0]

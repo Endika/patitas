@@ -97,6 +97,10 @@ export function createMotionState(): MotionState {
   }
 }
 
+/** Sitting, the body sinks this far and pitches back this many radians. */
+export const SIT_DROP = 0.07,
+  SIT_PITCH = 0.45
+
 /** World position of the leg's paw at rest for a body at `pos` facing `h`. */
 export function restWorld(L: LegRig, out: Vec3, pos: Vec3, h: number): Vec3 {
   const c = Math.cos(h),
@@ -243,8 +247,8 @@ export function stepLocomotion(m: MotionState, legs: LegState[], dt: number): Bo
   m.bob = bob
   m.bobV = bobVel
   return {
-    y: bob - 0.07 * m.sit - 0.04 * m.bow,
-    pitch: pitch - 0.45 * m.sit + 0.3 * m.bow,
+    y: bob - SIT_DROP * m.sit - 0.04 * m.bow,
+    pitch: pitch - SIT_PITCH * m.sit + 0.3 * m.bow,
     roll: -m.yawRate * 0.05 * k,
     k,
   }

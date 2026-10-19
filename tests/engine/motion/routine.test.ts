@@ -49,6 +49,7 @@ import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
 import { keepOff, separate } from '@/engine/room/crowd'
 import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
+import { seeded } from '../seeded'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.shiba)
@@ -60,16 +61,6 @@ const at = (h: number, min = 0) => new Date(2026, 9, 18, h, min).getTime()
 /** How far ahead of its body a shiba's mouth meets the bowl. */
 const MUZZLE = 0.45
 const base = { breed: BREEDS.shiba, muzzle: MUZZLE, clamp }
-
-function seeded(seed: number) {
-  let a = seed
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 interface Pup {
   r: RoutineState
