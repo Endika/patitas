@@ -5,6 +5,7 @@ import {
   feed,
   fillBladder,
   getHungry,
+  settle,
   isNight,
   MESS_CAP,
   messKind,
@@ -88,7 +89,7 @@ export interface RoutineState {
   /** Seconds awake, with a mess waiting, in all and on the move, not yet counted into the care. */
   awake: number
   sulking: number
-  fasting: number
+  passing: number
   moving: number
   /** In the bath or being brushed: it holds still for it, and wakes from a nap into it. */
   held: HeldRoutine | null
@@ -194,7 +195,7 @@ export const WEIGH_TIME = 3
 const ON_SCALE_TURN = -1.2
 /** How far it walks on, off the scale, once weighed. */
 const STEP_OFF = 0.55
-/** Seconds of bladder, sulking, hunger and exercise gathered before they are written to the care. */
+/** Seconds of bladder, sulking, hunger, mood and exercise gathered before they are written to the care. */
 const CARE_FLUSH = 10
 
 export function createRoutineState(): RoutineState {
@@ -219,7 +220,7 @@ export function createRoutineState(): RoutineState {
     fedAgo: FED_RECENTLY,
     awake: 0,
     sulking: 0,
-    fasting: 0,
+    passing: 0,
     moving: 0,
     held: null,
     weigh: false,
@@ -794,7 +795,7 @@ export function stepRoutine(
   r.fedAgo += dt
   if (r.routine !== 'sleeping') r.awake += dt
   r.sulking = ctx.care.messes.length ? r.sulking + dt : 0
-  r.fasting += dt
+  r.passing += dt
   if (m.speed > MOVING) r.moving += dt
   const ev: RoutineEvents = {
     care:
@@ -813,9 +814,9 @@ export function stepRoutine(
     ev.care = sulk(ev.care, r.sulking)
     r.sulking = 0
   }
-  if (r.fasting >= CARE_FLUSH) {
-    ev.care = getHungry(ev.care, r.fasting)
-    r.fasting = 0
+  if (r.passing >= CARE_FLUSH) {
+    ev.care = settle(getHungry(ev.care, r.passing), r.passing)
+    r.passing = 0
   }
   if (r.moving >= CARE_FLUSH) {
     ev.care = exercise(ev.care, r.moving, ctx.breed)

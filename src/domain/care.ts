@@ -123,11 +123,6 @@ export function catchUp(
   const hours = (now - care.lastSeen) / HOUR_MS
   if (hours <= 0) return { ...care, lastSeen: now }
   const accidents = holdOn(care, now, place, random)
-  const drift = HAPPINESS_DRIFT_PER_HOUR * hours
-  const toward =
-    care.happiness > 0.5
-      ? Math.max(0.5, care.happiness - drift)
-      : Math.min(0.5, care.happiness + drift)
   const drifted: Care = {
     ...care,
     hunger: Math.max(
@@ -139,7 +134,7 @@ export function catchUp(
       Math.max(CATCH_UP_MIN_CLEANLINESS, care.cleanliness - CLEANLINESS_LOSS_PER_HOUR * hours),
     ),
     energy: unit(care.energy + ENERGY_REST_PER_HOUR * hours),
-    happiness: unit(toward),
+    happiness: settle(care, hours * 3600).happiness,
     wet: unit(care.wet - WET_LOSS_PER_SECOND * hours * 3600),
     shine: unit(care.shine - SHINE_LOSS_PER_HOUR * hours),
     weightKg: clampWeight(care.weightKg, breed),
@@ -274,6 +269,16 @@ export const getHungry = (care: Care, seconds: number): Care => ({
   ...care,
   hunger: unit(care.hunger + (HUNGER_PER_HOUR * seconds) / 3600),
 })
+
+/** `seconds` of happiness easing back toward one half, from either side. */
+export function settle(care: Care, seconds: number): Care {
+  const drift = (HAPPINESS_DRIFT_PER_HOUR * seconds) / 3600
+  const happiness =
+    care.happiness > 0.5
+      ? Math.max(0.5, care.happiness - drift)
+      : Math.min(0.5, care.happiness + drift)
+  return { ...care, happiness: unit(happiness) }
+}
 
 /** Play, petting, a meal or a bath it likes: `amount` more happiness. */
 export const cheer = (care: Care, amount: number): Care => ({

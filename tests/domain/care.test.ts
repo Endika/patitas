@@ -8,6 +8,7 @@ import {
   cleanMess,
   comeBack,
   getHungry,
+  settle,
   createCare,
   fillBladder,
   messKind,
@@ -333,6 +334,16 @@ describe('in the room', () => {
     const care = { ...createCare(breed, 0), hunger: 0.3 }
     expect(getHungry(care, 3600).hunger).toBeCloseTo(0.42)
     expect(getHungry({ ...care, hunger: 0.99 }, 3600).hunger).toBe(1)
+  })
+
+  it('settles toward one half as catchUp does, from either side, without overshooting', () => {
+    const care = createCare(breed, 0)
+    expect(settle({ ...care, happiness: 1 }, 3600).happiness).toBeCloseTo(0.95)
+    expect(settle({ ...care, happiness: 0.2 }, 3600).happiness).toBeCloseTo(0.25)
+    expect(settle({ ...care, happiness: 0.52 }, 3600).happiness).toBe(0.5)
+    expect(settle({ ...care, happiness: 1 }, 3600).happiness).toBeCloseTo(
+      catchUp({ ...care, happiness: 1 }, breed, HOUR).happiness,
+    )
   })
 
   it('cheers up with play, never past 1', () => {

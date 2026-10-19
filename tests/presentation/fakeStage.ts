@@ -60,6 +60,10 @@ export function createFakeStage(place?: PlaceAccident) {
     },
     cares: () => new Map(held),
     placeAccidents: () => place,
+    resume(cares, away) {
+      calls.push(`resume:${away}`)
+      for (const [id, care] of cares) if (held.has(id)) held.set(id, care)
+    },
     takeBall: () => void calls.push('takeBall'),
     stowBall: () => void calls.push('stowBall'),
     trick: (pose) => void calls.push(`trick:${pose}`),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
@@ -53,12 +53,15 @@ export default function RoomScreen({
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
 }) {
-  /** Saves the care the room keeps of `ids`, or of every puppy in it, as seen now. */
+  /**
+   * Saves the care the room keeps of `ids`, or of every puppy in it, as seen now. A save that
+   * fails leaves the last one in place, and the room plays on.
+   */
   const keep = useCallback(
     (stage: RoomStage, ids?: (id: string) => boolean) => {
       const seen = now()
       for (const [id, care] of stage.cares())
-        if (!ids || ids(id)) void saveCare(id, { ...care, lastSeen: seen })
+        if (!ids || ids(id)) saveCare(id, { ...care, lastSeen: seen }).catch(() => {})
     },
     [now, saveCare],
   )
@@ -66,10 +69,15 @@ export default function RoomScreen({
   const status = reported ?? WAITING
   const [full, setFull] = useState(false)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
+  const [unloaded, setUnloaded] = useState(false)
   const inRoom = useMemo(
     () => room.inRoom.flatMap((id) => puppies.find((p) => p.id === id) ?? []),
     [puppies, room],
   )
+  const everyone = useRef(puppies)
+  useEffect(() => {
+    everyone.current = puppies
+  })
 
   // Those leaving are saved; those coming in bring their care, with the time they were away
   useEffect(() => {
@@ -83,8 +91,15 @@ export default function RoomScreen({
       return
     }
     let live = true
-    void Promise.all(coming.map((p) => loadCare(p.id))).then((saved) => {
+    let failed = false
+    const load = (id: string) =>
+      loadCare(id).catch(() => {
+        failed = true
+        return undefined
+      })
+    void Promise.all(coming.map((p) => load(p.id))).then((saved) => {
       if (!live) return
+      if (failed) setUnloaded(true)
       const at = now()
       const place = stage.placeAccidents(inRoom.length)
       const cares = new Map(
@@ -100,17 +115,45 @@ export default function RoomScreen({
     }
   }, [createStage, inRoom, stageRef, keep, loadCare, now])
 
-  // A phone can close the app without warning: save every so often and when it is hidden
+  // A phone can close the app without warning: save every so often and once as it is hidden.
+  // Back from hidden, the time away passes for everyone in the room, as if it had been closed.
   useEffect(() => {
-    const save = () => stageRef.current && keep(stageRef.current)
-    const hidden = () => document.visibilityState === 'hidden' && save()
+    let hiddenAt: number | null = null
+    const save = () => {
+      if (stageRef.current && hiddenAt === null) keep(stageRef.current)
+    }
+    const shown = () => {
+      const stage = stageRef.current
+      if (!stage) return
+      if (document.visibilityState === 'hidden') {
+        if (hiddenAt !== null) return
+        keep(stage)
+        hiddenAt = now()
+        return
+      }
+      if (hiddenAt === null) return
+      const since = hiddenAt,
+        at = now()
+      hiddenAt = null
+      const held = stage.cares()
+      const place = stage.placeAccidents(held.size)
+      const cares = new Map<string, Care>()
+      for (const [id, care] of held) {
+        const puppy = everyone.current.find((p) => p.id === id)
+        if (!puppy) continue
+        const breed = BREEDS[puppy.breedId]
+        cares.set(id, comeBack({ ...care, lastSeen: since }, breed, at, place))
+      }
+      stage.resume(cares, at - since)
+      keep(stage)
+    }
     const timer = setInterval(save, SAVE_EVERY)
-    document.addEventListener('visibilitychange', hidden)
+    document.addEventListener('visibilitychange', shown)
     return () => {
       clearInterval(timer)
-      document.removeEventListener('visibilitychange', hidden)
+      document.removeEventListener('visibilitychange', shown)
     }
-  }, [keep, stageRef])
+  }, [keep, now, stageRef])
 
   const touched = status.touched
   const picked = touched && touched.count > (chosen?.after ?? 0) ? touched.id : (chosen?.id ?? null)
@@ -157,6 +200,11 @@ export default function RoomScreen({
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}
+        {unloaded && (
+          <p role="alert" className="room-note">
+            No se han podido cargar los cuidados.
+          </p>
+        )}
         <NeedsPanel
           needs={status.needs}
           selected={selected}
