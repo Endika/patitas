@@ -29,6 +29,7 @@ import {
   cheerUp,
   dropFetch,
   putToBed,
+  rebed,
   showCare,
   coatWork,
   disposeOwn,
@@ -408,6 +409,44 @@ describe('putToBed', () => {
     ])
     expect([motion.pos.x, motion.pos.z, motion.heading]).toEqual([slot.x, slot.z, slot.heading])
     for (const L of v.legs) expect(Math.hypot(L.pos.x - slot.x, L.pos.z - slot.z)).toBeLessThan(0.6)
+  })
+})
+
+describe('rebed', () => {
+  const sleeper = (place: number) => {
+    const motion = createMotionState()
+    const v = {
+      motion,
+      legs: createLegStates(legRigs(anatomy(BREEDS.dorado)), motion),
+      fetch: createFetchState(),
+      routine: createRoutineState(),
+      bath: createBath(),
+      brush: createBrush(),
+      coatTouch: null,
+      place,
+    }
+    return v
+  }
+
+  it('lays each sleeper in its new bed as a fresh sleeper, and leaves the awake ones be', () => {
+    const cam = fitCamera(createCamera(), 1)
+    const [alone] = bedSlots(computeSpots(cam, 1))
+    const ball = createBall()
+    const first = sleeper(0),
+      second = sleeper(1)
+    putToBed(first, alone!, ball)
+    second.motion.pos.set(0.3, 0, 0.2)
+
+    const spots = computeSpots(cam, 2)
+    rebed([first, second], spots, ball)
+    const [left] = bedSlots(spots)
+    expect([first.motion.pos.x, first.motion.pos.z, first.motion.heading]).toEqual([
+      left!.x,
+      left!.z,
+      left!.heading,
+    ])
+    expect([first.routine.side, first.motion.sleepSide]).toEqual([-1, -1])
+    expect([second.routine.routine, second.motion.pos.x]).toEqual(['none', 0.3])
   })
 })
 

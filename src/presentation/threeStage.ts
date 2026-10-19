@@ -18,6 +18,7 @@ import {
   pointLook,
   putBallAway,
   putToBed,
+  rebed,
   rubCoat,
   showCare,
   stopBrushing,
@@ -243,9 +244,10 @@ export function createThreeStage(
       v.place = i
       return [v]
     })
-    if (room.furnish(wanted.length > 1 ? 2 : 1))
-      for (const v of views) forgetRoute(v.routine, v.motion)
+    const refurnished = room.furnish(wanted.length > 1 ? 2 : 1)
+    if (refurnished) for (const v of views) forgetRoute(v.routine, v.motion)
     followBeds()
+    if (refurnished && room.furniture) rebed(views, room.furniture.spots, ball)
   }
 
   /** Mounts every wanted puppy whose mesh is ready; a mesh for a puppy no longer wanted waits unused. */
@@ -342,6 +344,7 @@ export function createThreeStage(
       cleanT = CLEANED_TIME
       return true
     },
+    tapsAt: (x, y, w, h) => !!messes.hit(room.camera, x, y, w, h),
   })
   // The beds move with the frame
   const offResize = room.onResize(() => {

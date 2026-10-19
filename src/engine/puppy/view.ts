@@ -30,6 +30,7 @@ import {
 } from '@/engine/motion/locomotion'
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import {
+  bedSlots,
   createRoutineState,
   goWeigh,
   holdStill,
@@ -648,6 +649,22 @@ export function putToBed(
     L.s = 0
   }
   tuckIn(view.routine, m, slot.side)
+}
+
+/**
+ * The beds laid out again for another number of puppies: each sleeper lies down in its new bed,
+ * turned and curled to the side a fresh sleeper there would be.
+ */
+export function rebed(
+  views: (Parameters<typeof putToBed>[0] & Pick<PuppyView, 'place'>)[],
+  spots: Spots,
+  ball: BallState,
+): void {
+  const slots = bedSlots(spots)
+  for (const v of views) {
+    const slot = slots[v.place]
+    if (slot && v.routine.routine === 'sleeping') putToBed(v, slot, ball)
+  }
 }
 
 /** Below this change in its dirt, time away leaves the mud where the coat shows it. */

@@ -256,11 +256,12 @@ describe('the beds in frame', () => {
       const vx = Math.sin(facing),
         vz = Math.cos(facing)
       // A curled sleeper reaches 0.45 across its bed (its head turned outwards, ears and all),
-      // measured on the shots, and its head up to 0.3 towards the camera
+      // measured on the shots, and its head up to 0.3 towards the camera; the rim may reach further
       const slots = bedSlots(spots)
       expect(slots).toHaveLength(n)
-      for (const slot of slots)
-        for (const off of [-0.45, 0.45])
+      for (const [i, slot] of slots.entries()) {
+        const reach = Math.max(0.45, spots.beds[i]!.radius)
+        for (const off of [-reach, reach])
           for (const ahead of [0, 0.3])
             for (const y of [0, 0.4]) {
               const p = new THREE.Vector3(
@@ -270,8 +271,18 @@ describe('the beds in frame', () => {
               ).project(camera)
               expect(Math.abs(p.x)).toBeLessThanOrEqual(0.95)
             }
+      }
     },
   )
+
+  it.each(ASPECTS)('gives a lone puppy a bed a dorado fits in, at aspect %f', (aspect) => {
+    const { cam } = view(aspect)
+    const [alone] = computeSpots(cam, 1).beds
+    expect(alone!.radius).toBeGreaterThanOrEqual(0.48)
+    expect(alone!.depth / alone!.radius).toBeCloseTo(0.34 / 0.42)
+    for (const bed of computeSpots(cam, 2).beds)
+      expect([bed.radius, bed.depth]).toEqual([0.42, 0.34])
+  })
 })
 
 describe('START_PLACES', () => {
