@@ -17,7 +17,7 @@ npm run icons        # regenerar los iconos PNG desde public/favicon.svg
 
 ## Rendimiento
 
-Objetivo: 50 fps o más con 2 cachorros en el OnePlus 8.
+Objetivo: 50 fps o más con 2 cachorros en un móvil.
 
 Para medir, abre la app con `?fps` en la URL (por ejemplo `https://endika.github.io/patitas/?fps`): la sala muestra los fps en una esquina, actualizados dos veces por segundo.
 
@@ -28,5 +28,3 @@ Calidad según el dispositivo (`pickQuality`):
 | Ordenador           | 24               | 2          | 2048   |
 | Táctil, 1 cachorro  | 16               | 1,6        | 2048   |
 | Táctil, 2 cachorros | 12               | 1,5        | 1024   |
-
-Medición en el móvil: pendiente
