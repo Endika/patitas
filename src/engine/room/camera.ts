@@ -120,3 +120,17 @@ export function clampPlay(cam: FixedCamera, x: number, z: number): [number, numb
   const d = clamp(q.d, PLAY.near, PLAY.far)
   return playWorld(cam, d, clamp(q.side, -playHalf(cam, d), playHalf(cam, d)))
 }
+
+/** `clampPlay` in place, building nothing: for the code that runs every frame. */
+export function clampPlayTo(cam: FixedCamera, p: Pick<Vec3, 'x' | 'z'>): void {
+  const fx = -Math.sin(cam.az),
+    fz = -Math.cos(cam.az),
+    camD = cam.dist * Math.cos(cam.el),
+    rx = p.x - cam.target.x,
+    rz = p.z - cam.target.z
+  const d = clamp(rx * fx + rz * fz, PLAY.near, PLAY.far),
+    half = halfAt(camD, d, cam.tanH),
+    side = clamp(rx * -fz + rz * fx, -half, half)
+  p.x = cam.target.x + fx * d - fz * side
+  p.z = cam.target.z + fz * d + fx * side
+}

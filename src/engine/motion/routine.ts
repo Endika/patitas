@@ -748,6 +748,10 @@ export function letGo(r: RoutineState): void {
   if (r.routine === 'bathing' || r.routine === 'brushing') enter(r, 'none')
 }
 
+/** Busy in its place (a meal, the scale, the bath or the brush): nobody shoves it off it. */
+export const staysPut = (r: RoutineState): boolean =>
+  !!r.held || r.routine === 'eating' || r.routine === 'onScale'
+
 /** How far a puppy in the way of a chase walks off, and the least that counts as making way. */
 const STEP_ASIDE = 0.6,
   STEP_ASIDE_MIN = 0.4

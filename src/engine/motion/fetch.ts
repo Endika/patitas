@@ -28,6 +28,8 @@ export interface FetchEvents {
   dropped?: true
   /** The chase has got no nearer for a while: whoever stands in the way should step aside. */
   blocked?: true
+  /** The chase got no nearer for so long that it gave up. */
+  gaveUp?: true
 }
 
 export interface FetchCtx {
@@ -58,6 +60,21 @@ export function createFetchState(): FetchState {
 }
 
 const camPos = new THREE.Vector3()
+
+/**
+ * Counts the seconds `f` has got no PROGRESS nearer its target, `dist` away now (starting again
+ * when `fresh`). True the moment that reaches BLOCKED.
+ */
+function watch(f: FetchState, dist: number, fresh: boolean, dt: number): boolean {
+  if (fresh || dist < f.nearest - PROGRESS) {
+    f.nearest = dist
+    f.stuckT = 0
+    return false
+  }
+  const was = f.stuckT
+  f.stuckT += dt
+  return was < BLOCKED && f.stuckT >= BLOCKED
+}
 
 /** A chase that gets no nearer asks for the way after BLOCKED s and gives up after GIVE_UP s. */
 const PROGRESS = 0.05,
@@ -111,22 +128,16 @@ export function stepFetch(
     const dx = p.x - m.pos.x,
       dz = p.z - m.pos.z,
       dist = Math.hypot(dx, dz) || 1
-    if (fresh || dist < f.nearest - PROGRESS) {
-      f.nearest = dist
-      f.stuckT = 0
-    } else {
-      const was = f.stuckT
-      f.stuckT += dt
-      if (was < BLOCKED && f.stuckT >= BLOCKED) ev.blocked = true
-      if (f.stuckT >= GIVE_UP) {
-        // It cannot get there: it sits and looks to the player, who can throw again
-        f.task = 'free'
-        f.taskT = 0
-        cameraPosition(cam, camPos)
-        setPose(m, 'sit')
-        m.face = Math.atan2(camPos.x - m.pos.x, camPos.z - m.pos.z)
-        return ev
-      }
+    if (watch(f, dist, fresh, dt)) ev.blocked = true
+    if (f.stuckT >= GIVE_UP) {
+      // It cannot get there: it sits and looks to the player, who can throw again
+      f.task = 'free'
+      f.taskT = 0
+      cameraPosition(cam, camPos)
+      setPose(m, 'sit')
+      m.face = Math.atan2(camPos.x - m.pos.x, camPos.z - m.pos.z)
+      ev.gaveUp = true
+      return ev
     }
     go(p.x - (dx / dist) * ctx.reach, p.z - (dz / dist) * ctx.reach, dist > 0.8 ? 'hop' : 'trot')
     if (dist < ctx.reach + 0.08 && ball.vel.length() < 0.9 && p.y < BALL_R + 0.03) {
@@ -161,6 +172,13 @@ export function stepFetch(
       else go(f.drop.x, f.drop.z, 'hop')
     }
   } else if (f.task === 'return') {
+    // Held up on the way back, it brings the ball as near as it got
+    if (
+      m.goal &&
+      !f.wading &&
+      watch(f, Math.hypot(f.drop.x - m.pos.x, f.drop.z - m.pos.z), fresh, dt)
+    )
+      m.goal = null
     if (!m.goal && f.wading) {
       f.wading = false
       go(f.drop.x, f.drop.z, 'trot')

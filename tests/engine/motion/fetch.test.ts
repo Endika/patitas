@@ -275,6 +275,50 @@ describe('stepFetch when the chase is held up', () => {
     expect(m.face).not.toBeNull()
     expect(ball.state).toBe('air')
     expect(ball.pos.distanceTo(at)).toBe(0)
+
+    // It sits for a while, then stands again
+    let stood = Infinity
+    for (let n = 0; n < 60 * 7 && stood === Infinity; n++) {
+      stepFetch(f, m, ball, ctx, DT)
+      stepPoses(m, DT)
+      stepLocomotion(m, legs, DT)
+      if (m.pose === 'stand') stood = n * DT
+    }
+    expect(stood).toBeCloseTo(5, 1)
+
+    // The next throw watches the chase afresh: no call for the way straight off
+    f.task = 'chase'
+    f.taskT = 0
+    expect(stepFetch(f, m, ball, ctx, DT).blocked).toBeUndefined()
+    expect(f.stuckT).toBe(0)
+    expect(f.nearest).toBeCloseTo(Math.hypot(ball.pos.x - m.pos.x, ball.pos.z - m.pos.z))
+  })
+
+  it('brings the ball back as near as it got when held up on the way', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const m = createMotionState()
+    const legs = createLegStates(legRigs(A), m)
+    const ctx: FetchCtx = {
+      reach: 0.5,
+      cam,
+      mouthWorld: (out: Vec3) => out.set(m.pos.x, 0.5, m.pos.z),
+      mood: { happy: 0.5 },
+      energy: 0.5,
+    }
+    const ball: BallState = { ...createBall(), state: 'mouth' }
+    const { fx, fz } = playLocal(cam, 0, 0)
+    m.pos.set(cam.target.x + fx * 1.2, 0, cam.target.z + fz * 1.2)
+    const start = m.pos.clone()
+    const f: FetchState = { ...createFetchState(), task: 'grab', taskT: 0.6, holding: true }
+    const tasks: FetchTask[] = []
+    for (let n = 0; n < 60 * 6; n++) {
+      stepFetch(f, m, ball, ctx, DT)
+      if (tasks.at(-1) !== f.task) tasks.push(f.task)
+      stepPoses(m, DT)
+      stepLocomotion(m, legs, DT)
+      m.pos.copy(start)
+    }
+    expect(tasks.slice(0, 3)).toEqual(['grab', 'return', 'present'])
   })
 
   it('keeps chasing, and asks nothing, while it gets nearer', () => {
