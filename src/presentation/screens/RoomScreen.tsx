@@ -53,6 +53,8 @@ export default function RoomScreen({
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
 }) {
+  /** Puppies whose stored care could not be read: what they play on must not overwrite it. */
+  const unreadable = useRef(new Set<string>())
   /**
    * Saves the care the room keeps of `ids`, or of every puppy in it, as seen now. A save that
    * fails leaves the last one in place, and the room plays on.
@@ -61,7 +63,8 @@ export default function RoomScreen({
     (stage: RoomStage, ids?: (id: string) => boolean) => {
       const seen = now()
       for (const [id, care] of stage.cares())
-        if (!ids || ids(id)) saveCare(id, { ...care, lastSeen: seen }).catch(() => {})
+        if ((!ids || ids(id)) && !unreadable.current.has(id))
+          saveCare(id, { ...care, lastSeen: seen }).catch(() => {})
     },
     [now, saveCare],
   )
@@ -69,7 +72,7 @@ export default function RoomScreen({
   const status = reported ?? WAITING
   const [full, setFull] = useState(false)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
-  const [unloaded, setUnloaded] = useState(false)
+  const [unloaded, setUnloaded] = useState<ReadonlySet<string>>(() => new Set())
   const inRoom = useMemo(
     () => room.inRoom.flatMap((id) => puppies.find((p) => p.id === id) ?? []),
     [puppies, room],
@@ -91,21 +94,25 @@ export default function RoomScreen({
       return
     }
     let live = true
-    let failed = false
     const load = (id: string) =>
-      loadCare(id).catch(() => {
-        failed = true
-        return undefined
-      })
-    void Promise.all(coming.map((p) => load(p.id))).then((saved) => {
+      loadCare(id).then(
+        (care) => ({ care, failed: false }),
+        () => ({ care: undefined, failed: true }),
+      )
+    void Promise.all(coming.map((p) => load(p.id))).then((loaded) => {
       if (!live) return
-      if (failed) setUnloaded(true)
+      coming.forEach((p, i) => {
+        if (loaded[i]!.failed) unreadable.current.add(p.id)
+        else unreadable.current.delete(p.id)
+      })
+      setUnloaded(new Set(unreadable.current))
       const at = now()
       const place = stage.placeAccidents(inRoom.length)
       const cares = new Map(
         coming.map((p, i) => {
           const breed = BREEDS[p.breedId]
-          return [p.id, comeBack(saved[i] ?? createCare(breed, at), breed, at, place)] as const
+          const saved = loaded[i]!.care ?? createCare(breed, at)
+          return [p.id, comeBack(saved, breed, at, place)] as const
         }),
       )
       stage.setPuppies(inRoom, cares)
@@ -145,7 +152,7 @@ export default function RoomScreen({
         cares.set(id, comeBack({ ...care, lastSeen: since }, breed, at, place))
       }
       stage.resume(cares, at - since)
-      keep(stage)
+      keep(stage, (id) => cares.has(id))
     }
     const timer = setInterval(save, SAVE_EVERY)
     document.addEventListener('visibilitychange', shown)
@@ -200,7 +207,7 @@ export default function RoomScreen({
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}
-        {unloaded && (
+        {inRoom.some((p) => unloaded.has(p.id)) && (
           <p role="alert" className="room-note">
             No se han podido cargar los cuidados.
           </p>

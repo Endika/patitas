@@ -369,6 +369,67 @@ describe('RoomScreen', () => {
     await waitFor(() => expect(stage.names()).toEqual([]))
   })
 
+  it('never saves over care it could not load, and clears the notice as that puppy goes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const byName = await ids(storage)
+    const luna = byName.get('Luna')!,
+      kira = byName.get('Kira')!
+    await storage.saveCare(luna, { ...createCare(BREEDS.beagle, at(18, 9)), hunger: 0.2 })
+    let failing = true
+    const saved: string[] = []
+    const flaky: GameStorage = {
+      ...storage,
+      loadCare: (id) =>
+        failing && id === luna ? Promise.reject(new Error('IDB busy')) : storage.loadCare(id),
+      saveCare: (id, care) => {
+        saved.push(id)
+        return storage.saveCare(id, care)
+      },
+    }
+    const stage = start(flaky, { now: () => at(18, 9) })
+    const notice = 'No se han podido cargar los cuidados.'
+    expect(await screen.findByText(notice)).toBeInTheDocument()
+    await waitFor(() => expect(stage.arrived).toHaveLength(2))
+
+    act(() => vi.advanceTimersByTime(30_000))
+    hide('hidden')
+    hide('visible')
+    await user.click((await roster()).getByRole('button', { name: 'Sacar a Luna' }))
+    await waitFor(() => expect(stage.names()).toEqual(['Kira']))
+    expect(saved).toContain(kira)
+    expect(saved).not.toContain(luna)
+    expect((await storage.loadCare(luna))?.hunger).toBe(0.2)
+    expect(screen.queryByText(notice)).not.toBeInTheDocument()
+
+    // A later load that works brings the stored care in, and saving it is safe again
+    failing = false
+    await user.click((await roster()).getByRole('button', { name: 'Meter a Luna' }))
+    await waitFor(() => expect(stage.names()).toEqual(['Kira', 'Luna']))
+    expect(stage.arrived.at(-1)).toMatchObject({ id: luna, care: { hunger: 0.2 } })
+    hide('hidden')
+    await waitFor(() => expect(saved).toContain(luna))
+    expect(screen.queryByText(notice)).not.toBeInTheDocument()
+  })
+
+  it('leaves the absence on record for a puppy in the room it no longer knows', async () => {
+    const storage = await adopted(['Luna'])
+    const stray = { ...createCare(BREEDS.beagle, at(18, 9)), happiness: 0.6 }
+    let now = at(18, 9)
+    const stage = start(storage, { now: () => now })
+    await waitFor(() => expect(stage.arrived).toHaveLength(1))
+    stage.hold('stray', stray)
+
+    hide('hidden')
+    await waitFor(async () => expect((await storage.loadCare('stray'))?.lastSeen).toBe(at(18, 9)))
+    now = at(18, 15)
+    hide('visible')
+    const luna = (await ids(storage)).get('Luna')!
+    await waitFor(async () => expect((await storage.loadCare(luna))?.lastSeen).toBe(now))
+    expect((await storage.loadCare('stray'))?.lastSeen).toBe(at(18, 9))
+  })
+
   it('keeps the care of every puppy when the app is hidden', async () => {
     const storage = await adopted(['Luna'])
     const luna = (await ids(storage)).get('Luna')!
