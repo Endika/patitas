@@ -327,8 +327,8 @@ describe('formatKg', () => {
     expect(formatKg(12)).toBe('12,0 kg')
   })
 
-  it('reads zero with nobody on it', () => {
-    expect(formatKg(null)).toBe('0,0 kg')
+  it('shows nothing with nobody on it', () => {
+    expect(formatKg(null)).toBe('')
   })
 })
 
@@ -339,7 +339,7 @@ describe('showScale', () => {
     return { drawn, scaleReading: (kg: number | null) => void drawn.push(formatKg(kg)) }
   }
 
-  it('reads the weight while a puppy stands on it, holds it a while, then goes back to zero', () => {
+  it('reads the weight while a puppy stands on it, holds it a while, then goes blank', () => {
     const d = createScaleDisplay(),
       f = fake()
     showScale(d, f, null, DT)
@@ -349,7 +349,7 @@ describe('showScale', () => {
     for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, DT)
     expect(f.drawn).toEqual(['4,3 kg'])
     for (let t = 0; t < 0.2; t += DT) showScale(d, f, null, DT)
-    expect(f.drawn).toEqual(['4,3 kg', '0,0 kg'])
+    expect(f.drawn).toEqual(['4,3 kg', ''])
   })
 
   it('draws again only when the tenths change, or on furniture laid out anew', () => {
