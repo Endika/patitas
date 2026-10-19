@@ -54,6 +54,16 @@ const at = (h: number, min = 0) => new Date(2026, 9, 18, h, min).getTime()
 const MUZZLE = 0.45
 const base = { breed: BREEDS.shiba, muzzle: MUZZLE, clamp }
 
+function seeded(seed: number) {
+  let a = seed
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 interface Pup {
   r: RoutineState
   m: MotionState
@@ -101,6 +111,7 @@ function run(
   places?: number[],
   more: Partial<RoutineCtx> = {},
 ) {
+  const random = seeded(1)
   for (let n = 0; n < secs / DT; n++) {
     for (const [i, p] of pups.entries()) {
       const ctx: RoutineCtx = {
@@ -110,6 +121,7 @@ function run(
         spots,
         place: places?.[i] ?? i,
         bowl: p.bowl,
+        random,
         ...more,
       }
       const ev = stepRoutine(p.r, p.m, ctx, DT)
