@@ -94,6 +94,8 @@ export interface PointerHandlers<H extends PuppyHit = PuppyHit> {
   free(): boolean
   petStart(hit: H, now: number): void
   petMove(hit: H, now: number, px: number): void
+  /** A stroke slid off every puppy; it may come back on with `petMove`. */
+  petOff?(): void
   petEnd(): void
   /** The pointer moved: puppies follow it with their eyes. */
   look(ray: THREE.Ray, now: number): void
@@ -156,6 +158,7 @@ export function attachPointer<H extends PuppyHit>(
     if (mode === 'pet') {
       const hit = h.hit(ray)
       if (hit) h.petMove(hit, now / 1000, px)
+      else h.petOff?.()
     }
     h.look(ray, now / 1000)
   }

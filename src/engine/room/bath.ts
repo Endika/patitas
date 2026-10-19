@@ -26,16 +26,24 @@ export const TREMBLE_HZ = 12
 export const FOAM_MAX = 192
 export const DROP_MAX = 200
 
-/** The finger scrubs this far round it, taking off this much dirt a second at the middle. */
+/**
+ * The finger scrubs this far round it, taking off this much dirt at the middle per unit it
+ * travels over the coat: rubbing cleans, a still finger does not.
+ */
 const SCRUB_R = 0.16,
-  SCRUB_RATE = 6
+  SCRUB_PER_UNIT = 3
 /** How wet the lather leaves the fur it is rubbed into. */
 const SOAPY = 0.5
-/** The dryer's air reaches further than a finger and dries this much a second at the middle. */
+/** The dryer's air reaches further than a finger and dries this much per unit travelled. */
 const DRY_R = 0.24,
-  DRY_RATE = 8
-/** Seconds between blobs of foam while rubbing. */
-const FOAM_EVERY = 0.03
+  DRY_PER_UNIT = 5
+/** At most this much travel counts in one frame, so a jump across the body is not a stroke. */
+const MAX_TRAVEL = 0.1
+/** A blob of foam for every this much travel, and at most a few a frame. */
+const FOAM_EVERY = 0.035,
+  FOAM_BURST = 4
+/** Seconds after the finger last moved that the puppy still feels it rubbing. */
+const RUB_HOLD = 0.3
 /** Seconds between drying steps in the air: wetness falls too slowly to need more. */
 const AIR_STEP = 1
 /** Below this it counts as dry. */
@@ -98,6 +106,55 @@ export interface BathTouch {
   rest: Vec3
   /** Which way the finger moves, in the puppy's frame: the dryer blows the fur that way. */
   dir: Vec3
+  /** How far it has moved over the coat since the bath last stepped. */
+  travel: number
+}
+
+/**
+ * Where a stroke reaches besides under the finger, in the rest pose. The fixed camera never sees
+ * the far side, the belly or the legs behind the near ones, so:
+ * - the same spot on the other side is done too;
+ * - a stroke low on the flank, between `bellyY` and `flankY` and from `back` to `front`, also
+ *   does the belly under it;
+ * - one below `flankY`, on a leg or the lower body, also does the same spot at the other end,
+ *   front for back: `legSwap − z`.
+ */
+export interface BathReach {
+  bellyY: number
+  flankY: number
+  back: number
+  front: number
+  legSwap: number
+}
+
+export function bathReach(A: Pick<Anatomy, 'zones' | 'bones' | 'bi'>): BathReach {
+  const pos = (name: string) => A.bones[A.bi[name]!]!.pos
+  const belly = A.zones.find((z) => z.zone === 'belly')!
+  return {
+    bellyY: belly.c[1] - belly.r * 0.6,
+    flankY: pos('spine')[1],
+    back: pos('pelvis')[2] - 0.1,
+    front: pos('chest')[2] + 0.08,
+    legSwap: pos('shL')[2] + pos('hipL')[2],
+  }
+}
+
+const reached = Array.from({ length: 5 }, () => new THREE.Vector3())
+
+/** The rest points a touch at `p` works on, into `reached`; returns how many. */
+function reachOf(p: Vec3, reach: BathReach | undefined): number {
+  reached[0]!.copy(p)
+  if (!reach) return 1
+  let n = 1
+  const side = Math.abs(p.x) >= 0.03
+  if (side) reached[n++]!.set(-p.x, p.y, p.z)
+  if (p.y >= reach.flankY) return n
+  const z = reach.legSwap - p.z
+  reached[n++]!.set(p.x, p.y, z)
+  if (side) reached[n++]!.set(-p.x, p.y, z)
+  if (p.y > reach.bellyY && p.z >= reach.back && p.z <= reach.front)
+    reached[n++]!.set(0, reach.bellyY, p.z)
+  return n
 }
 
 /** A blob of lather stuck to a bone. */
@@ -126,6 +183,8 @@ export interface Bath {
   blow: number
   blowAt: Vec3
   blowDir: Vec3
+  /** Seconds since the finger last moved over the coat. */
+  rubT: number
 }
 
 export function createBath(): Bath {
@@ -147,6 +206,7 @@ export function createBath(): Bath {
     blow: 0,
     blowAt: new THREE.Vector3(),
     blowDir: new THREE.Vector3(0, 0, -1),
+    rubT: RUB_HOLD,
   }
 }
 
@@ -270,7 +330,7 @@ function dryAt(
   wet: Float32Array,
   rest: DirtRest,
   point: Pick<Vec3, 'x' | 'y' | 'z'>,
-  dt: number,
+  amount: number,
 ): boolean {
   const p = rest.position,
     r2 = DRY_R * DRY_R
@@ -282,7 +342,7 @@ function dryAt(
       dz = p[i * 3 + 2]! - point.z,
       d2 = dx * dx + dy * dy + dz * dz
     if (d2 >= r2) continue
-    wet[i] = Math.max(0, wet[i]! - DRY_RATE * dt * (1 - d2 / r2))
+    wet[i] = Math.max(0, wet[i]! - amount * (1 - d2 / r2))
     changed = true
   }
   return changed
@@ -319,8 +379,10 @@ function addFoam(b: Bath, touch: BathTouch, random: () => number) {
 
 export interface BathInput {
   coat: Coat
-  /** The finger on the puppy, or null. */
+  /** The finger on the puppy, or null. Its travel is used up by the step. */
   touch: BathTouch | null
+  /** Where else a stroke reaches; without it, only under the finger. */
+  reach?: BathReach
   random?: () => number
 }
 
@@ -336,12 +398,19 @@ export function stepBath(b: Bath, input: BathInput, dt: number): boolean {
   b.t += dt
   for (let i = 0; i < b.foamN; i++) b.foam[i]!.age += dt
   let changed = false
+  const travel = touch ? Math.min(MAX_TRAVEL, touch.travel) : 0
+  if (touch) touch.travel = 0
+  b.rubT = travel > 0 ? 0 : b.rubT + dt
   const drying = b.phase === 'drying' && b.dryer && !!touch
-  b.touched = (b.phase === 'scrub' && !!touch) || drying
-  if (b.phase === 'scrub' && touch) {
-    changed = scrubAt(coat.dirt.field, rest, touch.rest, SCRUB_R, SCRUB_RATE * dt) || changed
-    changed = soakAt(coat.wet, rest, touch.rest, SCRUB_R, SOAPY) || changed
-    b.foamAcc += dt
+  const n = touch && travel > 0 ? reachOf(touch.rest, input.reach) : 0
+  b.touched = !!touch && b.rubT < RUB_HOLD && (b.phase === 'scrub' || drying)
+  if (b.phase === 'scrub' && touch && travel > 0) {
+    for (let i = 0; i < n; i++) {
+      const at = reached[i]!
+      changed = scrubAt(coat.dirt.field, rest, at, SCRUB_R, SCRUB_PER_UNIT * travel) || changed
+      changed = soakAt(coat.wet, rest, at, SCRUB_R, SOAPY) || changed
+    }
+    b.foamAcc = Math.min(b.foamAcc + travel, FOAM_EVERY * FOAM_BURST)
     for (; b.foamAcc >= FOAM_EVERY; b.foamAcc -= FOAM_EVERY)
       addFoam(b, touch, input.random ?? Math.random)
   } else if (b.phase === 'rinse') {
@@ -353,7 +422,9 @@ export function stepBath(b: Bath, input: BathInput, dt: number): boolean {
       enter(b, 'shake')
     }
   } else if (b.phase === 'shake' && b.t >= SHAKE_TIME) enter(b, 'drying')
-  if (drying) changed = dryAt(coat.wet, rest, touch.rest, dt) || changed
+  if (drying)
+    for (let i = 0; i < n; i++)
+      changed = dryAt(coat.wet, rest, reached[i]!, DRY_PER_UNIT * travel) || changed
   b.blow = damp(b.blow, drying ? 1 : 0, 8, dt)
   if (drying) {
     b.blowAt.copy(touch.rest)
@@ -391,6 +462,11 @@ const FOAM_R = 0.026,
   DROP_R = 0.016,
   DROP_LIFE = 1.4,
   GRAVITY = 6
+/** Shaken off, drops fly out at most this fast, and up a little: they land round the puppy. */
+const SPRAY_SPEED = 0.75,
+  SPRAY_UP = 0.7
+/** Bath spheres a puppy has at most: shower drops are tested against these. */
+const MAX_SPHERES = 64
 /** Drops a second from the shower while rinsing, and off the coat while shaking. */
 const RAIN = 150,
   SPRAY = 220
@@ -400,9 +476,12 @@ const SHOWER_Y = 1.15,
 
 const Z = new THREE.Vector3(0, 0, 1),
   UP = new THREE.Vector3(0, 1, 0)
-/** Where the dryer is held from the spot it dries, and how big it is. */
-const DRYER_OFF = { side: 0.16, up: 0.1 },
-  DRYER_SCALE = 1.7
+/**
+ * Where the dryer is held from the spot it dries, and how big it is: up and to the left, clear of
+ * a finger coming from below on the right.
+ */
+const DRYER_OFF = { side: -0.24, up: 0.14 },
+  DRYER_SCALE = 2.5
 const ONE = new THREE.Quaternion()
 const tmp = new THREE.Vector3(),
   tmp2 = new THREE.Vector3(),
@@ -467,6 +546,7 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
   )
   for (const m of [foam, drops]) {
     m.count = 0
+    m.visible = false
     m.frustumCulled = false
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     scene.add(m)
@@ -512,10 +592,15 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
   /** World centre of a bath zone, into `out`. */
   const centre = (z: BathShown['bathZones'][number], out: Vec3) =>
     z.bone.localToWorld(out.copy(z.off))
-  const onCoat = (shown: readonly BathShown[], p: Vec3) => {
-    for (const s of shown)
-      for (const zone of s.bathZones)
-        if (centre(zone, tmp2).distanceToSquared(p) < zone.r * zone.r) return true
+  const spheres = new Float32Array(MAX_SPHERES * 4)
+  /** Inside one of the first `n` spheres in `spheres`. */
+  const onCoat = (n: number, p: Vec3) => {
+    for (let i = 0; i < n * 4; i += 4) {
+      const dx = p.x - spheres[i]!,
+        dy = p.y - spheres[i + 1]!,
+        dz = p.z - spheres[i + 2]!
+      if (dx * dx + dy * dy + dz * dz < spheres[i + 3]!) return true
+    }
     return false
   }
 
@@ -557,20 +642,33 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
           const d = unit(tmp)
           if (d.y < -0.3) d.y = -d.y
           const c = centre(zone, tmp2)
-          const speed = 1.1 + random() * 0.9
+          const speed = SPRAY_SPEED * (0.5 + 0.5 * random())
           spawn(
             false,
             c.x + d.x * zone.r,
             c.y + d.y * zone.r,
             c.z + d.z * zone.r,
             d.x * speed,
-            d.y * speed + 0.8,
+            d.y * speed + SPRAY_UP,
             d.z * speed,
           )
         }
       }
       foam.count = n
-      foam.instanceMatrix.needsUpdate = true
+      foam.visible = n > 0
+      if (n) foam.instanceMatrix.needsUpdate = true
+
+      // Shower drops stop on the coat of the puppy being rinsed: its spheres, placed once
+      let rinsed = 0
+      for (const s of shown) {
+        if (s.bath.phase !== 'rinse') continue
+        for (const zone of s.bathZones) {
+          if (rinsed === MAX_SPHERES) break
+          centre(zone, tmp2).toArray(spheres, rinsed * 4)
+          spheres[rinsed++ * 4 + 3] = zone.r * zone.r
+        }
+        break
+      }
 
       let live = 0
       for (let i = 0; i < DROP_MAX; i++) {
@@ -582,21 +680,22 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
         pos[j + 1]! += vel[j + 1]! * dt
         pos[j + 2]! += vel[j + 2]! * dt
         tmp.set(pos[j]!, pos[j + 1]!, pos[j + 2]!)
-        if (tmp.y < 0.01 || life[i]! <= 0 || (shower[i] && onCoat(shown, tmp))) {
+        if (tmp.y < 0.01 || life[i]! <= 0 || (shower[i] && onCoat(rinsed, tmp))) {
           life[i] = 0
           continue
         }
         drops.setMatrixAt(live++, mat.compose(tmp, ONE, scl.set(1, 1.5, 1)))
       }
       drops.count = live
-      drops.instanceMatrix.needsUpdate = true
+      drops.visible = live > 0
+      if (live) drops.instanceMatrix.needsUpdate = true
 
       let t: BathTouch | null = null
       for (const s of shown) if (s.bath.phase === 'drying' && s.bath.dryer) t ??= s.bathTouch
       dryer.group.visible = !!t
       if (t) {
         const at = t.bone.localToWorld(tmp.copy(t.local))
-        // Held up and to the right of the spot, so it shows side on rather than end on
+        // Held off to one side of the spot, so it shows side on rather than end on
         const d = tmp2.copy(at).sub(camera).normalize()
         side.crossVectors(d, UP).normalize()
         dryer.group.position

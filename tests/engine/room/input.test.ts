@@ -189,4 +189,27 @@ describe('attachPointer', () => {
     press(canvas, 'pointerup', 211, 621)
     expect(events).toEqual(['petStart', 'tap', 'petEnd'])
   })
+
+  it('says when a stroke slides off the puppy, and keeps following it back on', () => {
+    const canvas = fakeCanvas(),
+      events: string[] = []
+    const onPuppy = { zone: 'back' as const, point: new THREE.Vector3(), distance: 1 }
+    attachPointer(
+      canvas,
+      camera,
+      handlers(undefined, [], {
+        hit: (ray) => (ray.direction.x < 0 ? onPuppy : null),
+        petStart: () => void events.push('petStart'),
+        petMove: () => void events.push('petMove'),
+        petOff: () => void events.push('petOff'),
+        petEnd: () => void events.push('petEnd'),
+      }),
+    )
+    press(canvas, 'pointerdown', 150, 420)
+    press(canvas, 'pointermove', 180, 420)
+    press(canvas, 'pointermove', 380, 420)
+    press(canvas, 'pointermove', 160, 420)
+    press(canvas, 'pointerup', 160, 420)
+    expect(events).toEqual(['petStart', 'petMove', 'petOff', 'petMove', 'petEnd'])
+  })
 })

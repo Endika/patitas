@@ -209,6 +209,19 @@ describe('bath', () => {
     expect(crossings(shake)).toBeLessThanOrEqual(22)
   })
 
+  it('ended mid-shake, the body eases back instead of snapping upright', () => {
+    const roll = rolls(SHAKE_TIME, (input, t) => {
+      input.routine = t < 0.325 ? 'bathing' : undefined
+      input.bath = { phase: t < 0.325 ? 'shake' : 'off', t, touched: false }
+    })
+    // From the last frame of the shake on, frame 19, well into a swing
+    const after = roll.slice(18)
+    expect(Math.abs(after[0]!)).toBeGreaterThan(0.2)
+    const jumps = after.slice(1).map((r, i) => Math.abs(r - after[i]!))
+    expect(Math.max(...jumps)).toBeLessThan(0.15)
+    expect(Math.abs(roll.at(-1)!)).toBeLessThan(0.01)
+  })
+
   it('trembles a little at 12 Hz while wet, and not at all once dry', () => {
     const wet = rolls(1, (input) => (input.wet = 1))
     expect(most(wet)).toBeGreaterThan(0.005)
@@ -216,6 +229,8 @@ describe('bath', () => {
     expect(crossings(wet)).toBeGreaterThanOrEqual(22)
     expect(crossings(wet)).toBeLessThanOrEqual(25)
     expect(most(rolls(1, (input) => (input.wet = 0)))).toBe(0)
+    // Damp is not wet: it stops trembling well before it is dry
+    expect(most(rolls(1, (input) => (input.wet = 0.28)))).toBe(0)
   })
 
   /** Rubbed in the bath for `secs` with `persona`: its mood, ears and gaze. */

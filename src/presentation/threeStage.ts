@@ -230,8 +230,13 @@ export function createThreeStage(
     },
     petMove(hit, t, px) {
       if (hit.bathZone) return rubBath(hit.view, hit.bathZone, hit.point)
+      for (const v of views) liftBath(v)
       if (hit.view !== petView) return
       if (movePet(hit.view.behaviour, hit.zone, hit.point, t, px)) room.emitHeart(hit.point)
+    },
+    // Off the puppy the scrubbing or drying stops and the dryer is put away
+    petOff() {
+      for (const v of views) liftBath(v)
     },
     petEnd() {
       if (petView) endPet(petView.behaviour)
