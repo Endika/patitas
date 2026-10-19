@@ -210,12 +210,12 @@ describe('computeSpots', () => {
       const { cam, camera } = view(aspect)
       const spots = spotsFor(aspect, 2),
         { mud } = spots
-      // The two start places: a body 0.26 wide, 0.6 long and 0.55 tall, turned to `heading`
+      // The two start places: a dorado's body, 0.3 wide, 0.7 long and 0.7 tall, turned to `heading`
       const screens = startPlaces(cam, spots, 2).map(({ x, z: z0, heading = 0 }) => {
         const box = new THREE.Box2()
-        for (const w of [-0.13, 0.13])
-          for (const l of [-0.3, 0.3])
-            for (const y of [0, 0.55]) {
+        for (const w of [-0.15, 0.15])
+          for (const l of [-0.35, 0.35])
+            for (const y of [0, 0.7]) {
               const p = new THREE.Vector3(
                 x + w * Math.cos(heading) + l * Math.sin(heading),
                 y,
@@ -234,7 +234,7 @@ describe('computeSpots', () => {
           all++
           if (!screens.some((b) => b.containsPoint(new THREE.Vector2(p.x, p.y)))) seen++
         }
-      expect(seen / all).toBeGreaterThanOrEqual(0.9)
+      expect(seen / all).toBeGreaterThanOrEqual(0.95)
     },
   )
 
@@ -258,6 +258,35 @@ describe('computeSpots', () => {
       expect(local(spots.beds[0]!.center).d).toBeCloseTo(1.7)
       if (n === 2 && aspect >= 1.5) expect(local(spots.beds[1]!.center).d).toBeCloseTo(1.7)
     },
+  )
+
+  it.each(COUNTS)(
+    'at every aspect from 0.3 to 3.5 in steps of 0.01 for %i, keeps every rule, in play, and the scale in the house or by the strip',
+    (n) => {
+      const grass = SPLIT - STRIP_HALF,
+        wrong: string[] = []
+      for (let k = 0; k <= 320; k++) {
+        const aspect = +(0.3 + k * 0.01).toFixed(2),
+          { cam } = view(aspect),
+          spots = computeSpots(cam, n)
+        // Below LAYOUT_ASPECT the room is laid out as for it: everything must still be in play here
+        if (spots.fallback || startPlacesOf(cam, spots, n).fallback)
+          wrong.push(`${aspect} fallback`)
+        for (const [name, { center }] of named(spots)) {
+          const [x, z] = clampPlay(cam, center.x, center.z)
+          if (Math.hypot(x - center.x, z - center.z) > 1e-9)
+            wrong.push(`${aspect} ${name} out of play`)
+        }
+        const scale = playLocal(cam, spots.scale.center.x, spots.scale.center.z)
+        const inHouse = scale.side - spots.scale.radius >= SPLIT + STRIP_HALF - 1e-9
+        if (!inHouse && scale.side + spots.scale.radius < grass - 0.1 - 1e-9)
+          wrong.push(
+            `${aspect} scale ${(grass - scale.side - spots.scale.radius).toFixed(2)} off the strip`,
+          )
+      }
+      expect(wrong).toEqual([])
+    },
+    60000,
   )
 
   it.each(WIDE)('keeps every bed, bowl and mat off the grass at aspect %f for %i', (aspect, n) => {
