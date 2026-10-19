@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.4.0](https://github.com/Endika/patitas/compare/v0.3.0...v0.4.0) (2026-10-19)
+
+
+### Features
+
+* add bed, bowl, scale and a garden corner to the room ([15b1b91](https://github.com/Endika/patitas/commit/15b1b914365563745496220615d0c1815da94966))
+* add puppy care needs with gentle time catch-up ([dbb2b6f](https://github.com/Endika/patitas/commit/dbb2b6febf62f6d9359e375d6c5a0260419b7a47))
+* add the care bar and needs panel ([ea59d46](https://github.com/Endika/patitas/commit/ea59d463a0ef2066cf869ad514233c544afd2da3))
+* bathe puppies with foam, rinse and a shake ([6f947a3](https://github.com/Endika/patitas/commit/6f947a3ca62172fe81be6ee480922ce00b4aca41))
+* brush and weigh puppies ([895f98a](https://github.com/Endika/patitas/commit/895f98a5528b3ba630e8e207cc295bb1377ce5a9))
+* calm the room HUD so the puppies fill the screen ([8011ee1](https://github.com/Endika/patitas/commit/8011ee14c52f048ca5856c2eb0e4ab6981ead84c))
+* feed puppies from a bowl ([7223e7a](https://github.com/Endika/patitas/commit/7223e7a3d64aa03fa9559e6c32ad40e31ae19a97))
+* get puppies muddy in the garden corner ([ac2fc6c](https://github.com/Endika/patitas/commit/ac2fc6ce1a693674cfd08ee9ddc6ecfe19d6e1f6))
+* give each puppy its own bed and bowl ([047383d](https://github.com/Endika/patitas/commit/047383d5b70c93a7fd6f9652087da60fc58fdf4b))
+* lay out adoption side by side on a phone held sideways ([8fe6c05](https://github.com/Endika/patitas/commit/8fe6c05150f0a371ddb18f967750f91ccf853ee2))
+* let puppies go to bed and sleep by tiredness and time ([95fc9b9](https://github.com/Endika/patitas/commit/95fc9b95a3f3a492aa2ae9e1e3f17d491b683c67))
+* puppies pee and poop and you clean up ([54a9129](https://github.com/Endika/patitas/commit/54a91294c9630ee95796e9c02c535833fd272e73))
+* vary which puppy chases the ball and let them race ([79c22ac](https://github.com/Endika/patitas/commit/79c22ac380fbbfe13713b649787bd866c7b703d3))
+
+
+### Bug Fixes
+
+* catch up after the app was hidden and harden the care bar ([df6b9f7](https://github.com/Endika/patitas/commit/df6b9f7f33a3b88d3273cef630735807c1a4467b))
+* keep fresh messes tappable and let calls win over chores ([54e0530](https://github.com/Endika/patitas/commit/54e05306afb971ddc57674c23d97c9dc23ec0987))
+* keep mud wading allocation-free and the debug mud button gentle ([4263abe](https://github.com/Endika/patitas/commit/4263abed9cb09473bf3bca24588b3b1a2c14d29c))
+* keep sleeping puppies in frame and undisturbed ([91e9f5c](https://github.com/Endika/patitas/commit/91e9f5cf8374855284dbdcaa72291500c019b5b5))
+* keep stored care after a failed load ([530331a](https://github.com/Endika/patitas/commit/530331a76b30ab6402e5e88fa613468a2d212ae8))
+* lay out the garden where puppies can see and reach it ([234b3e5](https://github.com/Endika/patitas/commit/234b3e5a25bc1fbe6c784f63cc668b5850b145f5))
+* leave the scale display blank when nobody is on it ([2383e47](https://github.com/Endika/patitas/commit/2383e474d7ca3c17ae95c9fd27e1d753afe0af81))
+* let a player reach the whole coat and stop the bath where the finger leaves ([90d1394](https://github.com/Endika/patitas/commit/90d1394c3f61070d08fb8f8abda88b9d5071a9ae))
+* let happiness differ between puppies ([87205e3](https://github.com/Endika/patitas/commit/87205e36c3baa38ca564352260ca8a80e88f894b))
+* let two puppies eat centred and keep the begging pause ([cbb7d59](https://github.com/Endika/patitas/commit/cbb7d59a7aede7262ca6ab683d1c7d64f608df0c))
+* make the pee puddle readable on the floor ([3c4c01f](https://github.com/Endika/patitas/commit/3c4c01f42957cc550c7fb8c4d11ddf77a0c7d232))
+* polish sleepers, beds and mess taps ([9f70429](https://github.com/Endika/patitas/commit/9f70429fd7ed1f45e1d8b902720aba49aa057327))
+* return focus from the room's popovers and let its notices go ([c927356](https://github.com/Endika/patitas/commit/c927356e308b515570481346a8af3572b33df100))
+* seed particle tests and keep weighing clear of the eater ([efa4c63](https://github.com/Endika/patitas/commit/efa4c633c7d1a7324359e7890dca5a5adeec2d7d))
+* settle meal size and require the breed for weight changes ([1ee917d](https://github.com/Endika/patitas/commit/1ee917d2a3e3b50c7d142ffb97b2c4b2db33c23d))
+
 ## [0.3.0](https://github.com/Endika/patitas/compare/v0.2.0...v0.3.0) (2026-10-18)
 
 
