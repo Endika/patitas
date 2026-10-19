@@ -37,8 +37,11 @@ const LOOK_AWAY = 0.9,
   LOOK_AWAY_YAW = 1
 /** Seconds the shake takes to build up and to die down. */
 const SHAKE_EASE = 0.12
-/** Wet through, it trembles this much. */
-const TREMBLE = 0.02
+/** How fast a shake cut short settles. */
+const SHAKE_SETTLE = 10
+/** Wet through, it trembles this much; merely damp, up to DAMP, not at all. */
+const TREMBLE = 0.02,
+  DAMP = 0.3
 /** Asking for food: the head tips to one side, then the other. */
 const BEG_TILT = 0.24
 /** Asleep: the head turns onto the front paws and the tail wraps round the body. */
@@ -129,6 +132,8 @@ export interface BehaviourState {
   bathRubbed: boolean
   lookAwayT: number
   earsBack: number
+  /** The body's roll from shaking itself dry. */
+  shakeRoll: number
 }
 
 export function createBehaviourState(): BehaviourState {
@@ -173,6 +178,7 @@ export function createBehaviourState(): BehaviourState {
     bathRubbed: false,
     lookAwayT: 0,
     earsBack: 0,
+    shakeRoll: 0,
   }
 }
 
@@ -429,17 +435,19 @@ export function stepBehaviour(
     s.roll.x * 0.7 * aw,
   ]
   const shakeT = bath?.phase === 'shake' ? bath.t : -1
-  const shakeRoll =
+  // Cut short, the shake settles back rather than snapping upright
+  s.shakeRoll =
     shakeT >= 0
       ? SHAKE_ROLL *
         Math.sin(shakeT * 2 * Math.PI * SHAKE_HZ) *
         sm(0, SHAKE_EASE, shakeT) *
         (1 - sm(SHAKE_TIME - SHAKE_EASE, SHAKE_TIME, shakeT))
-      : 0
+      : damp(s.shakeRoll, 0, SHAKE_SETTLE, dt)
+  const shakeRoll = s.shakeRoll
   const tremble =
     shakeT >= 0
       ? 0
-      : TREMBLE * sm(0.15, 0.6, input.wet ?? 0) * aw * Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
+      : TREMBLE * sm(DAMP, 0.6, input.wet ?? 0) * aw * Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
   const spine: Rot = [
     body.pitch * (1 - fk),
     s.yaw.x * 0.08 * (1 - fk),

@@ -9,11 +9,18 @@ import { createFetchState } from '@/engine/motion/fetch'
 import { createRoutineState, tuckIn } from '@/engine/motion/routine'
 import { createBehaviourState } from '@/engine/puppy/behaviour'
 import { createBath } from '@/engine/room/bath'
+import { createCamera, fitCamera } from '@/engine/room/camera'
+import { computeSpots } from '@/engine/room/furniture'
+import { createLegStates } from '@/engine/motion/locomotion'
+import { legRigs } from '@/engine/motion/ik'
+import { anatomy } from '@/engine/puppy/anatomy'
 import {
   disposeOwn,
   hitBath,
   hitZone,
+  liftBath,
   rubBath,
+  soilingDepth,
   type BathZone,
   type PuppyView,
   offerBall,
@@ -177,5 +184,24 @@ describe('the bath', () => {
     // Along the world's −z is the puppy's own +x, a quarter turn round
     rubBath(view, z, at.clone().add(new THREE.Vector3(0, 0, -0.02)))
     expect(t.dir.distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(1e-9)
+    // The bath uses up how far it slid; off the puppy and back on, it starts again
+    expect(t.travel).toBeCloseTo(0.02, 9)
+    liftBath(view)
+    expect(view.bathTouch).toBeNull()
+    rubBath(view, z, at)
+    expect(view.bathTouch!.travel).toBe(0)
+  })
+})
+
+describe('soilingDepth', () => {
+  it('soils a puppy standing in the puddle, but not one in its bath', () => {
+    const spots = computeSpots(fitCamera(createCamera(), 0.46), 1)
+    const motion = createMotionState()
+    motion.pos.copy(spots.mud.center)
+    const legs = createLegStates(legRigs(anatomy(BREEDS.shiba)), motion)
+    const routine = createRoutineState()
+    expect(soilingDepth({ routine, motion, legs }, spots, [])).toBeGreaterThan(0.5)
+    routine.bath = true
+    expect(soilingDepth({ routine, motion, legs }, spots, [])).toBe(0)
   })
 })

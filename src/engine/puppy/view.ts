@@ -31,6 +31,7 @@ import {
 } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
 import {
+  bathReach,
   bathSpheres,
   beginBath,
   createBath,
@@ -40,6 +41,7 @@ import {
   stepBath,
   withCoat,
   type Bath,
+  type BathReach,
   type BathTouch,
   type Coat,
 } from '@/engine/room/bath'
@@ -143,6 +145,8 @@ export interface PuppyView extends BehaviourRig, SceneView {
   fur: FurUniforms
   bath: Bath
   bathZones: BathZone[]
+  /** Where else on the coat a stroke reaches. */
+  bathReach: BathReach
   /** The finger scrubbing or drying it, or null. */
   bathTouch: BathTouch | null
   /** Seconds to the next «z» while asleep. */
@@ -392,6 +396,7 @@ export function mountPuppyView(
     fur: furU,
     bath: createBath(),
     bathZones,
+    bathReach: bathReach(A),
     bathTouch: null,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
@@ -484,8 +489,9 @@ export function hitPuppy(views: PuppyView[], ray: THREE.Ray): PuppyViewHit | nul
 const was = new THREE.Vector3()
 
 /**
- * The finger at `point` on bath zone `z`: where that is on the bone and in the rest pose, and
- * which way it is moving, in the puppy's frame, once it has moved far enough to tell.
+ * The finger at `point` on bath zone `z`: where that is on the bone and in the rest pose, how far
+ * it has slid, and which way it is moving, in the puppy's frame, once it has moved far enough to
+ * tell.
  */
 export function rubBath(
   view: Pick<PuppyView, 'bath' | 'bathTouch' | 'motion'>,
@@ -501,11 +507,13 @@ export function rubBath(
       local: new THREE.Vector3(),
       rest: new THREE.Vector3(),
       dir: view.bath.blowDir.clone(),
+      travel: 0,
     }
   t.bone = z.bone
   z.bone.worldToLocal(t.local.copy(point))
   t.rest.copy(t.local).add(z.rest)
   if (!moved) return
+  t.travel += point.distanceTo(was)
   const dx = point.x - was.x,
     dz = point.z - was.z,
     c = Math.cos(view.motion.heading),
@@ -649,14 +657,9 @@ export function tickPuppies(
         })
       }
     }
-    const depth = spots
-      ? Math.max(
-          mudDepth(spots, M.pos, view.legs),
-          messDepth(ctx.underfoot ?? NOTHING_UNDERFOOT, view.legs),
-        )
-      : 0
+    const depth = spots ? soilingDepth(view, spots, ctx.underfoot ?? NOTHING_UNDERFOOT) : 0
     if (stepDirt(view.coat.dirt, depth, dt)) view.coat.dirty = true
-    stepBath(view.bath, { coat: view.coat, touch: view.bathTouch }, dt)
+    stepBath(view.bath, { coat: view.coat, touch: view.bathTouch, reach: view.bathReach }, dt)
     if (flushCoat(view.coat, dt)) {
       view.coatAttr.needsUpdate = true
       view.care = withCoat(view.care, view.coat)
@@ -716,6 +719,16 @@ export function tickPuppies(
     } else view.snoreT = 0
   })
   return moved.map((m) => m.ev)
+}
+
+/** How deep in mud or a mess its paws are; in its bath, none, or it would soil as it is scrubbed. */
+export function soilingDepth(
+  view: Pick<PuppyView, 'routine' | 'motion' | 'legs'>,
+  spots: Spots,
+  underfoot: readonly Underfoot[],
+): number {
+  if (view.routine.bath) return 0
+  return Math.max(mudDepth(spots, view.motion.pos, view.legs), messDepth(underfoot, view.legs))
 }
 
 const camPos = new THREE.Vector3()

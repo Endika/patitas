@@ -77,9 +77,11 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
           <button type="button" onClick={() => stageRef.current?.relieve?.('poop')}>
             Caca
           </button>
-          <button type="button" onClick={() => stageRef.current?.bath(0)}>
-            Baño
-          </button>
+          {debugNames(breedIds).map((n, i) => (
+            <button key={n} type="button" onClick={() => stageRef.current?.bath(i)}>
+              {breedIds.length > 1 ? `Baño ${n}` : 'Baño'}
+            </button>
+          ))}
           <button type="button" onClick={() => stageRef.current?.rinse()}>
             Aclarar
           </button>
