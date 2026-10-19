@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react'
 import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
@@ -12,7 +21,6 @@ import UnsavedNotice from '../components/UnsavedNotice'
 import { useDismiss, type Closable, type Dismissal } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
-import { EXIT_MS, useBackGuard } from '../useBackGuard'
 import { useFleeting } from '../useFleeting'
 import { useRoomStage } from '../useRoomStage'
 import '../room.css'
@@ -45,6 +53,8 @@ export default function RoomScreen({
   saveCare,
   now = Date.now,
   createStage = createThreeStage,
+  exitAsked = false,
+  ref,
 }: {
   puppies: Puppy[]
   room: Room
@@ -59,6 +69,10 @@ export default function RoomScreen({
   saveCare(id: string, care: Care): Promise<void>
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
+  /** A back with nothing open: one more leaves. */
+  exitAsked?: boolean
+  /** Closes what is open in the room for the system back, as Escape or «Terminar» would. */
+  ref?: Ref<Closable>
 }) {
   /** Puppies whose stored care could not be read: what they play on must not overwrite it. */
   const unreadable = useRef(new Set<string>())
@@ -210,10 +224,9 @@ export default function RoomScreen({
   const stage = () => stageRef.current
   const busy = status.needs.find((n) => n.mode === 'bath' || n.mode === 'brush')?.mode
 
-  // The system back closes what is open, as Escape or «Terminar» would, before it leaves
   const hud = useRef<Closable>(null),
     card = useRef<Closable>(null)
-  const closeTop = (): boolean => {
+  const closeTop = () => {
     if (card.current?.close() || hud.current?.close()) return true
     if (castOpen && !empty) {
       closeCast('escape')
@@ -223,7 +236,7 @@ export default function RoomScreen({
     else if (busy === 'brush') stageRef.current?.endBrush()
     return Boolean(busy)
   }
-  const leaving = useFleeting(useBackGuard(closeTop) || null, EXIT_MS)
+  useImperativeHandle(ref, () => ({ close: closeTop }))
 
   return (
     <div className="room">
@@ -278,7 +291,7 @@ export default function RoomScreen({
             {waiting} espera fuera: saca a uno para que entre.
           </p>
         )}
-        {leaving && (
+        {exitAsked && (
           <p role="status" className="room-note">
             Pulsa atrás otra vez para salir
           </p>

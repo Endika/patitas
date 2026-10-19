@@ -13,6 +13,7 @@ export default function AdoptScreen({
   onAdopt,
   onBack,
   createPreview,
+  exitAsked = false,
 }: {
   unsaved: boolean
   /** Throws `InvalidPuppyName`. */
@@ -20,6 +21,8 @@ export default function AdoptScreen({
   /** Back to the room, when there is someone in it. */
   onBack?: () => void
   createPreview?: CreatePreview
+  /** A back with nothing to go back to: one more leaves. */
+  exitAsked?: boolean
 }) {
   const [breedId, setBreedId] = useState<BreedId>('dorado')
   const [name, setName] = useState('')
@@ -62,6 +65,14 @@ export default function AdoptScreen({
             </h1>
             <p className="text-ink-soft">Elige una raza y ponle nombre.</p>
           </header>
+          {exitAsked && (
+            <p
+              role="status"
+              className="rounded-2xl border border-brand bg-glass px-4 py-3 text-sm font-semibold"
+            >
+              Pulsa atrás otra vez para salir
+            </p>
+          )}
           {unsaved && (
             <UnsavedNotice className="rounded-2xl border border-brand bg-glass px-4 py-3 text-sm font-semibold" />
           )}
