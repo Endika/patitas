@@ -336,6 +336,16 @@ export function createRoomScene(
     for (const cb of resizeListeners) cb()
   }
 
+  // A window being dragged fires many resizes a frame: the room is laid out again once a frame
+  let resizeFrame = 0
+  const onResize = () => {
+    if (resizeFrame) return
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0
+      resize()
+    })
+  }
+
   const tickFloaters = (dt: number) => {
     for (let i = floaters.length - 1; i >= 0; i--) {
       const f = floaters[i]!
@@ -427,7 +437,8 @@ export function createRoomScene(
     dispose() {
       renderer.setAnimationLoop(null)
       fpsReadout?.remove()
-      removeEventListener('resize', resize)
+      removeEventListener('resize', onResize)
+      if (resizeFrame) cancelAnimationFrame(resizeFrame)
       resizeListeners.clear()
       // Puppy views own their resources and may share cached geometry
       for (const v of views) scene.remove(v.group)
@@ -453,7 +464,7 @@ export function createRoomScene(
       renderer.forceContextLoss()
     },
   }
-  addEventListener('resize', resize)
+  addEventListener('resize', onResize)
   resize()
   return room
 }
