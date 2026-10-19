@@ -9,8 +9,8 @@
   --coral: #e0674f;
   --coral-soft: #f2c3b5;
   --health-good: #4f9a6b;
-  --health-ok: #9aa7a3;
-  --health-warn: #d08a2c;
+  --health-ok: #7d8a86;
+  --health-warn: #b5731a;
   --font-display: 'Trebuchet MS', system-ui, sans-serif;
   --font-body: 'Segoe UI', system-ui, sans-serif;
   color-scheme: light;
@@ -176,7 +176,7 @@
   max-width: 100%;
   padding: 0 12px;
 }
-.room .room-pup[aria-pressed='true'] {
+.room .room-pup[aria-current='true'] {
   border-color: var(--coral);
   box-shadow: inset 0 0 0 1px var(--coral);
 }
@@ -244,6 +244,10 @@
   font-weight: 700;
   font-size: 0.95rem;
 }
+.room-need-breed {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
 .room-need-head small {
   font-size: 0.75rem;
   font-weight: 700;
@@ -299,7 +303,9 @@
   flex-direction: column;
   gap: 6px;
   width: max-content;
-  max-width: calc(100vw - 32px);
+  max-width: calc(
+    100vw - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px))
+  );
   padding: 8px;
   border-radius: 20px;
   background: rgba(249, 252, 251, 0.94);
@@ -388,7 +394,12 @@
   left: 50%;
   bottom: calc(100% + 2px);
   width: max-content;
-  max-width: min(34ch, calc(100vw - 32px));
+  max-width: min(
+    34ch,
+    calc(
+      100vw - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px))
+    )
+  );
   margin: 0;
   padding: 8px 14px;
   border-radius: 14px;
@@ -415,6 +426,8 @@
   gap: 6px;
 }
 .room-tray {
+  /* After the buttons for the keyboard, above them on screen */
+  order: -1;
   animation: room-pop 0.16s ease-out;
 }
 .room-actions,
@@ -509,9 +522,14 @@
     scrollbar-color: var(--line) transparent;
     padding-top: max(12px, env(safe-area-inset-top, 0px));
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    /* The rails sit beside the room, never over it, so a finger can scroll them anywhere */
+    pointer-events: auto;
   }
   .room-top {
     grid-column: 1;
+    /* What runs below the fold fades out, so the rail reads as one that scrolls */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+    padding-bottom: 24px;
     padding-left: max(12px, env(safe-area-inset-left, 0px));
     padding-right: 4px;
     gap: 8px;
@@ -579,12 +597,18 @@
     padding: 0 10px;
     font-size: 0.82rem;
   }
+  /* Notices first, under the empty room's title, so a long roster never pushes them out of view */
+  .room-top > .room-name,
+  .room-top > .room-breed {
+    order: -2;
+  }
   .room-note {
+    order: -1;
     font-size: 0.82rem;
   }
   .room-hint {
     position: static;
-    order: -1;
+    order: -2;
     width: auto;
     max-width: none;
     margin-bottom: auto;

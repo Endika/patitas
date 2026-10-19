@@ -1,6 +1,6 @@
 import { useCallback, useId, useRef, useState } from 'react'
 import type { PuppyNeeds } from '../roomStage'
-import { useDismiss } from './useDismiss'
+import { useDismiss, type Dismissal } from './useDismiss'
 
 const BARS: ['happiness' | 'hunger' | 'cleanliness' | 'energy', string][] = [
   ['happiness', 'Felicidad'],
@@ -30,22 +30,33 @@ function Meter({ label, value }: { label: string; value: number }) {
 
 /**
  * A chip for each puppy in the room with its name, how happy it is, its health and what the scale
- * read; a tap opens its card with every need. With two, the chip tapped also picks the puppy the
- * care actions look after.
+ * read; a tap opens its card with its breed and every need. With two, the chip tapped also picks
+ * the puppy the care actions look after, marked as the current one.
  */
 export default function NeedsPanel({
   needs,
   selected,
   onSelect,
+  breedOf,
 }: {
   needs: PuppyNeeds[]
   selected: number
   onSelect(id: string): void
+  /** The breed's name of the puppy with this id. */
+  breedOf(id: string): string
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const box = useRef<HTMLDivElement>(null)
+  const chips = useRef(new Map<string, HTMLButtonElement>())
   const cardId = useId()
-  const close = useCallback(() => setOpen(null), [])
+  // Escape gives focus back to the chip whose card it closes
+  const close = useCallback(
+    (how: Dismissal) => {
+      if (how === 'escape' && open) chips.current.get(open)?.focus()
+      setOpen(null)
+    },
+    [open],
+  )
   const shown = needs.find((n) => n.id === open)
   useDismiss(box, !!shown, close)
   if (!needs.length) return null
@@ -59,15 +70,20 @@ export default function NeedsPanel({
             key={n.id}
             type="button"
             className="room-pup"
-            aria-pressed={two ? i === selected : undefined}
+            ref={(chip) => {
+              if (chip) chips.current.set(n.id, chip)
+              else chips.current.delete(n.id)
+            }}
+            aria-current={(two && i === selected) || undefined}
             aria-expanded={open === n.id}
-            aria-controls={cardId}
+            aria-controls={open === n.id ? cardId : undefined}
             onClick={() => {
               if (two) onSelect(n.id)
               setOpen(open === n.id ? null : n.id)
             }}
           >
             <span className="room-pup-name">{n.name}</span>
+            <span className="sr-only">, {n.health}</span>
             <span className="room-pup-health" data-health={n.health} aria-hidden="true" />
             <span className="room-pup-mood" aria-hidden="true">
               <i style={{ transform: `scaleX(${n.happiness})` }} />
@@ -79,7 +95,9 @@ export default function NeedsPanel({
       {shown && (
         <section id={cardId} aria-label={shown.name} className="room-need">
           <p className="room-need-head">
-            <span>{shown.name}</span>
+            <span>
+              {shown.name} <span className="room-need-breed">· {breedOf(shown.id)}</span>
+            </span>
             <small data-health={shown.health}>{shown.health}</small>
           </p>
           {BARS.map(([key, label]) => (

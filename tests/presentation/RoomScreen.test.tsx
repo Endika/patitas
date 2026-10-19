@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
+import { NOTICE_MS } from '@/presentation/screens/RoomScreen'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
 import { createCare, health } from '@/domain/care'
@@ -223,7 +224,7 @@ describe('RoomScreen', () => {
         needs: [needs(luna, 'Luna', { reading: '4,3 kg', weightStatus: 'En su peso' })],
       }),
     )
-    const chip = screen.getByRole('button', { name: /^Luna/ })
+    const chip = screen.getByRole('button', { name: /^Luna,/ })
     expect(chip).toHaveTextContent('4,3 kg')
     await user.click(chip)
     expect(screen.getByText('4,3 kg · En su peso')).toBeInTheDocument()
@@ -250,28 +251,44 @@ describe('RoomScreen', () => {
       }),
     )
 
-    // Each chip opens that puppy's card, one at a time
+    // Each chip tells its puppy's health and opens its card, one at a time
+    const luna = screen.getByRole('button', { name: 'Luna, Muy bien' })
+    const kira = screen.getByRole('button', { name: 'Kira, Necesita cuidados' })
     expect(screen.queryByRole('meter')).not.toBeInTheDocument()
+    expect(luna).toHaveAttribute('aria-expanded', 'false')
+    expect(luna).not.toHaveAttribute('aria-controls')
     const value = (name: string) =>
       within(screen.getByRole('region')).getByRole('meter', { name }).getAttribute('aria-valuenow')
     const bars = ['Felicidad', 'Hambre', 'Limpieza', 'Energía']
-    await user.click(screen.getByRole('button', { name: 'Luna' }))
-    expect(screen.getByRole('region', { name: 'Luna' })).toHaveTextContent('Muy bien')
+    await user.click(luna)
+    const card = screen.getByRole('region', { name: 'Luna' })
+    expect(luna).toHaveAttribute('aria-expanded', 'true')
+    expect(luna).toHaveAttribute('aria-controls', card.id)
+    expect(card).toHaveTextContent('Beagle')
+    expect(card).toHaveTextContent('Muy bien')
     expect(bars.map(value)).toEqual(['90', '20', '100', '80'])
-    await user.click(screen.getByRole('button', { name: 'Kira' }))
+    await user.click(kira)
     expect(screen.queryByRole('region', { name: 'Luna' })).not.toBeInTheDocument()
+    expect(luna).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByRole('region', { name: 'Kira' })).toHaveTextContent('Necesita cuidados')
     expect(bars.map(value)).toEqual(['30', '95', '40', '10'])
-    await user.click(screen.getByRole('button', { name: 'Kira' }))
+    await user.click(kira)
     expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(kira).toHaveAttribute('aria-expanded', 'false')
+    // Escape closes a card and leaves focus on its chip
+    await user.click(kira)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(kira).toHaveFocus()
 
     // Kira, picked on her chip, is looked after until another is picked, on a chip or in the room
-    expect(screen.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
+    expect(kira).toHaveAttribute('aria-current', 'true')
+    expect(luna).not.toHaveAttribute('aria-current')
     await care(user, 'Comida')
-    await user.click(screen.getByRole('button', { name: 'Luna' }))
+    await user.click(luna)
     await care(user, 'Comida')
     act(() => stage.emit({ touched: { id: byName.get('Kira')!, count: 1 } }))
-    expect(screen.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
+    expect(kira).toHaveAttribute('aria-current', 'true')
     await care(user, 'Pesar')
     expect(stage.calls).toEqual(['feed:1', 'feed:0', 'weigh:1'])
   })
@@ -283,17 +300,46 @@ describe('RoomScreen', () => {
     const list = () => screen.queryByRole('list', { name: 'Tus cachorros' })
     expect(list()).not.toBeInTheDocument()
 
+    expect(toggle).not.toHaveAttribute('aria-controls')
     await user.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle).toHaveAttribute('aria-controls')
     expect(screen.getByRole('button', { name: 'Adoptar otro' })).toBeInTheDocument()
+    screen.getByRole('button', { name: 'Sacar a Luna' }).focus()
     await user.keyboard('{Escape}')
     expect(list()).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
 
     await user.click(toggle)
     await user.click(screen.getByRole('button', { name: 'Sacar a Luna' }))
     expect(await screen.findByRole('heading', { name: 'La sala está vacía' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Cachorros' })).not.toBeInTheDocument()
     expect(list()).toBeInTheDocument()
+  })
+
+  it('lets the full-room and waiting-outside notices go after a while', async () => {
+    const storage = await adopted(['Luna', 'Kira', 'Toby'])
+    start(storage)
+    const list = await roster()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const full = 'Ya hay dos cachorros en la sala. Saca uno para que entre otro.'
+
+    await user.click(list.getByRole('button', { name: 'Meter a Toby' }))
+    expect(await screen.findByText(full)).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(NOTICE_MS))
+    expect(screen.queryByText(full)).not.toBeInTheDocument()
+    // Refused again, it says so again
+    await user.click(list.getByRole('button', { name: 'Meter a Toby' }))
+    expect(await screen.findByText(full)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Adoptar otro' }))
+    await user.type(screen.getByLabelText('Nombre'), 'Nala')
+    await user.click(screen.getByRole('button', { name: 'Adoptar' }))
+    const outside = 'Nala espera fuera: saca a uno para que entre.'
+    expect(await screen.findByText(outside)).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(NOTICE_MS))
+    expect(screen.queryByText(outside)).not.toBeInTheDocument()
   })
 
   it('says «¡Limpio!» while a mess is being cleaned up', async () => {
