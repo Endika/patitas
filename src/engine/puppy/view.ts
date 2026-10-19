@@ -36,6 +36,7 @@ import {
   holdStill,
   keepsEating,
   letGo,
+  stepAside,
   stepRoutine,
   touch,
   tuckIn,
@@ -43,7 +44,7 @@ import {
   type BedSlot,
   type RoutineState,
 } from '@/engine/motion/routine'
-import { bounceOff, type BallState } from '@/engine/room/ball'
+import { bounceOff, rollOut, type BallState } from '@/engine/room/ball'
 import {
   bathReach,
   bathSpheres,
@@ -69,7 +70,7 @@ import {
 } from '@/engine/room/brush'
 import { bodyOf, bodyShape, createBody, type Body, type BodyShape } from '@/engine/room/bodies'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
-import { claimBall, keepOff, separate } from '@/engine/room/crowd'
+import { claimBall, inTheWay, keepOff, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
 import { messLocal } from '@/engine/room/messes'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
@@ -894,6 +895,14 @@ export function tickPuppies(
   for (const v of views) bodies.push(placeBody(v))
   if (views.length > 1) separate(motions, PERSONAL_SPACE, inPlay, bodies)
   bounceOff(ball, bodies, catcher)
+  rollOut(ball, bodies, catcher, room.cam, dt)
+  // A chase that gets no nearer: the awake one in the way walks off; a sleeper stays, and the
+  // ball rolls out from it instead
+  for (let i = 0; i < views.length; i++) {
+    if (!moved[i]!.ev.blocked) continue
+    const k = inTheWay(motions, bodies, i, ball.pos)
+    if (k >= 0) stepAside(motions[k]!, ball.pos.x, ball.pos.z, inPlay)
+  }
   cameraPosition(room.cam, camPos)
   views.forEach((view, i) => {
     const s = view.behaviour,

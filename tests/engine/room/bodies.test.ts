@@ -56,10 +56,10 @@ describe('bodyOf', () => {
     expect(out.chest.r).toBe(shape.stand.chest.r)
   })
 
-  it('counts a pose without spheres of its own as standing', () => {
+  it('lies belly up as low as lying down', () => {
     const belly = bodyOf({ x: 0, z: 0 }, 0.3, 'belly', shape, createBody()),
-      stand = bodyOf({ x: 0, z: 0 }, 0.3, 'stand', shape, createBody())
-    expect(belly).toEqual(stand)
+      lie = bodyOf({ x: 0, z: 0 }, 0.3, 'lie', shape, createBody())
+    expect(belly).toEqual(lie)
   })
 
   it('moves along the floor with shiftBody', () => {

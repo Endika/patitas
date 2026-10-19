@@ -118,7 +118,7 @@ export function bodyShape(A: Anatomy): BodyShape {
 
 /**
  * Writes into `out` the spheres of a puppy standing at `pos` on the floor, facing `heading`.
- * Poses other than sitting, lying and sleeping count as standing.
+ * Belly up it lies as low as lying down; the other poses count as standing.
  */
 export function bodyOf(
   pos: Pick<Vec3, 'x' | 'z'>,
@@ -127,7 +127,14 @@ export function bodyOf(
   shape: BodyShape,
   out: Body,
 ): Body {
-  const local = shape[pose === 'sit' || pose === 'lie' || pose === 'sleep' ? pose : 'stand']
+  const local =
+    shape[
+      pose === 'belly'
+        ? 'lie'
+        : pose === 'sit' || pose === 'lie' || pose === 'sleep'
+          ? pose
+          : 'stand'
+    ]
   const s = Math.sin(heading),
     c = Math.cos(heading)
   place(out.head, local.head, pos, s, c)

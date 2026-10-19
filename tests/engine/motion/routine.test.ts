@@ -36,6 +36,7 @@ import {
   letGo,
   relieveNow,
   SPLASH_TIME,
+  stepAside,
   stepRoutine,
   touch,
   tuckIn,
@@ -46,7 +47,7 @@ import {
   type RoutineState,
 } from '@/engine/motion/routine'
 import { anatomy } from '@/engine/puppy/anatomy'
-import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { clampPlay, createCamera, fitCamera, PLAY, playLocal } from '@/engine/room/camera'
 import { keepOff, separate } from '@/engine/room/crowd'
 import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
 import { seeded } from '../seeded'
@@ -1008,5 +1009,42 @@ describe('tuckIn', () => {
     tuckIn(p.r, p.m)
     expect([p.r.routine, p.m.pose, p.m.fk, p.m.sleepW]).toEqual(['sleeping', 'sleep', 1, 1])
     expect(p.m.legPose[0]).toEqual(POSES.sleep.front)
+  })
+})
+
+describe('stepAside', () => {
+  const at = (d: number, side: number) => {
+    const q = playLocal(cam, cam.target.x, cam.target.z)
+    return clamp(cam.target.x + q.fx * d - q.fz * side, cam.target.z + q.fz * d + q.fx * side)
+  }
+
+  it('walks a short way straight off from the ball when there is room', () => {
+    const m = createMotionState()
+    const [x, z] = at(0.6, 0)
+    m.pos.set(x, 0, z + 0.3)
+    stepAside(m, x, z, clamp)
+    expect(m.goal).not.toBeNull()
+    expect(m.goal!.x).toBeCloseTo(x)
+    expect(m.goal!.z).toBeCloseTo(z + 0.9)
+    expect(m.next).toBe('walk')
+  })
+
+  it('backed into a corner, turns off along the edge rather than stay', () => {
+    const m = createMotionState()
+    const [cx, cz] = at(PLAY.near, 9)
+    m.pos.set(cx, 0, cz)
+    const [bx, bz] = at(PLAY.near + 0.3, 0)
+    stepAside(m, bx, bz, clamp)
+    const g = m.goal!
+    expect(Math.hypot(g.x - cx, g.z - cz)).toBeGreaterThanOrEqual(0.4)
+    const [gx, gz] = clamp(g.x, g.z)
+    expect(Math.hypot(gx - g.x, gz - g.z)).toBeLessThan(1e-9)
+  })
+
+  it('stands a puppy up to walk off', () => {
+    const m = createMotionState()
+    setPose(m, 'sit')
+    stepAside(m, 1, 0, clamp)
+    expect(m.pose).toBe('stand')
   })
 })

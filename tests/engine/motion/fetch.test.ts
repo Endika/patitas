@@ -236,3 +236,64 @@ describe('a ball in the mud', () => {
     expect(Math.hypot(m.goal!.x - f.drop.x, m.goal!.z - f.drop.z)).toBeLessThan(1e-9)
   })
 })
+
+describe('stepFetch when the chase is held up', () => {
+  it('asks for the way after 3 s without getting nearer, then gives up at 8 s and sits', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const m = createMotionState()
+    const legs = createLegStates(legRigs(A), m)
+    const reach = A.tongue[2] - 0.12
+    const ctx: FetchCtx = {
+      reach,
+      cam,
+      mouthWorld: (out: Vec3) => out.set(m.pos.x, A.tongue[1], m.pos.z),
+      mood: { happy: 0.5 },
+      energy: 0.5,
+      random: () => 0.9,
+    }
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const { fx, fz } = playLocal(cam, 0, 0)
+    ball.pos.set(cam.target.x + fx * 1.2, BALL_R, cam.target.z + fz * 1.2)
+    const at = ball.pos.clone()
+    const f: FetchState = { ...createFetchState(), task: 'chase' }
+    const blocked: number[] = []
+    let gaveUp = Infinity
+    for (let n = 0; n < 60 * 10 && gaveUp === Infinity; n++) {
+      if (stepFetch(f, m, ball, ctx, DT).blocked) blocked.push(n * DT)
+      if (f.task !== 'chase') gaveUp = n * DT
+      stepPoses(m, DT)
+      stepLocomotion(m, legs, DT)
+      // Something it cannot get past holds it where it started
+      m.pos.set(0, 0, 0)
+    }
+    expect(blocked).toHaveLength(1)
+    expect(blocked[0]).toBeCloseTo(3, 1)
+    expect(gaveUp).toBeCloseTo(8, 1)
+    expect(f.task).toBe('free')
+    expect(m.pose).toBe('sit')
+    expect(m.goal).toBeNull()
+    expect(m.face).not.toBeNull()
+    expect(ball.state).toBe('air')
+    expect(ball.pos.distanceTo(at)).toBe(0)
+  })
+
+  it('keeps chasing, and asks nothing, while it gets nearer', () => {
+    const cam = fitCamera(createCamera(), 0.46)
+    const m = createMotionState()
+    const ctx: FetchCtx = {
+      reach: 0.5,
+      cam,
+      mouthWorld: (out: Vec3) => out.copy(m.pos),
+      mood: { happy: 0.5 },
+      energy: 0.5,
+    }
+    const ball: BallState = { ...createBall(), state: 'air' }
+    ball.pos.set(0, BALL_R, 5)
+    const f: FetchState = { ...createFetchState(), task: 'chase' }
+    for (let n = 0; n < 60 * 9; n++) {
+      expect(stepFetch(f, m, ball, ctx, DT).blocked).toBeUndefined()
+      m.pos.z += 0.4 * DT
+    }
+    expect(f.task).toBe('chase')
+  })
+})

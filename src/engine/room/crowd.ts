@@ -290,6 +290,32 @@ function pushApart(
 }
 
 /**
+ * Which awake puppy other than `chaser` stands nearest `at` along the floor, by its body: the
+ * one in the way of a chase. −1 when all the others sleep.
+ */
+export function inTheWay(
+  states: readonly MotionState[],
+  bodies: readonly Body[],
+  chaser: number,
+  at: Pick<Vec3, 'x' | 'z'>,
+): number {
+  let best = -1,
+    nearest = Infinity
+  for (let i = 0; i < states.length; i++) {
+    if (i === chaser || states[i]!.pose === 'sleep') continue
+    for (let k = 0; k < SPHERES; k++) {
+      const s = sphereAt(bodies[i]!, k),
+        d = Math.hypot(at.x - s.x, at.z - s.z) - s.r
+      if (d < nearest) {
+        nearest = d
+        best = i
+      }
+    }
+  }
+  return best
+}
+
+/**
  * Keeps everyone but `owner` out of the circle of radius `r` round (x, z), and their goals with
  * them: the scale while one puppy is weighed.
  */
