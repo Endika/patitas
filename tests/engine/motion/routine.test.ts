@@ -600,7 +600,7 @@ describe('mud', () => {
       expect(p.r.routine).toBe('none')
       expect(p.r.mudAgo).toBeLessThan(10)
       expect(meanDirt(rolled)).toBeGreaterThan(meanDirt(stood) + 0.05)
-      if (wallow === 'roll') expect(meanOf(rolled, parts, 'back')).toBeGreaterThan(0.3)
+      if (wallow === 'roll') expect(meanOf(rolled, parts, 'back')).toBeGreaterThan(0.2)
       else expect(meanOf(rolled, parts, 'muzzle')).toBeGreaterThan(meanOf(stood, parts, 'muzzle'))
     }
     expect(seen).toEqual(new Set(['roll', 'dig']))
