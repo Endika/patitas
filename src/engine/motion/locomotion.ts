@@ -31,6 +31,8 @@ export interface MotionState {
   then: PoseStep | null
   fk: number
   bellyW: number
+  /** How far it has rolled onto its side in the mud, 0 to 1. */
+  rollW: number
   /** How far the head and tail have curled into the sleeping pose, 0 to 1. */
   sleepW: number
   /** Which way the head curls asleep: −1 or +1 along the puppy's own x. */
@@ -84,6 +86,7 @@ export function createMotionState(): MotionState {
     then: null,
     fk: 0,
     bellyW: 0,
+    rollW: 0,
     sleepW: 0,
     sleepSide: 1,
     poseY: 0,

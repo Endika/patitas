@@ -1,17 +1,21 @@
 import { messPenalty, soil, type Care } from '@/domain/care'
 import type { Vec3 } from '@/engine/math'
+import type { Wallow } from '@/engine/motion/routine'
 import { inMud, type Spots } from '@/engine/room/furniture'
 import { vnoise } from './noise'
 
 /**
  * Where mud can reach on a breed's mesh, worked out once from its rest pose: how readily the
- * paws, the belly and the tip of the muzzle take it, and the order it settles in by height.
+ * paws, the belly and the tip of the muzzle take it, and the back and the flanks rolling in it,
+ * and the order it settles in by height.
  */
 export interface DirtRest {
   position: ArrayLike<number>
   paw: Float32Array
   belly: Float32Array
   muzzle: Float32Array
+  back: Float32Array
+  flank: Float32Array
   /** 0 takes dirt first, 1 last: what `redistributeDirt` spreads a level by. */
   order: Float32Array
   /** The vertices mud reaches at all, so soiling skips the rest. */
@@ -32,6 +36,9 @@ export const DIRT_STEP = 0.1
 const PAW_RATE = 0.4,
   BELLY_RATE = 0.1,
   MUZZLE_RATE = 0.06
+/** Rolling, the back and the flanks take it too; digging, the paws, belly and muzzle faster. */
+const ROLL_RATE = { back: 0.3, flank: 0.35, belly: 0.3 },
+  DIG_TIMES = 2.5
 /** Rest heights: the paws, and the belly underneath. */
 const PAW_TOP = { from: 0.09, to: 0.15 },
   BELLY_TOP = { from: 0.24, to: 0.32 }
@@ -63,6 +70,8 @@ export function dirtRest(
   const paw = new Float32Array(n),
     belly = new Float32Array(n),
     muzzle = new Float32Array(n),
+    back = new Float32Array(n),
+    flank = new Float32Array(n),
     order = new Float32Array(n)
   let top = 1e-6
   for (let i = 0; i < n; i++) top = Math.max(top, position[i * 3 + 1]!)
@@ -83,15 +92,20 @@ export function dirtRest(
     muzzle[i] =
       (1 - sm(MUZZLE_R.from, MUZZLE_R.to, Math.hypot(x - nose[0]!, y - nose[1]!, z - nose[2]!))) *
       patchy
+    // Rolled on, the fur facing up and to the sides above the legs
+    const above = sm(BELLY_TOP.from + edge, BELLY_TOP.to + edge, y)
+    back[i] = above * sm(0.2, 0.7, normal[i * 3 + 1]!) * patchy
+    flank[i] = above * sm(0.4, 0.85, Math.abs(normal[i * 3]!)) * patchy
     order[i] = Math.min(
       1 - Math.min(1, paw[i]!),
       1 - 0.7 * Math.min(1, belly[i]!),
       1 - 0.45 * Math.min(1, muzzle[i]!),
       0.25 + 0.75 * Math.max(0, y / top),
     )
-    if (paw[i]! > 0 || belly[i]! > 0 || muzzle[i]! > 0) reach.push(i)
+    if (paw[i]! > 0 || belly[i]! > 0 || muzzle[i]! > 0 || back[i]! > 0 || flank[i]! > 0)
+      reach.push(i)
   }
-  return { position, paw, belly, muzzle, order, reach: Uint32Array.from(reach) }
+  return { position, paw, belly, muzzle, back, flank, order, reach: Uint32Array.from(reach) }
 }
 
 export const createDirt = (rest: DirtRest): Dirt => ({
@@ -103,24 +117,35 @@ export const createDirt = (rest: DirtRest): Dirt => ({
 /**
  * `dt` seconds standing in mud `depth` deep (0 to 1, as `inMud` gives it). The paws take it at any
  * depth, the belly from about a third of the way in and the tip of the muzzle only near the
- * middle, each slower than the one before: the longer and deeper, the higher it climbs. Returns
- * whether anything changed.
+ * middle, each slower than the one before: the longer and deeper, the higher it climbs. Rolling
+ * in it soils the back and the flanks as well, and digging soils the paws, belly and muzzle
+ * DIG_TIMES as fast. Returns whether anything changed.
  */
 export function soilFromMud(
   field: Float32Array,
   rest: DirtRest,
   depth: number,
   dt: number,
+  wallow: Wallow | null = null,
 ): boolean {
   if (depth <= 0 || dt <= 0) return false
-  const kp = PAW_RATE * Math.min(1, depth / 0.3) * dt,
-    kb = BELLY_RATE * sm(0.3, 0.8, depth) * dt,
-    km = MUZZLE_RATE * sm(0.6, 1, depth) * dt
+  const dig = wallow === 'dig' ? DIG_TIMES : 1,
+    roll = wallow === 'roll' ? depth * dt : 0
+  const kp = PAW_RATE * Math.min(1, depth / 0.3) * dt * dig,
+    kb = BELLY_RATE * sm(0.3, 0.8, depth) * dt * dig + ROLL_RATE.belly * roll,
+    km = MUZZLE_RATE * sm(0.6, 1, depth) * dt * dig,
+    kk = ROLL_RATE.back * roll,
+    kf = ROLL_RATE.flank * roll
   let changed = false
   for (const i of rest.reach) {
     const was = field[i]!
     if (was >= 1) continue
-    const add = kp * rest.paw[i]! + kb * rest.belly[i]! + km * rest.muzzle[i]!
+    const add =
+      kp * rest.paw[i]! +
+      kb * rest.belly[i]! +
+      km * rest.muzzle[i]! +
+      kk * rest.back[i]! +
+      kf * rest.flank[i]!
     if (add <= 0) continue
     field[i] = Math.min(1, was + add)
     changed = true
@@ -207,11 +232,16 @@ export function redistributeDirt(field: Float32Array, rest: DirtRest, level: num
 }
 
 /**
- * One frame for a puppy whose body stands at `depth` in the mud: soils it every DIRT_STEP while
- * it is in, so the field (and its upload) changes at most 10 times a second. Returns whether it
- * changed.
+ * One frame for a puppy whose body stands at `depth` in the mud, rolling or digging in it or not:
+ * soils it every DIRT_STEP while it is in, so the field (and its upload) changes at most 10 times a
+ * second. Returns whether it changed.
  */
-export function stepDirt(d: Dirt, depth: number, dt: number): boolean {
+export function stepDirt(
+  d: Dirt,
+  depth: number,
+  dt: number,
+  wallow: Wallow | null = null,
+): boolean {
   if (depth <= 0) {
     d.acc = 0
     return false
@@ -220,7 +250,7 @@ export function stepDirt(d: Dirt, depth: number, dt: number): boolean {
   if (d.acc < DIRT_STEP) return false
   const t = d.acc
   d.acc = 0
-  return soilFromMud(d.field, d.rest, depth, t)
+  return soilFromMud(d.field, d.rest, depth, t, wallow)
 }
 
 /** How deep in the puddle a puppy stands: its body or the deepest of its paws. */

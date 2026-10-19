@@ -29,6 +29,22 @@ const CHEW = 0.12,
 /** In the puddle: the head dips at the mud with a quick sniffing nod. */
 const MUD_PITCH = 0.75,
   MUD_NOD = { amp: 0.08, hz: 2.2 }
+/**
+ * Rolling in it: the body turns onto its side and wriggles towards its back and down again, the
+ * legs kicking; radians of the turn, how far it wriggles on from there, and how often.
+ */
+const ROLL = { side: 1.45, wriggle: 0.75, hz: 1.4 }
+/**
+ * Digging in it: head down at the hole, the front paws scrape in turn, each reaching forward
+ * lifted and pulling back along the ground; [upper, middle, paw] rotations at the reach and at the
+ * pull, and strokes a second.
+ */
+export const DIG = {
+  pitch: 0.95,
+  reach: [-0.75, 0.95, 0.7],
+  pull: [0.3, 0.05, -0.2],
+  hz: 3,
+} as const
 /** From this cuddliness a puppy likes its bath: it wags while rubbed, getting happier. */
 const BATH_FONDNESS = 0.5,
   BATH_JOY = 0.08
@@ -145,6 +161,8 @@ export interface BehaviourState {
   earsBack: number
   /** The body's roll from shaking itself dry. */
   shakeRoll: number
+  /** How far into digging the front legs are, 0 to 1. */
+  dig: number
 }
 
 export function createBehaviourState(): BehaviourState {
@@ -190,6 +208,7 @@ export function createBehaviourState(): BehaviourState {
     lookAwayT: 0,
     earsBack: 0,
     shakeRoll: 0,
+    dig: 0,
   }
 }
 
@@ -282,6 +301,9 @@ export interface BehaviourPose {
   lid: number
   lowLid: number
   sacc: { x: number; y: number }
+  /** Digging: how much its front legs dig, and each one's [upper, middle, paw] rotations. */
+  dig: number
+  digLegs: [Rot, Rot]
 }
 
 const spring = (s: Spring, target: number, k: number, c: number, dt: number) => {
@@ -387,6 +409,10 @@ export function stepBehaviour(
     pitchT = MUD_PITCH + MUD_NOD.amp * Math.sin(t * 2 * Math.PI * MUD_NOD.hz)
     yawT *= 0.3
   }
+  if (M.pose === 'dig') {
+    pitchT = DIG.pitch
+    yawT = 0
+  }
   if (s.lookAwayT > 0) yawT = -Math.sign(yawT || 1) * LOOK_AWAY_YAW
   spring(s.yaw, yawT, 55, 12, dt)
   spring(s.pitch, pitchT, 55, 12, dt)
@@ -467,11 +493,20 @@ export function stepBehaviour(
     shakeT >= 0
       ? 0
       : TREMBLE * sm(DAMP, 0.6, input.wet ?? 0) * aw * Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
+  // On its side from the start of the roll, then wriggling towards its back and down again
+  const rolled =
+    M.rollW * (ROLL.side + ROLL.wriggle * (0.5 - 0.5 * Math.cos(M.poseT * 2 * Math.PI * ROLL.hz)))
   const spine: Rot = [
     body.pitch * (1 - fk),
     s.yaw.x * 0.08 * (1 - fk),
-    body.roll * (1 - fk) + bw * 2.7 + shakeRoll + tremble,
+    body.roll * (1 - fk) + bw * 2.7 + rolled + shakeRoll + tremble,
   ]
+  s.dig = damp(s.dig, M.pose === 'dig' ? 1 : 0, 8, dt)
+  const stroke = (i: number): Rot => {
+    // 1 at the reach, 0 at the pull; the other paw half a stroke behind
+    const k = 0.5 + 0.5 * Math.cos(t * 2 * Math.PI * DIG.hz + i * Math.PI)
+    return [0, 1, 2].map((j) => DIG.pull[j]! + (DIG.reach[j]! - DIG.pull[j]!) * k) as Rot
+  }
 
   // Rump wiggle with the tail, and the scratch reflex: the hind leg moves on its own
   s.scratch = damp(
@@ -569,6 +604,8 @@ export function stepBehaviour(
     lid,
     lowLid,
     sacc: s.sacc,
+    dig: s.dig,
+    digLegs: [stroke(0), stroke(1)],
   }
 }
 
@@ -599,7 +636,9 @@ export function pickHint(
   const task = p.fetch.task,
     pose = p.motion.pose
   if (task === 'wait') return 'wait'
-  if (pose !== 'stand' && !p.zone) return pose === 'belly' ? 'belly-up' : pose
+  // Rolling and digging in the mud are its own doing, not a pose to explain
+  if (pose !== 'stand' && pose !== 'roll' && pose !== 'dig' && !p.zone)
+    return pose === 'belly' ? 'belly-up' : pose
   if (task === 'chase' || task === 'grab') return 'chase'
   if (task === 'return' || (task === 'present' && p.fetch.holding)) return 'bringing'
   if (task === 'present') return 'done'

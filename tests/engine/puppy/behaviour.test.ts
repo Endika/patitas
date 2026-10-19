@@ -4,11 +4,12 @@ import { describe, expect, it } from 'vitest'
 import { BREEDS, type Persona } from '@/domain/breeds'
 import { createFetchState, type FetchTask } from '@/engine/motion/fetch'
 import { createMotionState, type BodyPose } from '@/engine/motion/locomotion'
-import { setPose } from '@/engine/motion/poses'
+import { POSE_TIME, setPose, stepPoses } from '@/engine/motion/poses'
 import { anatomy, type ZoneId } from '@/engine/puppy/anatomy'
 import {
   behaviourRig,
   createBehaviourState,
+  DIG,
   LID_SHUT,
   pickHint,
   movePet,
@@ -179,6 +180,50 @@ describe('stepBehaviour', () => {
     }
     expect(pose.target.y).toBeLessThan(0.1)
     expect(pose.head[0] + pose.neck[0]).toBeGreaterThan(0.4)
+  })
+
+  it('rolling in it, it lies on its side and wriggles towards its back and down again', () => {
+    const { rig, s, input } = world()
+    input.routine = 'splashing'
+    const M = input.motion
+    setPose(M, 'roll')
+    const turns: number[] = []
+    for (let f = 1; f * DT <= POSE_TIME.roll; f++) {
+      input.now = f * DT
+      stepPoses(M, DT)
+      turns.push(stepBehaviour(rig, s, input, DT, input.now).spine[2])
+    }
+    const settled = turns.slice(Math.round(0.6 / DT))
+    // On its side (a quarter turn) at least, never belly up as a trick shows it (2.7)
+    expect(Math.min(...settled)).toBeGreaterThan(1.2)
+    expect(Math.max(...settled)).toBeLessThan(2.4)
+    expect(Math.max(...settled) - Math.min(...settled)).toBeGreaterThan(0.5)
+  })
+
+  it('digging, it looks down and its front paws scrape in turn', () => {
+    const { rig, s, input } = world()
+    input.routine = 'splashing'
+    setPose(input.motion, 'dig')
+    let pose = stepBehaviour(rig, s, input, DT, 0)
+    const left: number[] = [],
+      right: number[] = []
+    for (let f = 1; f * DT <= POSE_TIME.dig; f++) {
+      input.now = f * DT
+      pose = stepBehaviour(rig, s, input, DT, input.now)
+      left.push(pose.digLegs[0][0])
+      right.push(pose.digLegs[1][0])
+    }
+    expect(pose.dig).toBeGreaterThan(0.95)
+    expect(pose.head[0] + pose.neck[0]).toBeGreaterThan(0.45)
+    // Each paw reaches forward and pulls back several times, one while the other pulls
+    const strokes = (xs: number[]) =>
+      xs.filter((x, i) => i > 0 && x < -0.2 && xs[i - 1]! >= -0.2).length
+    expect(strokes(left)).toBeGreaterThanOrEqual(3)
+    left.forEach((l, i) => expect(l + right[i]!).toBeCloseTo(DIG.reach[0] + DIG.pull[0], 9))
+    // Standing again, the legs are its own
+    setPose(input.motion, 'stand')
+    for (let f = 0; f < 60; f++) pose = stepBehaviour(rig, s, input, DT, 3 + f * DT)
+    expect(pose.dig).toBeLessThan(0.01)
   })
 })
 

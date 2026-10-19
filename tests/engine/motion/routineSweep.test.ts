@@ -16,9 +16,11 @@ import {
   bedSlots,
   createRoutineState,
   giveWay,
+  goToMud,
   goWeigh,
   stepRoutine,
   staysPut,
+  wallowing,
   weighing,
   type RoutineState,
 } from '@/engine/motion/routine'
@@ -222,6 +224,40 @@ describe('two puppies from random starts', () => {
         )
       expect(t).not.toBeNull()
       for (const o of off) expect(o).toBeLessThan(0.1)
+    },
+  )
+
+  it.each(cases.flatMap((c) => [0, 1].map((who) => ({ ...c, who }))))(
+    'place $who rolls or digs in the mud while the other eats at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed, who }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 79 + aspect * 100))
+      const muddy = who === 0
+      const pups = [
+        pup(0, a!.x, a!.z, muddy ? 0.3 : 0.8, muddy ? 0 : 1),
+        pup(1, b!.x, b!.z, muddy ? 0.8 : 0.3, muddy ? 1 : 0),
+      ]
+      const mud = pups[who]!,
+        other = pups[1 - who]!
+      goToMud(mud.r, mud.m, spots, (x, z) => clampPlay(cam, x, z))
+      let wallowed = false,
+        back = false
+      const t = run(
+        pups,
+        cam,
+        spots,
+        noon,
+        40,
+        () => back && other.fed > 0,
+        () => {
+          wallowed ||= !!wallowing(mud.r, mud.m)
+          back ||= wallowed && mud.r.routine === 'none'
+        },
+      )
+      if (t == null)
+        failed.push(
+          `mud ${aspect} ${seed} ${who} wallowed=${wallowed} back=${back} ${mud.r.routine} ${other.r.routine}:${other.fed}`,
+        )
+      expect(t).not.toBeNull()
     },
   )
 

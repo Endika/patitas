@@ -53,6 +53,9 @@ interface Around {
   side: number
 }
 
+/** Rolling in the mud or digging at it. */
+export type Wallow = 'roll' | 'dig'
+
 /** Where the player holds it still to look after its coat. */
 export type HeldRoutine = 'bathing' | 'brushing'
 
@@ -82,6 +85,8 @@ export interface RoutineState {
   mudAgo: number
   /** Where it set off for the mud from, to go back to afterwards. */
   from: Vec3
+  /** What it chose to do in the mud once it has stamped about: roll in it or dig at it. */
+  wallow: Wallow | null
   /** What it is about to do when it squats, and whether that is in the garden, where it leaves nothing. */
   kind: MessKind
   inGarden: boolean
@@ -192,11 +197,16 @@ export const MUD_EVERY = 120
 const MUD_IDLE = 20
 /** Chance per second of setting off once it may, for a puppy fully curious. */
 const MUD_RATE = 1 / 30
-/** Seconds it stamps about in the puddle: turning foot to foot and sniffing at the mud. */
-export const SPLASH_TIME = 5
+/** Seconds it stamps about in the puddle first: turning foot to foot and sniffing at the mud. */
+export const SPLASH_TIME = 2.1
 const STAMP = 0.7,
   STAMP_TURN = 0.4,
   SNIFF_BOW = 0.45
+/** In the mud it faces the screen's right, this far round from facing the camera. */
+const IN_MUD_TURN = 1.1
+/** Then it rolls in it (POSE_TIME.roll) or, as likely, digs at it (POSE_TIME.dig), bowed down. */
+const ROLL_CHANCE = 0.5,
+  DIG_BOW = 0.35
 /** Seconds it squats. */
 export const RELIEF_TIME = 3
 /** How often it walks to the garden first, when it may squat anywhere. */
@@ -236,6 +246,7 @@ export function createRoutineState(): RoutineState {
     eaten: 0,
     mudAgo: 0,
     from: new THREE.Vector3(),
+    wallow: null,
     kind: 'pee',
     inGarden: false,
     relieved: false,
@@ -271,6 +282,7 @@ function enter(r: RoutineState, next: Routine) {
   r.asked = 0
   r.yields = 0
   r.there = false
+  r.wallow = null
 }
 
 /**
@@ -624,13 +636,17 @@ const toMud: Step = (r, m, ctx, _ev, dt) => {
     return enter(r, 'none')
   }
   if (m.pose !== 'stand') setPose(m, 'stand')
-  if (!approach(r, m, ctx, ctx.spots.mud, dt)) return
-  r.heading = m.heading
+  if (!approach(r, m, ctx, ctx.spots.mud, dt) || !faceTarget(r, m)) return
   enter(r, 'splashing')
 }
 
+/** Rolling or digging in the mud right now, as it chose to. */
+export const wallowing = (r: RoutineState, m: MotionState): Wallow | null =>
+  r.wallow && m.pose === r.wallow ? r.wallow : null
+
 const splashing: Step = (r, m, ctx) => {
-  if (m.goal || m.pose !== 'stand') {
+  const now = wallowing(r, m)
+  if (m.goal || (m.pose !== 'stand' && !now)) {
     m.face = null
     return enter(r, 'none')
   }
@@ -639,7 +655,16 @@ const splashing: Step = (r, m, ctx) => {
     m.bowGoal = Math.sin(r.t * 2.3) > 0.4 ? SNIFF_BOW : 0
     return
   }
-  m.face = null
+  if (!r.wallow) {
+    m.face = null
+    r.wallow = (ctx.random ?? Math.random)() < ROLL_CHANCE ? 'roll' : 'dig'
+    setPose(m, r.wallow)
+    return
+  }
+  if (now) {
+    if (now === 'dig') m.bowGoal = DIG_BOW
+    return
+  }
   r.mudAgo = 0
   enter(r, 'none')
   goTo(m, r.from.x, r.from.z, { happy: 0.5, energy: 0, gait: 'trot', clamp: ctx.clamp })
@@ -758,7 +783,7 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
  * 2. bed, after NIGHT_IDLE untouched at night or tired by day;
  * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds;
  * 4. wander into the mud, by day and left alone a while, at most every MUD_EVERY seconds and
- *    by chance, more often the more curious it is.
+ *    by chance, more often the more curious it is: it stamps about, then rolls or digs.
  */
 function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
   if (ctx.care.bladder >= 1) {
@@ -842,13 +867,14 @@ export function letGo(r: RoutineState): void {
 }
 
 /**
- * Busy in its place (a meal, the scale, the bath or the brush), there and turning in, making way
- * or squeezing past: nobody shoves it.
+ * Busy in its place (a meal, the scale, the mud, the bath or the brush), there and turning in,
+ * making way or squeezing past: nobody shoves it.
  */
 export const staysPut = (r: RoutineState): boolean =>
   !!r.held ||
   r.routine === 'eating' ||
   r.routine === 'onScale' ||
+  r.routine === 'splashing' ||
   r.there ||
   r.passT > 0 ||
   r.waitT > 0
@@ -1041,17 +1067,22 @@ export function goWeigh(r: RoutineState, m: MotionState): void {
 export const weighing = (r: RoutineState): boolean =>
   r.routine === 'toScale' || r.routine === 'onScale' || (r.weigh && r.routine === 'stretch')
 
-/** Sets off for the middle of the puddle, to stamp about in it and come back. */
+/**
+ * Sets off for the middle of the puddle, to stamp about, roll or dig in it and come back. There it
+ * turns side on to the screen, its head towards the room: the puddle lies by the play area's left
+ * edge, and so it shows its whole body.
+ */
 export function goToMud(
   r: RoutineState,
   m: MotionState,
   spots: Spots,
   clamp: RoutineCtx['clamp'],
 ): void {
-  const { center } = spots.mud
+  const { center, facing } = spots.mud
   const [x, z] = clamp(center.x, center.z)
   r.from.copy(m.pos)
   r.target.set(x, 0, z)
+  r.heading = facing + IN_MUD_TURN
   enter(r, 'toMud')
 }
 
@@ -1110,8 +1141,9 @@ export function stepRoutine(
   if (ctx.busy && !keepsEating(r, ctx.care) && !r.held) {
     r.idle = 0
     r.weigh = false
-    // The stamp's heading goes with it, or play would start with a stray turn
+    // The stamp's heading goes with it, or play would start with a stray turn, and it gets up
     if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null
+    if (wallowing(r, m)) setPose(m, 'stand')
     if (r.routine === 'relieving') m.sitGoal = m.bowGoal = 0
     if (r.routine !== 'none') enter(r, 'none')
   } else {

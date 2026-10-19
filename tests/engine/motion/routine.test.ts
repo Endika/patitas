@@ -18,7 +18,7 @@ import {
   type LegState,
   type MotionState,
 } from '@/engine/motion/locomotion'
-import { POSES, setPose, stepPoses } from '@/engine/motion/poses'
+import { POSE_TIME, POSES, setPose, stepPoses } from '@/engine/motion/poses'
 import {
   approach,
   bedSlots,
@@ -44,10 +44,12 @@ import {
   tuckIn,
   WEIGH_TIME,
   weighing,
+  wallowing,
   type Routine,
   type RoutineCtx,
   type RoutineState,
 } from '@/engine/motion/routine'
+import { createDirt, meanDirt, mudDepth, stepDirt } from '@/engine/puppy/dirt'
 import { anatomy } from '@/engine/puppy/anatomy'
 import {
   clampPlay,
@@ -69,6 +71,7 @@ import {
   type Spots,
 } from '@/engine/room/furniture'
 import { seeded } from '../seeded'
+import { meanOf, standIn } from '../puppy/standIn'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.shiba)
@@ -519,11 +522,13 @@ describe('meals', () => {
 describe('mud', () => {
   const curious = (curious: number): Partial<RoutineCtx> => ({ curious, random: () => 0 })
 
-  it('a curious puppy wanders into the puddle, stamps about in it and comes out', () => {
+  it('a curious puppy wanders into the puddle, stamps about, rolls in it and comes out', () => {
     const p = pup(0.12, -0.12)
     let deepest = 0,
       out = Infinity,
       left = false
+    const poses: string[] = []
+    let turned = NaN
     run(
       [p],
       MUD_EVERY + 40,
@@ -531,7 +536,9 @@ describe('mud', () => {
       SPOTS,
       () => {
         const depth = inMud(SPOTS, p.m.pos.x, p.m.pos.z)
+        if (p.r.routine === 'splashing' && isNaN(turned)) turned = p.m.heading - SPOTS.mud.facing
         if (p.r.routine === 'splashing') deepest = Math.max(deepest, depth)
+        if (p.r.routine === 'splashing' && poses.at(-1) !== p.m.pose) poses.push(p.m.pose)
         if (p.seen.includes('splashing') && p.r.routine === 'none') {
           left = true
           out = depth
@@ -541,27 +548,72 @@ describe('mud', () => {
       curious(0.9),
     )
     expect(p.seen).toEqual(['none', 'toMud', 'splashing', 'none'])
-    expect(p.time.splashing).toBeCloseTo(SPLASH_TIME, 1)
+    // Side on to the screen, its head towards the room, it stamps, rolls, gets up and goes
+    expect(Math.sin(turned)).toBeGreaterThan(0.8)
+    expect(poses).toEqual(['stand', 'roll', 'stand'])
+    expect(p.time.splashing).toBeCloseTo(SPLASH_TIME + POSE_TIME.roll, 1)
     expect(deepest).toBeGreaterThan(0.8)
     expect(left).toBe(true)
     expect(out).toBe(0)
     expect(p.m.pose).toBe('stand')
   })
 
-  it('goes at most once every 2 min, never without curiosity, never while playing', () => {
-    expect(MUD_EVERY).toBe(120)
-    const once = pup(0.12, -0.12)
-    run([once], MUD_EVERY * 1.9, at(12), SPOTS, undefined, undefined, curious(1))
-    expect(once.seen.filter((r) => r === 'toMud')).toHaveLength(1)
-    const dull = pup(0.12, -0.12)
-    run([dull], MUD_EVERY * 2, at(12), SPOTS, undefined, undefined, curious(0))
-    expect(dull.seen).toEqual(['none'])
-    const playing = pup(0.12, -0.12)
-    run([playing], MUD_EVERY * 1.5, at(12), SPOTS, undefined, undefined, {
-      ...curious(1),
-      busy: true,
-    })
-    expect(playing.seen).toEqual(['none'])
+  /**
+   * A visit from start to finish, the dirt kept on a stand-in puppy as the room keeps it, and
+   * beside it the same puppy only standing in the mud while the other rolls or digs.
+   */
+  const visit = (random: () => number) => {
+    const p = pup(0.12, -0.12)
+    p.r.mudAgo = MUD_EVERY
+    const { rest, parts } = standIn()
+    const dirt = createDirt(rest),
+      stood = createDirt(rest)
+    let wallow: string | null = null,
+      done = false
+    for (let n = 0; n < 120 / DT && !(p.seen.includes('splashing') && p.r.routine === 'none'); n++)
+      run(
+        [p],
+        DT,
+        at(12),
+        SPOTS,
+        () => {
+          const now = wallowing(p.r, p.m),
+            depth = mudDepth(SPOTS, p.m.pos, p.legs)
+          if (now && !wallow) stood.field.set(dirt.field)
+          wallow ??= now
+          if (wallow && !now) done = true
+          if (now) stepDirt(stood, depth, DT)
+          if (!done) stepDirt(dirt, depth, DT, now)
+        },
+        undefined,
+        { curious: 1, random },
+      )
+    return { p, wallow, rolled: dirt.field, stood: stood.field, parts }
+  }
+
+  it('on a seeded visit it rolls or digs, as likely, and soils itself more doing it', () => {
+    const seen = new Set<string | null>()
+    for (let seed = 1; seed <= 8; seed++) {
+      const { p, wallow, rolled, stood, parts } = visit(seeded(seed))
+      seen.add(wallow)
+      expect(wallow === 'roll' || wallow === 'dig').toBe(true)
+      expect(p.r.routine).toBe('none')
+      expect(p.r.mudAgo).toBeLessThan(10)
+      expect(meanDirt(rolled)).toBeGreaterThan(meanDirt(stood) + 0.05)
+      if (wallow === 'roll') expect(meanOf(rolled, parts, 'back')).toBeGreaterThan(0.3)
+      else expect(meanOf(rolled, parts, 'muzzle')).toBeGreaterThan(meanOf(stood, parts, 'muzzle'))
+    }
+    expect(seen).toEqual(new Set(['roll', 'dig']))
+  })
+
+  it('play gets it up from its roll at once', () => {
+    const p = pup(0.12, -0.12)
+    p.r.mudAgo = MUD_EVERY
+    for (let n = 0; n < 60 / DT && p.m.pose !== 'roll'; n++)
+      run([p], DT, at(12), SPOTS, undefined, undefined, curious(1))
+    expect(wallowing(p.r, p.m)).toBe('roll')
+    run([p], DT, at(12), SPOTS, undefined, undefined, { ...curious(1), busy: true })
+    expect([p.r.routine, p.m.pose, p.r.wallow]).toEqual(['none', 'stand', null])
   })
 
   it('play stops the stamping without a stray turn', () => {

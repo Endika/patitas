@@ -1,7 +1,8 @@
 import { damp, MAX_DT } from '@/engine/math'
 import type { MotionState } from './locomotion'
 
-export type PoseId = 'stand' | 'sit' | 'lie' | 'belly' | 'sleep'
+/** `roll` and `dig` are what it does in the puddle: on its side wriggling, and scraping at the mud. */
+export type PoseId = 'stand' | 'sit' | 'lie' | 'belly' | 'sleep' | 'roll' | 'dig'
 
 export interface PoseDef {
   y: number
@@ -11,7 +12,7 @@ export interface PoseDef {
   spread: number
 }
 
-type Lying = 'lie' | 'belly' | 'sleep'
+type Lying = 'lie' | 'belly' | 'sleep' | 'roll'
 
 const LIE: PoseDef = {
   y: -0.24,
@@ -20,14 +21,24 @@ const LIE: PoseDef = {
   spread: 0,
 }
 
-/** `sleep` rests on the bed's cushion on the same legs; behaviour curls the head and tail round. */
+/**
+ * `sleep` rests on the bed's cushion on the same legs; behaviour curls the head and tail round.
+ * `roll` folds the legs in to kick them about while behaviour turns it onto its side.
+ */
 export const POSES: Record<Lying, PoseDef> = {
   lie: LIE,
   belly: { y: -0.2, front: [-0.6, 0.3, 1.2], hind: [-0.9, 1.4, -0.6], spread: 0.35 },
   sleep: { ...LIE, y: -0.2 },
+  roll: { y: -0.2, front: [-0.8, 0.6, 1], hind: [-0.8, 1.3, -0.5], spread: 0.25 },
 }
 
-export const POSE_TIME: Record<'sit' | 'lie' | 'belly', number> = { sit: 5, lie: 7, belly: 6 }
+export const POSE_TIME: Record<'sit' | 'lie' | 'belly' | 'roll' | 'dig', number> = {
+  sit: 5,
+  lie: 7,
+  belly: 6,
+  roll: 2,
+  dig: 1.5,
+}
 
 export interface PoseStep {
   pose: PoseId
@@ -35,7 +46,7 @@ export interface PoseStep {
 }
 
 const poseDef = (p: PoseId): PoseDef | undefined =>
-  p === 'stand' || p === 'sit' ? undefined : POSES[p]
+  p === 'stand' || p === 'sit' || p === 'dig' ? undefined : POSES[p]
 
 /** Without `dur`, a trick lasts its POSE_TIME and sleep lasts until something stands it up. */
 export function setPose(
@@ -62,6 +73,7 @@ export function stepPoses(m: MotionState, dt: number): void {
   const P = poseDef(m.pose)
   m.fk = damp(m.fk, P ? 1 : 0, P ? 4 : 3, dt)
   m.bellyW = damp(m.bellyW, m.pose === 'belly' ? 1 : 0, 2.5, dt)
+  m.rollW = damp(m.rollW, m.pose === 'roll' ? 1 : 0, 4, dt)
   m.sleepW = damp(m.sleepW, m.pose === 'sleep' ? 1 : 0, 2, dt)
   if (P) {
     m.poseY = damp(m.poseY, P.y, 6, dt)
