@@ -212,8 +212,6 @@ const STEP_AWAY = 0.45,
 const PEE_SIT = 0.5,
   POOP_SIT = 0.75,
   POOP_BOW = 0.3
-/** How past the mud, across the garden, it goes: as a share of the way from the puddle. */
-const POTTY_FROM_MUD = 1.3
 /** Seconds it stands on the scale, turned this far from facing the camera: side on, to the left. */
 export const WEIGH_TIME = 3
 const ON_SCALE_TURN = -1.2
@@ -800,13 +798,8 @@ function goRelieve(r: RoutineState, m: MotionState, ctx: RoutineCtx) {
   r.inGarden = garden
   r.relieved = false
   if (!garden) return enter(r, 'relieving')
-  // Across the garden from the puddle
-  const g = ctx.spots.garden.center,
-    mud = ctx.spots.mud.center
-  const [x, z] = ctx.clamp(
-    g.x + (g.x - mud.x) * POTTY_FROM_MUD,
-    g.z + (g.z - mud.z) * POTTY_FROM_MUD,
-  )
+  // Its place on the grass, away from the puddle
+  const [x, z] = ctx.clamp(ctx.spots.garden.center.x, ctx.spots.garden.center.z)
   r.target.set(x, 0, z)
   m.goal = null
   enter(r, 'toGarden')

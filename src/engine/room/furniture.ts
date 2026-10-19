@@ -1,7 +1,15 @@
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
-import { playHalf, playLocal, playWorld, type FixedCamera } from './camera'
-import { findStarts, layOut, START_WANT, wantedStarts, type Oval } from './layout'
+import { PLAY, playLocal, playWorld, type FixedCamera } from './camera'
+import {
+  findStarts,
+  layOut,
+  mudPlace,
+  pottyPlace,
+  START_WANT,
+  wantedStarts,
+  type Oval,
+} from './layout'
 
 /** An oval footprint on the floor, turned to face the camera. */
 export interface Spot {
@@ -15,8 +23,8 @@ export interface Spot {
 }
 
 /**
- * Where the furniture stands: a bed and a bowl for each puppy, left first, then the scale; `garden`
- * is the grass around the `mud` puddle.
+ * Where the furniture stands: a bed and a bowl for each puppy, left first, then the scale; on the
+ * grass, the `mud` puddle and, away from it, the `garden` place where a puppy relieves itself.
  */
 export interface Spots {
   beds: Spot[]
@@ -72,64 +80,47 @@ export function startPlacesOf(
         puppies,
       )
     : null
-  const places = (found ?? wantedStarts(puppies)).map((p, i) => {
-    const [x, z] = playWorld(cam, p.d, p.side)
-    const want = START_WANT[puppies - 1]![i]
-    const heading = want && 'heading' in want ? want.heading : undefined
-    return heading == null ? { x, z } : { x, z, heading }
-  })
+  const places = found
+    ? found.map((p) => {
+        const [x, z] = playWorld(cam, p.d, p.side)
+        return { x, z, heading: p.heading }
+      })
+    : wantedStarts(puppies).map((p, i) => {
+        const [x, z] = playWorld(cam, p.d, p.side)
+        const want = START_WANT[puppies - 1]![i]
+        const heading = want && 'heading' in want ? want.heading : undefined
+        return heading == null ? { x, z } : { x, z, heading }
+      })
   return { places, fallback: !!spots && !found }
 }
 
 export { BEDS, BOWL, BOWL_STEP, SCALE, SLOT_APART } from './layout'
 
-/** The garden as drawn, before `layout` stretches it to the frame. */
-export const GARDEN = { radius: 0.315, depth: 0.45 }
-/** The garden's width over its depth. */
-const GARDEN_WIDTH = 0.7
-/** The puddle within the garden, in fractions of its half sizes: towards the front, a little to the left. */
-export const MUD = { u: -0.12, v: 0.35, size: 0.55 }
+/**
+ * The puddle's middle along the view: at the front of the play area, where the puppies starting
+ * behind it leave it in sight and the floor in front of them shows the rest of it.
+ */
+const MUD_D = PLAY.near + 0.15
 
 /**
  * Places each piece for `cam` (see `layOut`): the beds against the house wall, the bowls on their
  * mat in front of them, the scale at the front, every place a puppy stands still at SLOT_APART from
- * the other's. The garden runs along the left edge with its puddle.
+ * the other's. The puddle lies at the front of the grass, and the garden's place to squat behind it.
  */
 export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const facing = cam.az
-  const at = (d: number, side: number, size: { radius: number; depth: number }): Spot => {
-    const [x, z] = playWorld(cam, d, side)
-    return { center: new THREE.Vector3(x, 0, z), ...size, facing }
+  const placed = (o: Oval): Spot => {
+    const [x, z] = playWorld(cam, o.d, o.side)
+    return { center: new THREE.Vector3(x, 0, z), radius: o.radius, depth: o.depth, facing }
   }
-  const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot =>
-    at(d, side * playHalf(cam, d), size)
-  const gd = 0.8,
-    depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
-  const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
-  // Across the screen is +x turned by the azimuth, towards the camera is +z turned by it
-  const cx = Math.cos(facing),
-    sz = Math.sin(facing),
-    u = MUD.u * garden.radius,
-    v = MUD.v * garden.depth
-  const mud: Spot = {
-    center: new THREE.Vector3(
-      garden.center.x + u * cx + v * sz,
-      0,
-      garden.center.z - u * sz + v * cx,
-    ),
-    radius: MUD.size * garden.radius,
-    depth: MUD.size * garden.depth,
-    facing,
-  }
-  const m = playLocal(cam, mud.center.x, mud.center.z)
-  const plan = layOut(cam, puppies, { d: m.d, side: m.side, radius: mud.radius, depth: mud.depth })
-  const placed = (o: Oval) => at(o.d, o.side, o)
+  const mud = mudPlace(cam, MUD_D)
+  const plan = layOut(cam, puppies, mud)
   const spots: Spots = {
     beds: plan.beds.map(placed),
     bowls: plan.bowls.map(placed),
     scale: placed(plan.scale),
-    mud,
-    garden,
+    mud: placed(mud),
+    garden: placed(pottyPlace(plan, mud, cam)),
     fallback: plan.fallback,
   }
   spots.walk = walkLists(spots)
