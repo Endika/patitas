@@ -13,9 +13,11 @@ import {
   sulk,
   withCareDefaults,
   dry,
+  dull,
   ENERGY_MOVE_LOSS_PER_HOUR,
   exercise,
   feed,
+  groom,
   health,
   isNight,
   rest,
@@ -57,6 +59,7 @@ describe('createCare', () => {
       bladder: 0,
       messes: [],
       gloom: 0,
+      shine: 0,
     })
   })
 })
@@ -243,7 +246,7 @@ describe('pee and poop', () => {
   })
 
   it('reads an older record without the new fields as empty', () => {
-    const { bladder: _b, messes: _m, gloom: _g, ...old } = care
+    const { bladder: _b, messes: _m, gloom: _g, shine: _s, ...old } = care
     expect(withCareDefaults(old)).toEqual(care)
     expect(withCareDefaults(addMess(care, mess()))).toEqual(addMess(care, mess()))
   })
@@ -295,5 +298,29 @@ describe('catchUp with accidents', () => {
     const care = catchUp(createCare(breed, start), breed, start + 8 * HOUR)
     expect(care.messes).toEqual([])
     expect(care.bladder).toBe(1)
+  })
+})
+
+describe('shine', () => {
+  const start = at(1, 12)
+
+  it('brushing raises the shine and happiness, never past 1', () => {
+    const care = createCare(breed, start)
+    const brushed = groom(care, 0.3, 0.1)
+    expect([brushed.shine, brushed.happiness]).toEqual([0.3, 0.6])
+    expect(groom(brushed, 2, 2)).toMatchObject({ shine: 1, happiness: 1 })
+  })
+
+  it('fades over about a day, in the room and away', () => {
+    const shiny = { ...createCare(breed, start), shine: 1 }
+    expect(dull(shiny, 6 * 3600).shine).toBeCloseTo(0.75)
+    expect(dull(dull(shiny, 30 * 3600), 1).shine).toBe(0)
+    expect(catchUp(shiny, breed, start + 12 * HOUR).shine).toBeCloseTo(0.5)
+    expect(catchUp(shiny, breed, start + 3 * 24 * HOUR).shine).toBe(0)
+  })
+
+  it('a dull coat stays the same care', () => {
+    const care = createCare(breed, start)
+    expect(dull(care, 3600)).toBe(care)
   })
 })

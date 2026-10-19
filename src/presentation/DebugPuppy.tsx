@@ -25,8 +25,8 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 
 /**
  * One or two puppies in the room with the prototype's controls, for checking the render by eye,
- * plus buttons that fill the bowls, send the first puppy into the puddle, have it squat or bathe
- * it, and each puppy's care as the room keeps it.
+ * plus buttons that fill the bowls, send the first puppy into the puddle, have it squat, bathe,
+ * brush or weigh a puppy, and each puppy's care as the room keeps it.
  */
 export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
@@ -91,11 +91,32 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
           <button type="button" onClick={() => stageRef.current?.finishBath()}>
             Terminar
           </button>
+          {debugNames(breedIds).map((n, i) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={status?.needs[i]?.mode === 'brush'}
+              onClick={() =>
+                status?.needs[i]?.mode === 'brush'
+                  ? stageRef.current?.endBrush()
+                  : stageRef.current?.brush(i)
+              }
+            >
+              {breedIds.length > 1 ? `Cepillo ${n}` : 'Cepillo'}
+            </button>
+          ))}
+          {debugNames(breedIds).map((n, i) => (
+            <button key={n} type="button" onClick={() => stageRef.current?.weigh(i)}>
+              {breedIds.length > 1 ? `Pesar ${n}` : 'Pesar'}
+            </button>
+          ))}
           {status?.needs.map((n) => (
             <span key={n.name}>
               {n.name}: hambre {n.hunger.toFixed(2)} · cuenco {n.bowl.toFixed(2)} ·{' '}
               {n.weightKg.toFixed(2)} kg · limpieza {n.cleanliness.toFixed(2)} · mojado{' '}
-              {n.wet.toFixed(2)}
+              {n.wet.toFixed(2)} · brillo {n.shine.toFixed(2)}
+              {n.mode && ` · ${n.mode}`}
+              {n.reading && ` · báscula ${n.reading} (${n.weightStatus})`}
             </span>
           ))}
         </div>

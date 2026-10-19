@@ -7,22 +7,26 @@ import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/eng
 import {
   askTrick,
   bathe,
+  brushPuppy,
   finishBath,
   headWorld,
   hitPuppy,
-  liftBath,
+  liftCoat,
   mountPuppyView,
   offerBall,
   pointLook,
   putBallAway,
-  rubBath,
+  rubCoat,
+  stopBrushing,
   throwBall,
   tickPuppies,
+  weighPuppy,
   type PuppyView,
 } from '@/engine/puppy/view'
 import { loadPuppyGeometry, peekPuppyGeometry } from '@/engine/puppy/geometryClient'
 import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { createBathLayer, rinse, takeDryer } from '@/engine/room/bath'
+import { createBrushLayer } from '@/engine/room/brush'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
@@ -35,16 +39,26 @@ import {
   relieveNow,
   touch,
   tuckIn,
+  weighing,
 } from '@/engine/motion/routine'
-import { START_PLACES } from '@/engine/room/furniture'
+import { createScaleDisplay, formatKg, showScale, START_PLACES } from '@/engine/room/furniture'
 import { createMessLayer } from '@/engine/room/messes'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS } from './hints'
-import { NO_3D, type PuppyNeeds, type RoomStage, type StageStatus } from './roomStage'
+import {
+  NO_3D,
+  type CareMode,
+  type PuppyNeeds,
+  type RoomStage,
+  type StageStatus,
+} from './roomStage'
 
 const IDLE_HAPPINESS = 0.25
 
 const hundredths = (x: number) => Math.round(x * 100) / 100
+
+const modeOf = (v: PuppyView): CareMode | null =>
+  v.bath.phase !== 'off' ? 'bath' : v.brush.on ? 'brush' : weighing(v.routine) ? 'weigh' : null
 
 const needsOf = (v: PuppyView): PuppyNeeds => ({
   name: v.puppy.name,
@@ -55,6 +69,10 @@ const needsOf = (v: PuppyView): PuppyNeeds => ({
   weightKg: hundredths(v.care.weightKg),
   bowl: hundredths(v.bowl),
   wet: hundredths(v.care.wet),
+  shine: hundredths(v.care.shine),
+  mode: modeOf(v),
+  reading: v.weighed && formatKg(v.weighed.kg),
+  weightStatus: v.weighed?.status ?? null,
 })
 
 const sameNeeds = (a: PuppyNeeds[], b: PuppyNeeds[]) =>
@@ -119,6 +137,9 @@ export function createThreeStage(
       rinse() {},
       dryer() {},
       finishBath() {},
+      brush() {},
+      endBrush() {},
+      weigh() {},
       onChange: hub.onChange,
       dispose: hub.clear,
     }
@@ -127,6 +148,8 @@ export function createThreeStage(
   const ball = createBall()
   const messes = createMessLayer(room.scene)
   const baths = createBathLayer(room.scene)
+  const brushes = createBrushLayer(room.scene)
+  const scaleDisplay = createScaleDisplay()
   const mounted = new Map<string, PuppyView>()
   /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
   const failed = new Set<string>()
@@ -139,6 +162,8 @@ export function createThreeStage(
   const free = () => views.every((v) => v.fetch.task === 'free')
   /** The puppy in its bath, if any: one at a time. */
   const inBath = () => views.find((v) => v.bath.phase !== 'off')
+  /** The puppy being brushed, if any: one at a time, and not while another is bathed. */
+  const brushed = () => views.find((v) => v.brush.on)
   const mood = (v: PuppyView) => ({
     happy: v.behaviour.happy,
     energy: v.persona.energy,
@@ -222,26 +247,26 @@ export function createThreeStage(
     onBall: (ray) => ball.state === 'air' && rayHitsBall(ray, ball.pos),
     free,
     petStart(hit, t) {
-      if (hit.bathZone) return rubBath(hit.view, hit.bathZone, hit.point)
+      if (hit.bathZone) return rubCoat(hit.view, hit.bathZone, hit.point)
       petView = hit.view
       touch(hit.view.routine)
       startPet(hit.view.behaviour, hit.zone, hit.point, t)
       if (hit.view.fetch.task === 'free') hit.view.motion.goal = null
     },
     petMove(hit, t, px) {
-      if (hit.bathZone) return rubBath(hit.view, hit.bathZone, hit.point)
-      for (const v of views) liftBath(v)
+      if (hit.bathZone) return rubCoat(hit.view, hit.bathZone, hit.point)
+      for (const v of views) liftCoat(v)
       if (hit.view !== petView) return
       if (movePet(hit.view.behaviour, hit.zone, hit.point, t, px)) room.emitHeart(hit.point)
     },
     // Off the puppy the scrubbing or drying stops and the dryer is put away
     petOff() {
-      for (const v of views) liftBath(v)
+      for (const v of views) liftCoat(v)
     },
     petEnd() {
       if (petView) endPet(petView.behaviour)
       petView = null
-      for (const v of views) liftBath(v)
+      for (const v of views) liftCoat(v)
     },
     look(ray, t) {
       for (const v of views) pointLook(v, ray, room.camera, t)
@@ -257,7 +282,7 @@ export function createThreeStage(
       } else if (g.kind === 'takeBall') offerBall(views, ball)
       else if (g.kind === 'goTo')
         for (const v of views) {
-          if (touch(v.routine) || v.routine.bath || keepsEating(v.routine, v.care)) continue
+          if (touch(v.routine) || v.routine.held || keepsEating(v.routine, v.care)) continue
           goTo(v.motion, g.x, g.z, mood(v))
           v.behaviour.perk = 1
         }
@@ -292,6 +317,9 @@ export function createThreeStage(
       for (let n = 0; n < 3; n++) room.emitHeart(at)
     })
     baths.sync(views, dt, room.camera.position)
+    brushes.sync(views, dt, room.camera)
+    const onScale = views.find((w) => w.routine.routine === 'onScale')
+    showScale(scaleDisplay, room.furniture, onScale ? onScale.care.weightKg : null, dt)
     messes.begin()
     for (const v of views) for (const m of v.care.messes) messes.show(m, room.cam)
     messes.end()
@@ -369,7 +397,7 @@ export function createThreeStage(
     },
     bath(index) {
       const v = views[index]
-      if (v && !inBath()) bathe(v)
+      if (v && !inBath() && !brushed()) bathe(v)
     },
     rinse() {
       const v = inBath()
@@ -382,6 +410,18 @@ export function createThreeStage(
     finishBath() {
       const v = inBath()
       if (v) finishBath(v)
+    },
+    brush(index) {
+      const v = views[index]
+      if (v && !inBath() && !brushed()) brushPuppy(v)
+    },
+    endBrush() {
+      const v = brushed()
+      if (v) stopBrushing(v)
+    },
+    weigh(index) {
+      const v = views[index]
+      if (v && room.furniture && !views.some((w) => weighing(w.routine))) weighPuppy(v)
     },
     toMud() {
       const v = views[0],
@@ -402,6 +442,7 @@ export function createThreeStage(
       offResize()
       messes.dispose()
       baths.dispose()
+      brushes.dispose()
       for (const v of mounted.values()) v.dispose()
       mounted.clear()
       room.dispose()

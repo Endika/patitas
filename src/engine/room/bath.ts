@@ -12,6 +12,7 @@ import {
   type Dirt,
   type DirtRest,
 } from '@/engine/puppy/dirt'
+import { disposeTree, holdTool, type Grip } from './tool'
 
 export type BathPhase = 'off' | 'scrub' | 'rinse' | 'shake' | 'drying'
 
@@ -30,7 +31,7 @@ export const DROP_MAX = 200
  * The finger scrubs this far round it, taking off this much dirt at the middle per unit it
  * travels over the coat: rubbing cleans, a still finger does not.
  */
-const SCRUB_R = 0.16,
+export const SCRUB_R = 0.16,
   SCRUB_PER_UNIT = 3
 /** How wet the lather leaves the fur it is rubbed into. */
 const SOAPY = 0.5
@@ -38,12 +39,12 @@ const SOAPY = 0.5
 const DRY_R = 0.24,
   DRY_PER_UNIT = 5
 /** At most this much travel counts in one frame, so a jump across the body is not a stroke. */
-const MAX_TRAVEL = 0.1
+export const MAX_TRAVEL = 0.1
 /** A blob of foam for every this much travel, and at most a few a frame. */
 const FOAM_EVERY = 0.035,
   FOAM_BURST = 4
 /** Seconds after the finger last moved that the puppy still feels it rubbing. */
-const RUB_HOLD = 0.3
+export const RUB_HOLD = 0.3
 /** Seconds between drying steps in the air: wetness falls too slowly to need more. */
 const AIR_STEP = 1
 /** Below this it counts as dry. */
@@ -99,8 +100,8 @@ export function bathSpheres(A: Pick<Anatomy, 'zones' | 'bones' | 'bi'>): BathSph
   return out
 }
 
-/** The finger on a bathed puppy: the bone it is on, the point in that bone's frame and at rest. */
-export interface BathTouch {
+/** The finger on a bathed or brushed coat: its bone, the point in that bone's frame and at rest. */
+export interface CoatTouch {
   bone: THREE.Object3D
   local: Vec3
   rest: Vec3
@@ -139,10 +140,11 @@ export function bathReach(A: Pick<Anatomy, 'zones' | 'bones' | 'bi'>): BathReach
   }
 }
 
-const reached = Array.from({ length: 5 }, () => new THREE.Vector3())
+/** Where the last `reachOf` reaches, in the rest pose. */
+export const reached = Array.from({ length: 5 }, () => new THREE.Vector3())
 
 /** The rest points a touch at `p` works on, into `reached`; returns how many. */
-function reachOf(p: Vec3, reach: BathReach | undefined): number {
+export function reachOf(p: Vec3, reach: BathReach | undefined): number {
   reached[0]!.copy(p)
   if (!reach) return 1
   let n = 1
@@ -360,7 +362,7 @@ function airDry(wet: Float32Array, amount: number): boolean {
   return changed
 }
 
-function addFoam(b: Bath, touch: BathTouch, random: () => number) {
+function addFoam(b: Bath, touch: CoatTouch, random: () => number) {
   let f: Foam
   if (b.foamN < FOAM_MAX) f = b.foam[b.foamN++]!
   else {
@@ -380,7 +382,7 @@ function addFoam(b: Bath, touch: BathTouch, random: () => number) {
 export interface BathInput {
   coat: Coat
   /** The finger on the puppy, or null. Its travel is used up by the step. */
-  touch: BathTouch | null
+  touch: CoatTouch | null
   /** Where else a stroke reaches; without it, only under the finger. */
   reach?: BathReach
   random?: () => number
@@ -445,7 +447,7 @@ export function stepBath(b: Bath, input: BathInput, dt: number): boolean {
 export interface BathShown {
   bath: Bath
   bathZones: readonly { bone: THREE.Object3D; off: Vec3; r: number }[]
-  bathTouch: BathTouch | null
+  coatTouch: CoatTouch | null
   group: THREE.Object3D
 }
 
@@ -474,19 +476,16 @@ const RAIN = 150,
 const SHOWER_Y = 1.15,
   SHOWER_HALF = 0.22
 
-const Z = new THREE.Vector3(0, 0, 1),
-  UP = new THREE.Vector3(0, 1, 0)
 /**
  * Where the dryer is held from the spot it dries, and how big it is: up and to the left, clear of
  * a finger coming from below on the right.
  */
-const DRYER_OFF = { side: -0.24, up: 0.14 },
+const DRYER_GRIP: Grip = { back: 0.12, side: -0.24, up: 0.14 },
   DRYER_SCALE = 2.5
 const ONE = new THREE.Quaternion()
 const tmp = new THREE.Vector3(),
   tmp2 = new THREE.Vector3(),
   scl = new THREE.Vector3(),
-  side = new THREE.Vector3(),
   mat = new THREE.Matrix4()
 
 /** A small hair dryer with its nozzle along +z and a few streaks of air in front of it. */
@@ -690,23 +689,11 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
       drops.visible = live > 0
       if (live) drops.instanceMatrix.needsUpdate = true
 
-      let t: BathTouch | null = null
-      for (const s of shown) if (s.bath.phase === 'drying' && s.bath.dryer) t ??= s.bathTouch
+      let t: CoatTouch | null = null
+      for (const s of shown) if (s.bath.phase === 'drying' && s.bath.dryer) t ??= s.coatTouch
       dryer.group.visible = !!t
       if (t) {
-        const at = t.bone.localToWorld(tmp.copy(t.local))
-        // Held off to one side of the spot, so it shows side on rather than end on
-        const d = tmp2.copy(at).sub(camera).normalize()
-        side.crossVectors(d, UP).normalize()
-        dryer.group.position
-          .copy(at)
-          .addScaledVector(d, -0.12)
-          .addScaledVector(side, DRYER_OFF.side)
-          .addScaledVector(UP, DRYER_OFF.up)
-        dryer.group.quaternion.setFromUnitVectors(
-          Z,
-          d.copy(at).sub(dryer.group.position).normalize(),
-        )
+        holdTool(dryer.group, t.bone.localToWorld(tmp.copy(t.local)), camera, DRYER_GRIP)
         for (let i = 0; i < dryer.streaks.length; i++) {
           const m = dryer.streaks[i]!,
             u = (clock * 3 + i / dryer.streaks.length) % 1
@@ -722,15 +709,7 @@ export function createBathLayer(scene: THREE.Scene, random: () => number = Math.
         ;(m.material as THREE.Material).dispose()
         m.dispose()
       }
-      const done = new Set<THREE.Material | THREE.BufferGeometry>()
-      dryer.group.traverse((o) => {
-        if (!(o instanceof THREE.Mesh)) return
-        for (const r of [o.geometry, o.material] as (THREE.Material | THREE.BufferGeometry)[]) {
-          if (done.has(r)) continue
-          done.add(r)
-          r.dispose()
-        }
-      })
+      disposeTree(dryer.group)
     },
   }
 }

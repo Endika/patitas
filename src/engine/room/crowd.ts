@@ -26,6 +26,34 @@ export function separate(states: MotionState[], minDist = 0.45, clamp?: Clamp): 
     }
 }
 
+/**
+ * Keeps everyone but `owner` out of the circle of radius `r` round (x, z), and their goals with
+ * them: the scale while one puppy is weighed.
+ */
+export function keepOff(
+  states: readonly MotionState[],
+  owner: MotionState,
+  x: number,
+  z: number,
+  r: number,
+  clamp?: Clamp,
+): void {
+  for (const s of states) {
+    if (s === owner) continue
+    out(s.pos, x, z, r, clamp)
+    if (s.goal) out(s.goal, x, z, r, clamp)
+  }
+}
+
+function out(p: Vec3, x: number, z: number, r: number, clamp?: Clamp) {
+  const dx = p.x - x,
+    dz = p.z - z,
+    d = Math.hypot(dx, dz)
+  if (d >= r) return
+  const [nx, nz] = d > 1e-6 ? [dx / d, dz / d] : [1, 0]
+  move(p, nx * (r - d), nz * (r - d), clamp)
+}
+
 function move(p: Vec3, dx: number, dz: number, clamp?: Clamp): number {
   const x0 = p.x,
     z0 = p.z

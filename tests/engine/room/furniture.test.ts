@@ -5,7 +5,10 @@ import { cameraPosition, clampPlay, createCamera, fitCamera, playLocal } from '@
 import { bedSlots } from '@/engine/motion/routine'
 import {
   computeSpots,
+  createScaleDisplay,
   formatKg,
+  READING_HOLD,
+  showScale,
   showBowls,
   furnitureObstacles,
   inMud,
@@ -304,6 +307,39 @@ describe('formatKg', () => {
 
   it('reads zero with nobody on it', () => {
     expect(formatKg(null)).toBe('0,0 kg')
+  })
+})
+
+describe('showScale', () => {
+  const DT = 1 / 60
+  const fake = () => {
+    const drawn: string[] = []
+    return { drawn, scaleReading: (kg: number | null) => void drawn.push(formatKg(kg)) }
+  }
+
+  it('reads the weight while a puppy stands on it, holds it a while, then goes back to zero', () => {
+    const d = createScaleDisplay(),
+      f = fake()
+    showScale(d, f, null, DT)
+    expect(f.drawn).toEqual([])
+    for (let t = 0; t < 3; t += DT) showScale(d, f, 4.26, DT)
+    expect(f.drawn).toEqual(['4,3 kg'])
+    for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, DT)
+    expect(f.drawn).toEqual(['4,3 kg'])
+    for (let t = 0; t < 0.2; t += DT) showScale(d, f, null, DT)
+    expect(f.drawn).toEqual(['4,3 kg', '0,0 kg'])
+  })
+
+  it('draws again only when the tenths change, or on furniture laid out anew', () => {
+    const d = createScaleDisplay(),
+      f = fake(),
+      g = fake()
+    showScale(d, f, 4.31, DT)
+    showScale(d, f, 4.34, DT)
+    showScale(d, f, 4.36, DT)
+    expect(f.drawn).toEqual(['4,3 kg', '4,4 kg'])
+    showScale(d, g, 4.36, DT)
+    expect(g.drawn).toEqual(['4,4 kg'])
   })
 })
 

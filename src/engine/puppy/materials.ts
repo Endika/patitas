@@ -16,6 +16,8 @@ export interface FurUniforms {
   uBlowAt: { value: THREE.Vector3 }
   uBlow: { value: THREE.Vector3 }
   uBlowT: { value: number }
+  /** 0 to 1: brushed fur is a little glossier and fluffier. */
+  uShine: { value: number }
 }
 
 const MUD = new THREE.Color('#4a2f1b'),
@@ -32,6 +34,7 @@ export function furUniforms(f: FurParams): FurUniforms {
     uBlowAt: { value: new THREE.Vector3() },
     uBlow: { value: new THREE.Vector3() },
     uBlowT: { value: 0 },
+    uShine: { value: 0 },
   }
 }
 
@@ -40,7 +43,8 @@ export function furUniforms(f: FurParams): FurUniforms {
  * its normal, droops and combs it back, and keeps only the cells of the strands that reach it.
  * The `coat` attribute holds dirt and wetness per vertex, 0 to 1 each. Dirt tints it mud brown,
  * most on the outer shells, and clumps the strands shorter where it is thick; wet fur is darker,
- * glossier and lies flat against the body.
+ * glossier and lies flat against the body. Brushed fur (`uShine`) stands a little longer and
+ * catches the light at its tips.
  */
 export function furMaterial(h: number, u: FurUniforms): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })
@@ -53,13 +57,13 @@ export function furMaterial(h: number, u: FurUniforms): THREE.MeshStandardMateri
         '#include <common>',
         `#include <common>
 attribute float furLen; attribute vec2 coat; varying vec3 vRest; varying float vFur; varying float vDirt; varying float vWet;
-uniform float uH, uFurLen, uDroop, uComb, uBlowT; uniform vec3 uBlowAt, uBlow;`,
+uniform float uH, uFurLen, uDroop, uComb, uBlowT, uShine; uniform vec3 uBlowAt, uBlow;`,
       )
       .replace(
         '#include <skinning_vertex>',
         `#include <skinning_vertex>
 vRest = position; vFur = furLen; vDirt = coat.x; vWet = coat.y;
-float fl = furLen * uFurLen * uH * (1.0 - 0.35 * smoothstep(0.6, 1.0, coat.x)) * (1.0 - 0.6 * coat.y);
+float fl = furLen * uFurLen * uH * (1.0 - 0.35 * smoothstep(0.6, 1.0, coat.x)) * (1.0 - 0.6 * coat.y) * (1.0 + 0.14 * uShine * (1.0 - coat.y));
 transformed += normalize(objectNormal) * fl;
 transformed += vec3(0.0, -uDroop - 0.8 * coat.y, -uComb) * fl * uH;
 float blown = 1.0 - smoothstep(0.04, 0.2, distance(position, uBlowAt));
@@ -69,7 +73,7 @@ transformed += uBlow * fl * blown * (1.6 + 0.5 * sin(uBlowT * 31.0 + dot(positio
       .replace(
         '#include <common>',
         `#include <common>
-varying vec3 vRest; varying float vFur; varying float vDirt; varying float vWet; uniform float uH, uDensity;
+varying vec3 vRest; varying float vFur; varying float vDirt; varying float vWet; uniform float uH, uDensity, uShine;
 uniform vec3 uMud, uMudTip;
 float h13(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
 vec3 h33(vec3 p){ p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }`,
@@ -86,15 +90,17 @@ vec3 h33(vec3 p){ p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz
   diffuseColor.rgb = mix(diffuseColor.rgb, mix(uMud, uMudTip, uH), caked);
   diffuseColor.rgb *= mix(0.5, 1.04, smoothstep(0.0, 1.0, uH)) * (0.9 + 0.2 * h13(cell + 3.0));
   diffuseColor.rgb *= 1.0 - 0.45 * vWet;
+  diffuseColor.rgb *= 1.0 + 0.08 * uShine * uH * (1.0 - vDirt);
 }`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-roughnessFactor = mix(roughnessFactor, 0.45, vWet);`,
+roughnessFactor = mix(roughnessFactor, 0.45, vWet);
+roughnessFactor = mix(roughnessFactor, 0.62, uShine * uH * (1.0 - vDirt));`,
       )
   }
-  m.customProgramCacheKey = () => 'fur-v3'
+  m.customProgramCacheKey = () => 'fur-v4'
   return m
 }
 

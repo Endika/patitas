@@ -27,6 +27,8 @@ export interface Care {
   messes: Mess[]
   /** Happiness the waiting messes have taken so far, up to MESS_GLOOM_MAX. */
   gloom: number
+  /** 0 to 1: how glossy and fluffy brushing has left the coat. */
+  shine: number
 }
 
 export type Health = 'Muy bien' | 'Bien' | 'Necesita cuidados'
@@ -39,6 +41,8 @@ export const ENERGY_MOVE_LOSS_PER_HOUR = 0.3
 export const HAPPINESS_DRIFT_PER_HOUR = 0.05
 /** Left alone, a soaked coat dries in about 10 min. */
 export const WET_LOSS_PER_SECOND = 1 / 600
+/** A brushed coat loses its shine in about a day. */
+export const SHINE_LOSS_PER_HOUR = 1 / 24
 export const MEAL_WEIGHT_KG = 0.02
 export const PLAY_WEIGHT_KG_PER_MINUTE = 0.004
 export const MEAL_HUNGER = 0.7
@@ -76,13 +80,17 @@ export function createCare(breed: Breed, now: number): Care {
     bladder: 0,
     messes: [],
     gloom: 0,
+    shine: 0,
   }
 }
 
-/** A care record saved before pee and poop came along: nothing waiting and an empty bladder. */
+/**
+ * A care record saved before pee and poop came along: nothing waiting and an empty bladder; and
+ * before brushing, a dull coat.
+ */
 export const withCareDefaults = (
-  stored: Omit<Care, 'bladder' | 'messes' | 'gloom'> & Partial<Care>,
-): Care => ({ bladder: 0, messes: [], gloom: 0, ...stored })
+  stored: Omit<Care, 'bladder' | 'messes' | 'gloom' | 'shine'> & Partial<Care>,
+): Care => ({ bladder: 0, messes: [], gloom: 0, shine: 0, ...stored })
 
 export function isNight(now: number): boolean {
   const hour = new Date(now).getHours()
@@ -133,6 +141,7 @@ export function catchUp(
     energy: unit(care.energy + ENERGY_REST_PER_HOUR * hours),
     happiness: unit(toward),
     wet: unit(care.wet - WET_LOSS_PER_SECOND * hours * 3600),
+    shine: unit(care.shine - SHINE_LOSS_PER_HOUR * hours),
     weightKg: clampWeight(care.weightKg, breed),
     lastSeen: now,
     bladder: accidents.bladder,
@@ -226,6 +235,19 @@ export const dry = (care: Care, seconds: number): Care => ({
   ...care,
   wet: unit(care.wet - WET_LOSS_PER_SECOND * seconds),
 })
+
+/** Brushed: `shine` more gloss and `joy` more happiness. */
+export const groom = (care: Care, shine: number, joy: number): Care => ({
+  ...care,
+  shine: unit(care.shine + shine),
+  happiness: unit(care.happiness + joy),
+})
+
+/** `seconds` of the shine wearing off; a dull coat is the same care. */
+export const dull = (care: Care, seconds: number): Care =>
+  care.shine > 0
+    ? { ...care, shine: unit(care.shine - (SHINE_LOSS_PER_HOUR * seconds) / 3600) }
+    : care
 
 export const rest = (care: Care, seconds: number): Care => ({
   ...care,

@@ -29,6 +29,9 @@ export function createFakeStage() {
     rinse: () => void calls.push('rinse'),
     dryer: () => void calls.push('dryer'),
     finishBath: () => void calls.push('finishBath'),
+    brush: (index) => void calls.push(`brush:${index}`),
+    endBrush: () => void calls.push('endBrush'),
+    weigh: (index) => void calls.push(`weigh:${index}`),
     onChange(listener) {
       listeners.add(listener)
       listener(status)

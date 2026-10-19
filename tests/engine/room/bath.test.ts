@@ -25,7 +25,7 @@ import {
   withCoat,
   type Bath,
   type BathReach,
-  type BathTouch,
+  type CoatTouch,
   type Coat,
 } from '@/engine/room/bath'
 import { createCamera } from '@/engine/room/camera'
@@ -78,8 +78,8 @@ const HEADINGS = {
 
 /**
  * A finger zigzagging over the puppy as the room camera sees it, turned `heading` and standing
- * still in its rest pose: each frame it touches the first bath sphere under it, as `hitBath` does,
- * and how far the touch moved is the travel `rubBath` would measure.
+ * still in its rest pose: each frame it touches the first bath sphere under it, as `hitCoat` does,
+ * and how far the touch moved is the travel `rubCoat` would measure.
  */
 function stroker(pup: Pup, heading: number) {
   const d = LOOK.clone().applyAxisAngle(Y, -heading)
@@ -112,7 +112,7 @@ function stroker(pup: Pup, heading: number) {
   const legs = path.slice(1).map((p, i) => Math.hypot(p[0] - path[i]![0], p[1] - path[i]![1]))
   const length = legs.reduce((a, b) => a + b, 0)
   const ray = new THREE.Ray(new THREE.Vector3(), d)
-  const touch: BathTouch = {
+  const touch: CoatTouch = {
     bone: new THREE.Object3D(),
     local: new THREE.Vector3(),
     rest: new THREE.Vector3(),
@@ -122,7 +122,7 @@ function stroker(pup: Pup, heading: number) {
   let s = 0,
     was: THREE.Vector3 | null = null
   /** Where the finger is after another frame, or null when it is off the puppy. */
-  return (): BathTouch | null => {
+  return (): CoatTouch | null => {
     s += SPEED * DT
     if (s >= length) {
       s -= length
@@ -165,7 +165,7 @@ function run(b: Bath, coat: Coat, secs: number, heading?: number, pup = pups.shi
 }
 
 /** A finger on `p` that does not move. */
-const still = (p: THREE.Vector3): BathTouch => ({
+const still = (p: THREE.Vector3): CoatTouch => ({
   bone: new THREE.Object3D(),
   local: p.clone(),
   rest: p.clone(),
@@ -410,7 +410,7 @@ describe('createBathLayer', () => {
       off: new THREE.Vector3(...s.c),
       r: s.r,
     }))
-    const shown = { bath: b, bathZones: zones, bathTouch: null as BathTouch | null, group }
+    const shown = { bath: b, bathZones: zones, coatTouch: null as CoatTouch | null, group }
     return { scene, layer, coat, b, shown, cam: new THREE.Vector3(0, 1, 3) }
   }
 
@@ -479,10 +479,10 @@ describe('createBathLayer', () => {
     rinse(b)
     run(b, coat, RINSE_TIME + SHAKE_TIME + 0.1)
     takeDryer(b)
-    shown.bathTouch = still(new THREE.Vector3(0.1, 0.4, 0))
+    shown.coatTouch = still(new THREE.Vector3(0.1, 0.4, 0))
     layer.sync([shown], DT, cam)
     expect(dryer().visible).toBe(true)
-    shown.bathTouch = null
+    shown.coatTouch = null
     layer.sync([shown], DT, cam)
     expect(dryer().visible).toBe(false)
   })
