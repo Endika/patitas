@@ -89,8 +89,10 @@ export const HOUSE = SPLIT + STRIP_HALF,
   GRASS = SPLIT - STRIP_HALF
 
 /**
- * Whether two ovals of the same facing stand at least `gap` apart, rim to rim: each grown by half
- * of it is held in the oval of their summed half sizes, so this never passes two that are closer.
+ * Whether two ovals of the same facing stand at least `gap` apart, rim to rim, by the oval of their
+ * summed half sizes grown by it. Every centre in that oval is too close, so this never fails two
+ * that are far enough apart; for ovals near round it is all but exact, but a long one may pass a
+ * little closer (see `clearOf`).
  */
 export const apart = (a: Oval, b: Oval, gap: number): boolean =>
   ((a.side - b.side) / (a.radius + b.radius + gap)) ** 2 +
@@ -98,6 +100,49 @@ export const apart = (a: Oval, b: Oval, gap: number): boolean =>
   1
 
 const dist = (a: Place, b: Place) => Math.hypot(a.d - b.d, a.side - b.side)
+
+/** Points round the rim measured from, and Newton steps to the nearest point of the other. */
+const RIM = 48,
+  NEWTON = 6
+
+/**
+ * How far a point outside `o` lies from its rim, by Newton's method on the nearest rim angle; 0
+ * for a point inside it.
+ */
+function fromRim(o: Oval, d: number, side: number): number {
+  const x = Math.abs(side - o.side),
+    y = Math.abs(d - o.d),
+    a = o.radius,
+    b = o.depth
+  if ((x / a) ** 2 + (y / b) ** 2 <= 1) return 0
+  let t = Math.atan2(a * y, b * x)
+  for (let k = 0; k < NEWTON; k++) {
+    const c = Math.cos(t),
+      s = Math.sin(t)
+    // The slope of the squared distance along the rim, halved, and its own slope
+    const f = (a * a - b * b) * s * c - x * a * s + y * b * c,
+      df = (a * a - b * b) * (c * c - s * s) - x * a * c - y * b * s
+    if (Math.abs(df) < 1e-12) break
+    t = Math.min(Math.PI / 2, Math.max(0, t - f / df))
+  }
+  return Math.hypot(x - a * Math.cos(t), y - b * Math.sin(t))
+}
+
+/**
+ * Whether two ovals stand at least `gap` apart, rim to rim, however long either is: what `apart`
+ * passes is measured from points round `a`'s rim to the nearest of `b`'s.
+ */
+export function clearOf(a: Oval, b: Oval, gap: number): boolean {
+  if (!apart(a, b, gap)) return false
+  const reach = Math.max(a.radius, a.depth) + Math.max(b.radius, b.depth)
+  if (dist(a, b) - reach >= gap) return true
+  for (let i = 0; i < RIM; i++) {
+    const t = (i / RIM) * Math.PI * 2
+    if (fromRim(b, a.d + a.depth * Math.sin(t), a.side + a.radius * Math.cos(t)) < gap) return false
+  }
+  return true
+}
+
 const range = (from: number, to: number, step: number) => {
   const out: number[] = []
   for (let v = from; step > 0 ? v <= to + 1e-9 : v >= to - 1e-9; v += step) out.push(v)
@@ -136,8 +181,8 @@ export function layOut(cam: FixedCamera, puppies: 1 | 2, mud: Oval): Layout {
     for (const beds of bedRows(bed, puppies, half, frame)) {
       if (!bedsOk(beds, half, frame)) continue
       for (const bowls of rows) {
-        if (!bowlsClear(bowls, beds)) continue
-        const scale = scalePlace(beds, bowls, half)
+        if (!bowlsClear(bowls, beds) || bowls.some((b) => !clearOf(b, mud, GAP))) continue
+        const scale = scalePlace(beds, bowls, mud, half)
         if (!scale) continue
         const starts = findStarts({ beds, bowls, scale }, mud, cam, puppies)
         if (starts) return { beds, bowls, scale, starts, fallback: false }
@@ -300,7 +345,12 @@ function slotsApart(own: Place[][], scale?: Place) {
  * The scale at the front of the house just inside it, or as far right as it must; failing that
  * further forward or back, and last just outside on the grass by the strip.
  */
-function scalePlace(beds: Oval[], bowls: Oval[], half: (d: number) => number): Oval | null {
+function scalePlace(
+  beds: Oval[],
+  bowls: Oval[],
+  mud: Oval,
+  half: (d: number) => number,
+): Oval | null {
   const at = (d: number, side: number): Oval => ({ d, side, ...SCALE })
   const inside = HOUSE + BY_STRIP + SCALE.radius,
     outside = GRASS - BY_STRIP - SCALE.radius
@@ -316,7 +366,7 @@ function scalePlace(beds: Oval[], bowls: Oval[], half: (d: number) => number): O
     for (const b of bowls)
       if (!apart(s, b, GAP) || dist(s, b) < SCALE_FROM_BOWL || !apart(s, eater(b), EATER_GAP))
         return false
-    return slotsApart(own, s)
+    return slotsApart(own, s) && clearOf(s, mud, GAP)
   }
   for (const d of depths)
     for (const side of range(inside, half(d), 0.02)) if (ok(at(d, side))) return at(d, side)
@@ -338,9 +388,21 @@ export const START_WANT = [
 ] as const
 /** How far a start keeps from every piece's oval, and from the puddle's. */
 const START_CLEAR = 0.3,
-  MUD_CLEAR = 0.1,
-  /** Half a puppy's length, and its width seen from the camera turned a little as it starts. */
-  MUD_HIDE = 0.3
+  MUD_CLEAR = 0.1
+/** A puppy's body at its start as the camera sees it: half its width, half its length, its height. */
+const BODY_BOX = { half: 0.13, length: 0.3, tall: 0.55 }
+/** What hiding all of the puddle at the start costs, against the metres from the wanted place. */
+const HIDE_COST = 10
+
+/** A start: where, and which way the puppy faces there. */
+export interface StartPlace extends Place {
+  heading: number
+}
+/** A start and the share of the puddle it hides. */
+interface Start extends StartPlace {
+  hides: number
+}
+const start = ({ d, side, heading }: Start): StartPlace => ({ d, side, heading })
 
 export const wantedStarts = (puppies: 1 | 2): Place[] =>
   START_WANT[puppies - 1]!.map(({ d, side }) => ({ d, side }))
@@ -351,16 +413,15 @@ const inside = (o: Oval, p: Place, grow: number) =>
 /**
  * Where the puppies start among `pieces`: the open floor nearest START_WANT, clear of every piece
  * and the puddle, SLOT_APART from each other and from every place a puppy stands still at, on the
- * house side if it can. Null when there is no such floor.
+ * house side if it can and leaving the puddle in sight. Null when there is no such floor.
  */
 export function findStarts(
   l: Pick<Layout, 'beds' | 'bowls' | 'scale'>,
   mud: Oval,
   cam: FixedCamera,
   puppies: 1 | 2,
-): Place[] | null {
-  const half = (d: number) => playHalf(cam, d),
-    { camD } = playAxes(cam)
+): StartPlace[] | null {
+  const half = (d: number) => playHalf(cam, d)
   const want = START_WANT[puppies - 1]!
   const { own, scale } = slotsOf(l)
   const slots = [...own.flat(), scale]
@@ -374,31 +435,158 @@ export function findStarts(
       if (slots.some((q) => dist(p, q) < SLOT_APART)) continue
       open.push(p)
     }
-  // In front of the puddle, it hides it from the player: across the screen, a body nearer the
-  // camera covers what lies behind it within its width, seen from there
-  const across = (o: Place) => o.side / (camD + o.d)
-  const hides = (p: Place) =>
-    p.d - MUD_HIDE < mud.d + mud.depth &&
-    Math.abs(across(p) - across(mud)) < mud.radius / (camD + mud.d) + MUD_HIDE / (camD + p.d)
-  const cost = (p: Place, i: number) =>
+  const hidden = puddleHider(cam, mud)
+  // Turned as it would rather be, or facing the camera where that hides less of the puddle
+  const placed = (p: Place, i: number): Start => {
+    const w = want[i]!,
+      turned = 'heading' in w ? w.heading : 0
+    const hides = hidden(p, turned),
+      facing = hidden(p, cam.az)
+    return facing < hides
+      ? { ...p, heading: cam.az, hides: facing }
+      : { ...p, heading: turned, hides }
+  }
+  const cost = (p: Start, i: number) =>
     Math.hypot(p.d - want[i]!.d, p.side - want[i]!.side) +
     (p.side < SPLIT ? 0.5 : 0) +
-    (hides(p) ? 2 : 0)
+    HIDE_COST * p.hides
   // Cheapest first for each puppy: a pair costs at least its first's cost and the least second's
-  const ranked = (i: number) => open.map((p) => ({ p, c: cost(p, i) })).sort((a, b) => a.c - b.c)
+  const ranked = (i: number) =>
+    open
+      .map((o) => {
+        const p = placed(o, i)
+        return { p, c: cost(p, i) }
+      })
+      .sort((a, b) => a.c - b.c)
   const first = ranked(0)
-  if (puppies === 1) return first[0] ? [first[0].p] : null
+  if (puppies === 1) return first[0] ? [start(first[0].p)] : null
   const second = ranked(1)
-  let best: Place[] | null = null,
+  let best: StartPlace[] | null = null,
     least = Infinity
   for (const a of first) {
     if (!second[0] || a.c + second[0].c >= least) break
     for (const b of second) {
       if (a.c + b.c >= least) break
       if (b.p.side <= a.p.side || dist(a.p, b.p) < SLOT_APART) continue
-      ;[best, least] = [[a.p, b.p], a.c + b.c]
+      ;[best, least] = [[start(a.p), start(b.p)], a.c + b.c]
       break
     }
   }
   return best
+}
+
+/**
+ * The share of the puddle a puppy standing at a place, turned to `heading`, hides from the
+ * camera: points of the puddle that fall inside its body's box on the screen. Seen this low, a
+ * body hides the floor well behind it.
+ */
+function puddleHider(cam: FixedCamera, mud: Oval) {
+  const { camD } = playAxes(cam)
+  const high = cam.target.y + cam.dist * Math.sin(cam.el),
+    c = Math.cos(cam.el),
+    s = Math.sin(cam.el)
+  const screen = (d: number, side: number, y: number): [number, number] => {
+    const along = camD + d,
+      up = y - high,
+      z = along * c - up * s
+    return [side / z, (along * s + up * c) / z]
+  }
+  const points: [number, number][] = []
+  for (let r = 1; r <= 6; r++)
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2
+      points.push(
+        screen(
+          mud.d + (r / 6.5) * Math.sin(a) * mud.depth,
+          mud.side + (r / 6.5) * Math.cos(a) * mud.radius,
+          0,
+        ),
+      )
+    }
+  return (p: Place, heading: number) => {
+    const turn = heading - cam.az,
+      ws = Math.sin(turn),
+      wc = Math.cos(turn)
+    let x0 = Infinity,
+      x1 = -Infinity,
+      y0 = Infinity,
+      y1 = -Infinity
+    for (const w of [-BODY_BOX.half, BODY_BOX.half])
+      for (const l of [-BODY_BOX.length, BODY_BOX.length])
+        for (const y of [0, BODY_BOX.tall]) {
+          const [x, v] = screen(p.d + w * ws - l * wc, p.side + w * wc + l * ws, y)
+          x0 = Math.min(x0, x)
+          x1 = Math.max(x1, x)
+          y0 = Math.min(y0, v)
+          y1 = Math.max(y1, v)
+        }
+    let n = 0
+    for (const [x, y] of points) if (x >= x0 && x <= x1 && y >= y0 && y <= y1) n++
+    return n / points.length
+  }
+}
+
+/** From the puddle's rim to the doorway strip, and from its middle to the play area's edge. */
+const MUD_BY_STRIP = 0.05,
+  MUD_IN = 0.06
+
+/**
+ * The puddle on the grass at depth `d`: its size grows with the frame, from 0.43 square metres
+ * on a tall phone; where the grass is narrow it stretches along the view instead of widening.
+ * Its middle stays in the play area, where a puppy can stand in it, and it keeps off the strip.
+ */
+export function mudPlace(cam: FixedCamera, d: number): Oval {
+  const scale = Math.min(0.8, Math.max(0.45, 0.35 * playHalf(cam, 0.8)))
+  const want = { radius: 0.69 * scale, depth: 0.99 * scale }
+  const area = want.radius * want.depth
+  const half = playHalf(cam, d),
+    right = GRASS - MUD_BY_STRIP
+  const radius = Math.min(want.radius, right + half - MUD_IN)
+  return {
+    d,
+    side: Math.min((GRASS - half) / 2, right - radius),
+    radius,
+    depth: area / radius,
+  }
+}
+
+/** Where a puppy squats in the garden: room for one, and how far its rim keeps from the puddle's. */
+export const POTTY = { radius: 0.2, depth: 0.2 }
+const POTTY_FROM_MUD = 0.3
+/** How far into the play area its middle stays, and the depth it would rather be at. */
+const POTTY_IN = 0.1,
+  POTTY_D = 0.8
+
+/**
+ * The place on the grass where a puppy relieves itself: clear of the puddle by POTTY_FROM_MUD and
+ * of every piece, the further from the puddle the better (up to a metre), near the middle of the
+ * room's depth. Failing that, the grass furthest from the puddle.
+ */
+export function pottyPlace(
+  l: Pick<Layout, 'beds' | 'bowls' | 'scale'>,
+  mud: Oval,
+  cam: FixedCamera,
+): Oval {
+  const at = (d: number, side: number): Oval => ({ d, side, ...POTTY })
+  const pieces = [...l.beds, ...l.bowls, l.scale]
+  let best: Oval | null = null,
+    most = -Infinity,
+    far: Oval | null = null,
+    farthest = -Infinity
+  for (const d of range(PLAY.near + POTTY_IN, PLAY.far - POTTY_IN, 0.05))
+    for (const side of range(
+      GRASS - BY_STRIP - POTTY.radius,
+      -playHalf(cam, d) + POTTY_IN,
+      -0.05,
+    )) {
+      const p = at(d, side)
+      const away = dist(p, mud)
+      if (away > farthest) [far, farthest] = [p, away]
+      if (!clearOf(p, mud, POTTY_FROM_MUD)) continue
+      if (pieces.some((o) => !clearOf(p, o, GAP))) continue
+      if (l.bowls.some((b) => !clearOf(p, eater(b), EATER_GAP))) continue
+      const score = Math.min(away, 1) - 0.3 * Math.abs(d - POTTY_D)
+      if (score > most) [best, most] = [p, score]
+    }
+  return best ?? far ?? at(POTTY_D, GRASS - BY_STRIP - POTTY.radius)
 }

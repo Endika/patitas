@@ -2,7 +2,15 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { createBackdrop, SPLIT, STRIP_HALF } from '@/engine/room/backdrop'
-import { cameraPosition, clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import {
+  cameraPosition,
+  clampPlay,
+  createCamera,
+  fitCamera,
+  PLAY,
+  playHalf,
+  playLocal,
+} from '@/engine/room/camera'
 import { bedSlots, mealSpot } from '@/engine/motion/routine'
 import {
   computeSpots,
@@ -24,7 +32,7 @@ import {
   type Spots,
 } from '@/engine/room/furniture'
 import { bowl, bowlMats, KIBBLE, scaleReadout } from '@/engine/room/furnitureModels'
-import { DORADO_BED, EAT_REACH } from '@/engine/room/layout'
+import { apart, clearOf, DORADO_BED, EAT_REACH } from '@/engine/room/layout'
 import { apartBy } from '@/engine/room/apart'
 import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
 import { anatomy } from '@/engine/puppy/anatomy'
@@ -113,11 +121,7 @@ describe('computeSpots', () => {
 
   it.each(SWEEP)('puts every spot inside the play area at aspect %f for %i', (aspect, n) => {
     const { cam } = view(aspect)
-    // The puddle reaches the play area's edge on some tablets, where a puppy wading in is kept
-    // inside (`goToMud` clamps it): it is held to this at the usual aspects only
-    const usual = ASPECTS.includes(aspect)
     for (const [name, { center }] of named(spotsFor(aspect, n))) {
-      if (name === 'mud' && !usual) continue
       const [x, z] = clampPlay(cam, center.x, center.z)
       expect(Math.hypot(x - center.x, z - center.z), name).toBeLessThan(1e-9)
       expect(center.y).toBe(0)
@@ -156,26 +160,51 @@ describe('computeSpots', () => {
       for (let j = i + 1; j < list.length; j++) {
         const [na, a] = list[i]!,
           [nb, b] = list[j]!
-        // The puddle lies in the garden
-        if (na === 'garden' && nb === 'mud') continue
         expect(gap(a, b), `${na}-${nb}`).toBeGreaterThanOrEqual(0.1)
       }
   })
 
-  it.each(ASPECTS)('keeps the puddle inside the garden at aspect %f', (aspect) => {
-    const { garden, mud } = computeSpots(view(aspect).cam, 2)
-    for (const p of rim(mud)) {
-      const q = playLocal(view(aspect).cam, p.x, p.z),
-        g = playLocal(view(aspect).cam, garden.center.x, garden.center.z)
-      expect(
-        ((q.side - g.side) / garden.radius) ** 2 + ((q.d - g.d) / garden.depth) ** 2,
-      ).toBeLessThan(1)
-    }
-  })
+  it.each(SWEEP)(
+    'keeps the puddle on the grass, its middle well in the play area, at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const { mud } = spotsFor(aspect, n)
+      // The drawn rim wobbles out to 1.08 of the oval
+      for (const p of rim({ ...mud, radius: 1.08 * mud.radius, depth: 1.08 * mud.depth }))
+        expect(playLocal(cam, p.x, p.z).side).toBeLessThan(SPLIT - STRIP_HALF)
+      const c = playLocal(cam, mud.center.x, mud.center.z)
+      expect(Math.abs(c.side)).toBeLessThanOrEqual(c.half - 0.05)
+      expect(c.d).toBeGreaterThanOrEqual(PLAY.near + 0.1)
+    },
+  )
 
-  // Below 0.95 two puppies' places fill the house, and the only floor left to start on is by the
-  // puddle: there it is partly hidden at first
-  it.each(SWEEP.filter(([a, n]) => n === 2 && a >= 0.95).map(([a]) => a))(
+  it.each(WIDE)(
+    'makes the puddle three times as big as it was at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const { mud } = spotsFor(aspect, n)
+      // It was 0.55 of a garden 0.7 as wide as deep, its depth 0.35 of the play area's half width
+      const was = Math.min(0.8, Math.max(0.45, 0.35 * playHalf(cam, 0.8)))
+      expect(mud.radius * mud.depth).toBeGreaterThanOrEqual(3 * (0.55 * 0.7 * was) * (0.55 * was))
+    },
+  )
+
+  it.each(SWEEP)(
+    'puts the garden place on the grass, in play and clear of the puddle at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const { garden, mud } = spotsFor(aspect, n)
+      const backdrop = createBackdrop(cam)
+      for (const p of rim(garden)) expect(backdrop.zoneAt(p.x, p.z)).toBe('garden')
+      backdrop.dispose()
+      const c = playLocal(cam, garden.center.x, garden.center.z)
+      expect(Math.abs(c.side)).toBeLessThanOrEqual(c.half - 0.1 + 1e-9)
+      expect(gap(garden, mud)).toBeGreaterThanOrEqual(0.3)
+    },
+  )
+
+  // Starting behind the puddle, or turned to the camera beside it, they leave it in sight
+  it.each([0.46, ...SWEEP.filter(([, n]) => n === 2).map(([a]) => a)])(
     'leaves most of the puddle in sight of two puppies at their start at aspect %f',
     (aspect) => {
       const { cam, camera } = view(aspect)
@@ -302,15 +331,6 @@ describe('computeSpots', () => {
         }
     },
   )
-
-  it('stretches the garden along the depth and grows it with the frame', () => {
-    const narrow = computeSpots(view(0.46).cam, 1).garden,
-      wide = computeSpots(view(2.1).cam, 1).garden
-    expect(narrow.depth).toBeGreaterThan(narrow.radius)
-    expect(narrow.depth).toBeGreaterThanOrEqual(0.45)
-    expect(wide.depth).toBeGreaterThan(narrow.depth)
-    expect(wide.depth).toBeLessThanOrEqual(0.8)
-  })
 })
 
 describe('inMud', () => {
@@ -426,6 +446,20 @@ describe('startPlaces', () => {
     const [one] = startPlaces(cam, null, 1)
     expect(playLocal(cam, one!.x, one!.z).d).toBeCloseTo(0.16)
     expect(playLocal(cam, one!.x, one!.z).side).toBeCloseTo(0.2)
+  })
+})
+
+describe('clearOf', () => {
+  it('measures a long oval rim to rim, where the summed oval passes one a little too close', () => {
+    const puddle = { d: 0, side: 0, radius: 0.18, depth: 0.8 }
+    const bowl = (d: number, side: number) => ({ d, side, radius: 0.13, depth: 0.13 })
+    // 0.087 apart by its flank, and 0.124
+    expect(apart(bowl(0.75, 0.3), puddle, 0.1)).toBe(true)
+    expect(clearOf(bowl(0.75, 0.3), puddle, 0.1)).toBe(false)
+    expect(clearOf(bowl(0.6, 0.38), puddle, 0.1)).toBe(true)
+    // Overlapping, or one inside the other, is never clear
+    expect(clearOf(bowl(0, 0.1), puddle, 0.1)).toBe(false)
+    expect(clearOf(bowl(0, 0), puddle, 0)).toBe(false)
   })
 })
 

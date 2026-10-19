@@ -7,9 +7,7 @@ import {
   BOWL_STEP,
   computeSpots,
   formatKg,
-  GARDEN,
   inMud,
-  MUD,
   SCALE,
   smoothstep,
   type Furniture,
@@ -388,17 +386,17 @@ function blob(
 
 /**
  * The puddle, on the backdrop's garden ground: just clear of the floor, with a soft lip around a
- * lower middle.
+ * lower middle. Built one across and one along the view, for `layout` to stretch to its spot.
  */
-function garden(): THREE.Group {
+function puddle(): THREE.Group {
   const g = new THREE.Group()
   const mudRim = (a: number) => wobble(a, 0.08, 4.1)
   const wetEdge = new THREE.Color('#5a3b22'),
     deep = new THREE.Color('#3a2312')
   const mud = new THREE.Mesh(
     blob(
-      MUD.size * GARDEN.radius,
-      MUD.size * GARDEN.depth,
+      1,
+      1,
       mudRim,
       (t) => 0.002 + 0.005 * t * t * (1 - smoothstep(0.9, 1, t)),
       (t, _a, out) => out.copy(deep).lerp(wetEdge, smoothstep(0.55, 1, t)),
@@ -415,14 +413,13 @@ function garden(): THREE.Group {
       depthWrite: false,
     }),
   )
-  mud.position.set(MUD.u * GARDEN.radius, 0, MUD.v * GARDEN.depth)
   mud.receiveShadow = true
   mud.renderOrder = 2
   g.add(mud)
   return g
 }
 
-/** A bed and a bowl for each of `puppies`, the scale and the garden corner, laid out for `cam`. */
+/** A bed and a bowl for each of `puppies`, the scale and the puddle, laid out for `cam`. */
 export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 2): Furniture {
   const group = new THREE.Group()
   const shade = contactTexture()
@@ -434,15 +431,15 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
     // Bowls set apart one in front of the other each stand on a mat of their own
     ownMats = spots.bowls.length > 1 ? spots.bowls.map(() => bowlMat(1)) : [],
     scaleParts = scale(shade),
-    gardenG = garden()
-  group.add(...beds, mat, ...ownMats, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
+    puddleG = puddle()
+  group.add(...beds, mat, ...ownMats, ...bowls.map((b) => b.group), scaleParts.group, puddleG)
   scene.add(group)
 
   const placed: [THREE.Object3D, Spot][] = [
     ...beds.map((b, i): [THREE.Object3D, Spot] => [b, spots.beds[i]!]),
     ...bowls.map((b, i): [THREE.Object3D, Spot] => [b.group, spots.bowls[i]!]),
     [scaleParts.group, spots.scale],
-    [gardenG, spots.garden],
+    [puddleG, spots.mud],
   ]
   const update = (spot: Spot, fresh: Spot) => {
     const { center, ...size } = fresh
@@ -483,7 +480,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
         const { radius, depth } = spots.beds[i]!
         g.scale.set(radius / built[i]!, 1, depth / built[i]!)
       })
-      gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
+      puddleG.scale.set(spots.mud.radius, 1, spots.mud.depth)
     },
     bowlFill(place, level) {
       const parts = bowls[place]
