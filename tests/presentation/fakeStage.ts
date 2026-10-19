@@ -25,6 +25,10 @@ export function createFakeStage() {
     stowBall: () => void calls.push('stowBall'),
     trick: (pose) => void calls.push(`trick:${pose}`),
     feed: () => void calls.push('feed'),
+    bath: (index) => void calls.push(`bath:${index}`),
+    rinse: () => void calls.push('rinse'),
+    dryer: () => void calls.push('dryer'),
+    finishBath: () => void calls.push('finishBath'),
     onChange(listener) {
       listeners.add(listener)
       listener(status)

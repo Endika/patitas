@@ -8,9 +8,14 @@ import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
 import { createRoutineState, tuckIn } from '@/engine/motion/routine'
 import { createBehaviourState } from '@/engine/puppy/behaviour'
+import { createBath } from '@/engine/room/bath'
 import {
   disposeOwn,
+  hitBath,
   hitZone,
+  rubBath,
+  type BathZone,
+  type PuppyView,
   offerBall,
   ownGeometry,
   restBounds,
@@ -100,19 +105,21 @@ describe('offerBall', () => {
 })
 
 describe('ownGeometry', () => {
-  it('shares the breed mesh and frees only its own dirt when a view goes', () => {
+  it('shares the breed mesh and frees only its own coat when a view goes', () => {
     const shared = new THREE.BoxGeometry(0.4, 0.6, 0.8)
     const names = Object.keys(shared.attributes)
-    const dirtA = new THREE.BufferAttribute(new Float32Array(shared.attributes.position!.count), 1)
-    const dirtB = new THREE.BufferAttribute(new Float32Array(shared.attributes.position!.count), 1)
-    const a = ownGeometry(shared, dirtA),
-      b = ownGeometry(shared, dirtB)
+    const coat = () =>
+      new THREE.BufferAttribute(new Float32Array(shared.attributes.position!.count * 2), 2)
+    const coatA = coat(),
+      coatB = coat()
+    const a = ownGeometry(shared, coatA),
+      b = ownGeometry(shared, coatB)
     for (const n of names) {
       expect(a.attributes[n]).toBe(shared.attributes[n])
       expect(b.attributes[n]).toBe(shared.attributes[n])
     }
     expect(a.index).toBe(shared.index)
-    expect(a.attributes.dirt).toBe(dirtA)
+    expect(a.attributes.coat).toBe(coatA)
 
     // What the renderer would free is what the geometry still lists when it is disposed
     let freed: { attrs: THREE.BufferAttribute[]; index: unknown } | null = null
@@ -123,10 +130,52 @@ describe('ownGeometry', () => {
       }
     })
     disposeOwn(a, shared)
-    expect(freed).toEqual({ attrs: [dirtA], index: null })
+    expect(freed).toEqual({ attrs: [coatA], index: null })
     expect(Object.keys(shared.attributes)).toEqual(names)
     for (const n of names) expect(b.attributes[n]).toBe(shared.attributes[n])
     expect(b.index).toBe(shared.index)
-    expect(b.attributes.dirt).toBe(dirtB)
+    expect(b.attributes.coat).toBe(coatB)
+  })
+})
+
+describe('the bath', () => {
+  // A standing puppy turned a quarter round, its paw bone 0.1 up and 0.2 in front at rest
+  const group = new THREE.Group()
+  group.rotation.y = Math.PI / 2
+  const paw = new THREE.Bone()
+  paw.position.set(0, 0.1, 0.2)
+  group.add(paw)
+  group.updateMatrixWorld(true)
+  const z: BathZone = {
+    zone: 'chest',
+    bone: paw,
+    off: new THREE.Vector3(0, -0.06, 0),
+    r: 0.06,
+    rest: new THREE.Vector3(0, 0.1, 0.2),
+  }
+
+  it('reaches the paws, which petting never does', () => {
+    const ray = new THREE.Ray(new THREE.Vector3(0.2, 0.04, 3), new THREE.Vector3(0, 0, -1))
+    expect(hitZone({ motion: createMotionState(), zones: [] }, ray)).toBeNull()
+    const hit = hitBath({ bathZones: [z] }, ray)
+    expect(hit?.bathZone).toBe(z)
+    expect(hit!.point.z).toBeCloseTo(0.06, 2)
+  })
+
+  it('knows where the finger is at rest and which way it moves, in the puppy frame', () => {
+    const view: Pick<PuppyView, 'bath' | 'bathTouch' | 'motion'> = {
+      bath: createBath(),
+      bathTouch: null,
+      motion: createMotionState(),
+    }
+    view.motion.heading = Math.PI / 2
+    const at = paw.localToWorld(new THREE.Vector3(0.03, -0.05, 0))
+    rubBath(view, z, at)
+    const t = view.bathTouch!
+    expect(t.bone).toBe(paw)
+    expect(t.rest.distanceTo(new THREE.Vector3(0.03, 0.05, 0.2))).toBeLessThan(1e-9)
+    // Along the world's −z is the puppy's own +x, a quarter turn round
+    rubBath(view, z, at.clone().add(new THREE.Vector3(0, 0, -0.02)))
+    expect(t.dir.distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(1e-9)
   })
 })

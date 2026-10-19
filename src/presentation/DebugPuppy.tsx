@@ -25,8 +25,8 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 
 /**
  * One or two puppies in the room with the prototype's controls, for checking the render by eye,
- * plus buttons that fill the bowls, send the first puppy into the puddle or have it squat, and each
- * puppy's care as the room keeps it.
+ * plus buttons that fill the bowls, send the first puppy into the puddle, have it squat or bathe
+ * it, and each puppy's care as the room keeps it.
  */
 export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
@@ -77,10 +77,23 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
           <button type="button" onClick={() => stageRef.current?.relieve?.('poop')}>
             Caca
           </button>
+          <button type="button" onClick={() => stageRef.current?.bath(0)}>
+            Baño
+          </button>
+          <button type="button" onClick={() => stageRef.current?.rinse()}>
+            Aclarar
+          </button>
+          <button type="button" onClick={() => stageRef.current?.dryer()}>
+            Secador
+          </button>
+          <button type="button" onClick={() => stageRef.current?.finishBath()}>
+            Terminar
+          </button>
           {status?.needs.map((n) => (
             <span key={n.name}>
               {n.name}: hambre {n.hunger.toFixed(2)} · cuenco {n.bowl.toFixed(2)} ·{' '}
-              {n.weightKg.toFixed(2)} kg · limpieza {n.cleanliness.toFixed(2)}
+              {n.weightKg.toFixed(2)} kg · limpieza {n.cleanliness.toFixed(2)} · mojado{' '}
+              {n.wet.toFixed(2)}
             </span>
           ))}
         </div>

@@ -33,6 +33,7 @@ export type Routine =
   | 'splashing'
   | 'toGarden'
   | 'relieving'
+  | 'bathing'
 
 export interface RoutineState {
   routine: Routine
@@ -70,6 +71,8 @@ export interface RoutineState {
   /** Seconds awake, and with a mess waiting, not yet counted into the care. */
   awake: number
   sulking: number
+  /** In the bath: it holds still for it, and wakes from a nap into it. */
+  bath: boolean
 }
 
 export interface RoutineCtx {
@@ -187,6 +190,7 @@ export function createRoutineState(): RoutineState {
     fedAgo: FED_RECENTLY,
     awake: 0,
     sulking: 0,
+    bath: false,
   }
 }
 
@@ -288,7 +292,13 @@ export function followBed(r: RoutineState, body: readonly Vec3[], dx: number, dz
  * stops, to choose again where its own now stands. A sleeper sleeps on, for `followBed` to carry.
  */
 export function forgetRoute(r: RoutineState, m: MotionState): void {
-  if (r.routine === 'none' || r.routine === 'sleeping' || r.routine === 'stretch') return
+  if (
+    r.routine === 'none' ||
+    r.routine === 'sleeping' ||
+    r.routine === 'stretch' ||
+    r.routine === 'bathing'
+  )
+    return
   m.goal = null
   m.face = null
   enter(r, 'none')
@@ -388,6 +398,7 @@ const stretch: Step = (r, m, _ctx, ev, dt) => {
   if (r.t >= STRETCH_YAWN && r.t - dt < STRETCH_YAWN) ev.yawn = true
   if (r.t < STRETCH) return
   r.tired = false
+  if (r.bath) return enter(r, 'bathing')
   enter(r, 'none')
   ev.woke = true
 }
@@ -511,6 +522,13 @@ const relieving: Step = (r, m, ctx, ev) => {
   goTo(m, x, z, { happy: 0.5, energy: 0, gait: 'walk', clamp: ctx.clamp })
 }
 
+const bathing: Step = (_r, m) => {
+  m.goal = null
+  m.face = null
+  m.sitGoal = m.bowGoal = 0
+  if (m.pose !== 'stand') setPose(m, 'stand')
+}
+
 /**
  * The extension point: each routine's step. A new routine adds its states to `Routine`, a step
  * here (walking there with `approach`), and its want in `choose`, ahead of or behind the bed by
@@ -527,6 +545,7 @@ const STEPS: { [K in Routine]?: Step } = {
   splashing,
   toGarden,
   relieving,
+  bathing,
 }
 
 function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
@@ -610,6 +629,30 @@ export function relieveNow(r: RoutineState, m: MotionState, kind: MessKind): voi
   enter(r, 'relieving')
 }
 
+/**
+ * The bath starts where the puppy stands: whatever it was doing stops (a meal counts what it ate)
+ * and it stands still for it. A sleeper stretches first.
+ */
+export function holdForBath(r: RoutineState, m: MotionState): void {
+  r.bath = true
+  r.idle = 0
+  if (r.routine === 'sleeping' || r.routine === 'stretch') {
+    if (r.routine === 'sleeping') enter(r, 'stretch')
+    return
+  }
+  m.goal = null
+  m.face = null
+  m.sitGoal = m.bowGoal = 0
+  enter(r, 'bathing')
+}
+
+/** The bath is over: it is free to choose again, as if just touched. */
+export function releaseFromBath(r: RoutineState): void {
+  r.bath = false
+  r.idle = 0
+  if (r.routine === 'bathing') enter(r, 'none')
+}
+
 /** Sets off for the middle of the puddle, to stamp about in it and come back. */
 export function goToMud(
   r: RoutineState,
@@ -659,7 +702,7 @@ export function stepRoutine(
     ev.care = sulk(ev.care, r.sulking)
     r.sulking = 0
   }
-  if (ctx.busy && !keepsEating(r, ctx.care)) {
+  if (ctx.busy && !keepsEating(r, ctx.care) && !r.bath) {
     r.idle = 0
     // The stamp's heading goes with it, or play would start with a stray turn
     if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BREEDS, type Breed } from '@/domain/breeds'
-import { addMess, createCare, messPenalty, type Care } from '@/domain/care'
+import { addMess, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -22,12 +22,27 @@ import {
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import {
   createRoutineState,
+  holdForBath,
   keepsEating,
+  releaseFromBath,
   stepRoutine,
   touch,
   type RoutineState,
 } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
+import {
+  bathSpheres,
+  beginBath,
+  createBath,
+  createCoat,
+  endBath,
+  flushCoat,
+  stepBath,
+  withCoat,
+  type Bath,
+  type BathTouch,
+  type Coat,
+} from '@/engine/room/bath'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
 import { claimBall, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
@@ -47,18 +62,7 @@ import {
   type BehaviourState,
 } from './behaviour'
 import { RIM } from './coat'
-import {
-  createDirt,
-  dirtRest,
-  messDepth,
-  mudDepth,
-  redistributeDirt,
-  stepDirt,
-  withDirt,
-  type Dirt,
-  type DirtRest,
-  type Underfoot,
-} from './dirt'
+import { dirtRest, messDepth, mudDepth, stepDirt, type DirtRest, type Underfoot } from './dirt'
 import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from './face'
 import type { PuppyGeometry } from './geometry'
 import {
@@ -66,6 +70,7 @@ import {
   furMaterial,
   furUniforms,
   glintMaterial,
+  type FurUniforms,
   lidMaterial,
   noseMaterial,
   setFurHeight,
@@ -87,6 +92,11 @@ export interface ZoneRig {
   /** Zone centre in the bone's frame. */
   off: THREE.Vector3
   r: number
+}
+
+/** A sphere the finger can bathe, and where its bone stands in the rest pose. */
+export interface BathZone extends ZoneRig {
+  rest: THREE.Vector3
 }
 
 export interface LegBones {
@@ -122,10 +132,19 @@ export interface PuppyView extends BehaviourRig, SceneView {
   bowl: number
   /** Its place in the room's order: which bed and bowl are its. */
   place: number
-  /** Its own mud on the breed's shared mesh; `care.cleanliness` is 1 − its mean. */
-  dirt: Dirt
-  /** The GPU copy of `dirt.field`, marked for upload when it changes. */
-  dirtAttr: THREE.BufferAttribute
+  /**
+   * Its own dirt and wetness on the breed's shared mesh: `care.cleanliness` is 1 − the mean dirt
+   * and `care.wet` the mean wetness.
+   */
+  coat: Coat
+  /** The GPU copy of `coat.packed`, marked for upload when it changes. */
+  coatAttr: THREE.BufferAttribute
+  /** The fur shader's uniforms, this puppy's own. */
+  fur: FurUniforms
+  bath: Bath
+  bathZones: BathZone[]
+  /** The finger scrubbing or drying it, or null. */
+  bathTouch: BathTouch | null
   /** Seconds to the next «z» while asleep. */
   snoreT: number
   /** Where a held ball sits, in the jaw's frame. */
@@ -186,13 +205,13 @@ function restOf(geometry: THREE.BufferGeometry, A: Anatomy): DirtRest {
 
 /**
  * A geometry of the puppy's own over the breed's shared one: the same attribute objects, so the
- * GPU keeps one copy of the mesh, plus this puppy's `dirt`.
+ * GPU keeps one copy of the mesh, plus this puppy's `coat` (dirt and wetness).
  */
-export function ownGeometry(shared: THREE.BufferGeometry, dirt: THREE.BufferAttribute) {
+export function ownGeometry(shared: THREE.BufferGeometry, coat: THREE.BufferAttribute) {
   const g = new THREE.BufferGeometry()
   for (const [name, a] of Object.entries(shared.attributes)) g.setAttribute(name, a)
   g.setIndex(shared.index)
-  g.setAttribute('dirt', dirt)
+  g.setAttribute('coat', coat)
   return g
 }
 
@@ -243,10 +262,9 @@ export function mountPuppyView(
   group.updateMatrixWorld(true)
   const skeleton = new THREE.Skeleton(boneList)
   const ident = new THREE.Matrix4()
-  const dirt = createDirt(restOf(geometry, A))
-  redistributeDirt(dirt.field, dirt.rest, 1 - care.cleanliness - messPenalty(care))
-  const dirtAttr = new THREE.BufferAttribute(dirt.field, 1).setUsage(THREE.DynamicDrawUsage)
-  const furGeometry = ownGeometry(geometry, dirtAttr)
+  const coat = createCoat(restOf(geometry, A), care)
+  const coatAttr = new THREE.BufferAttribute(coat.packed, 2).setUsage(THREE.DynamicDrawUsage)
+  const furGeometry = ownGeometry(geometry, coatAttr)
   // Fewer shells re-space and hide layers instead of compiling new materials
   const furU = furUniforms(breed.fur)
   const shells: THREE.SkinnedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[] = []
@@ -330,6 +348,16 @@ export function mountPuppyView(
       r: z.r,
     }
   })
+  const bathZones = bathSpheres(A).map((z): BathZone => {
+    const bp = bonePos(z.b)
+    return {
+      zone: z.zone,
+      bone: bone(z.b),
+      off: new THREE.Vector3(z.c[0] - bp[0], z.c[1] - bp[1], z.c[2] - bp[2]),
+      r: z.r,
+      rest: new THREE.Vector3(...bp),
+    }
+  })
 
   const motion = createMotionState()
   motion.pos.set(place.x, 0, place.z)
@@ -359,8 +387,12 @@ export function mountPuppyView(
     bowl: 0,
     snoreT: 0,
     place: 0,
-    dirt,
-    dirtAttr,
+    coat,
+    coatAttr,
+    fur: furU,
+    bath: createBath(),
+    bathZones,
+    bathTouch: null,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
     setQuality: (q) => setShells(q.shells),
@@ -414,17 +446,94 @@ export function restBounds(geometry: THREE.BufferGeometry, group: THREE.Object3D
   return geometry.boundingBox!.clone().applyMatrix4(group.matrixWorld)
 }
 
-/** The nearest hit among several puppies. */
-export function hitPuppy(
-  views: PuppyView[],
+/** The finger works on the puppy in its bath: scrubbing it, or drying it with the dryer in hand. */
+export const bathWork = (b: Bath): boolean =>
+  b.phase === 'scrub' || (b.phase === 'drying' && b.dryer)
+
+/** The bath sphere under the ray: legs, tail and belly included. */
+export function hitBath(
+  view: Pick<PuppyView, 'bathZones'>,
   ray: THREE.Ray,
-): (PuppyHit & { view: PuppyView }) | null {
-  let best: (PuppyHit & { view: PuppyView }) | null = null
+): { zone: ZoneId; point: THREE.Vector3; distance: number; bathZone: BathZone } | null {
+  let best: BathZone | null = null,
+    bt = Infinity
+  for (const z of view.bathZones) {
+    const t = raySphere(ray, z.bone.localToWorld(tmp.copy(z.off)), z.r)
+    if (t > 0 && t < bt) {
+      bt = t
+      best = z
+    }
+  }
+  return best
+    ? { zone: best.zone, point: ray.at(bt, new THREE.Vector3()), distance: bt, bathZone: best }
+    : null
+}
+
+export type PuppyViewHit = PuppyHit & { view: PuppyView; bathZone?: BathZone }
+
+/** The nearest hit among several puppies; on one being bathed, where the bath can reach. */
+export function hitPuppy(views: PuppyView[], ray: THREE.Ray): PuppyViewHit | null {
+  let best: PuppyViewHit | null = null
   for (const view of views) {
-    const h = hitZone(view, ray)
+    const h = bathWork(view.bath) ? hitBath(view, ray) : hitZone(view, ray)
     if (h && (!best || h.distance < best.distance)) best = { ...h, view }
   }
   return best
+}
+
+const was = new THREE.Vector3()
+
+/**
+ * The finger at `point` on bath zone `z`: where that is on the bone and in the rest pose, and
+ * which way it is moving, in the puppy's frame, once it has moved far enough to tell.
+ */
+export function rubBath(
+  view: Pick<PuppyView, 'bath' | 'bathTouch' | 'motion'>,
+  z: BathZone,
+  point: Vec3,
+): void {
+  let t = view.bathTouch
+  const moved = !!t
+  if (t) t.bone.localToWorld(was.copy(t.local))
+  else
+    t = view.bathTouch = {
+      bone: z.bone,
+      local: new THREE.Vector3(),
+      rest: new THREE.Vector3(),
+      dir: view.bath.blowDir.clone(),
+    }
+  t.bone = z.bone
+  z.bone.worldToLocal(t.local.copy(point))
+  t.rest.copy(t.local).add(z.rest)
+  if (!moved) return
+  const dx = point.x - was.x,
+    dz = point.z - was.z,
+    c = Math.cos(view.motion.heading),
+    sn = Math.sin(view.motion.heading)
+  was.set(dx * c - dz * sn, point.y - was.y, dx * sn + dz * c)
+  if (was.lengthSq() > 1e-6) t.dir.copy(was).normalize()
+}
+
+export const liftBath = (view: Pick<PuppyView, 'bathTouch'>): void => void (view.bathTouch = null)
+
+/**
+ * The bath starts where the puppy stands: it stops what it was doing and holds still, a sleeper
+ * after a stretch. Not while it plays ball.
+ */
+export function bathe(view: PuppyView): boolean {
+  const task = view.fetch.task
+  if (task !== 'free' && task !== 'wait') return false
+  view.fetch.task = 'free'
+  beginBath(view.bath)
+  holdForBath(view.routine, view.motion)
+  return true
+}
+
+/** «Terminar»: out of the bath, still wet as it is, and free again. */
+export function finishBath(view: PuppyView): void {
+  endBath(view.bath)
+  releaseFromBath(view.routine)
+  view.bathTouch = null
 }
 
 const plane = new THREE.Plane(),
@@ -546,10 +655,16 @@ export function tickPuppies(
           messDepth(ctx.underfoot ?? NOTHING_UNDERFOOT, view.legs),
         )
       : 0
-    if (stepDirt(view.dirt, depth, dt)) {
-      view.dirtAttr.needsUpdate = true
-      view.care = withDirt(view.care, view.dirt.field)
+    if (stepDirt(view.coat.dirt, depth, dt)) view.coat.dirty = true
+    stepBath(view.bath, { coat: view.coat, touch: view.bathTouch }, dt)
+    if (flushCoat(view.coat, dt)) {
+      view.coatAttr.needsUpdate = true
+      view.care = withCoat(view.care, view.coat)
     }
+    const { bath, fur } = view
+    fur.uBlowAt.value.copy(bath.blowAt)
+    fur.uBlow.value.copy(bath.blowDir).multiplyScalar(bath.blow)
+    fur.uBlowT.value = t
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
@@ -581,6 +696,8 @@ export function tickPuppies(
         ball,
         camera: camPos,
         routine: view.routine.routine,
+        bath: view.bath,
+        wet: view.care.wet,
         ...(ctx.random && { random: ctx.random }),
       },
       dt,
@@ -672,9 +789,9 @@ export function headWorld(view: PuppyView, out: Vec3 = new THREE.Vector3()): Vec
   return view.bones.head!.getWorldPosition(out)
 }
 
-/** Asleep, or too hungry to leave its meal: the ball goes on without it. */
+/** Asleep, in the bath, or too hungry to leave its meal: the ball goes on without it. */
 const away = (v: Pick<PuppyView, 'routine' | 'care'>) =>
-  v.routine.routine === 'sleeping' || keepsEating(v.routine, v.care)
+  v.routine.routine === 'sleeping' || v.routine.bath || keepsEating(v.routine, v.care)
 
 /**
  * The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on and a
@@ -735,7 +852,12 @@ export function throwBall(
  * wakes instead.
  */
 export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
-  if (touch(view.routine) || view.fetch.task !== 'free' || keepsEating(view.routine, view.care))
+  if (
+    touch(view.routine) ||
+    view.routine.bath ||
+    view.fetch.task !== 'free' ||
+    keepsEating(view.routine, view.care)
+  )
     return false
   setPose(view.motion, pose)
   view.behaviour.happy = Math.min(1, view.behaviour.happy + 0.05)

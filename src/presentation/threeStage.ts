@@ -6,18 +6,23 @@ import type { Vec3 } from '@/engine/math'
 import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/engine/puppy/behaviour'
 import {
   askTrick,
+  bathe,
+  finishBath,
   headWorld,
   hitPuppy,
+  liftBath,
   mountPuppyView,
   offerBall,
   pointLook,
   putBallAway,
+  rubBath,
   throwBall,
   tickPuppies,
   type PuppyView,
 } from '@/engine/puppy/view'
 import { loadPuppyGeometry, peekPuppyGeometry } from '@/engine/puppy/geometryClient'
 import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
+import { createBathLayer, rinse, takeDryer } from '@/engine/room/bath'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import { goTo } from '@/engine/motion/locomotion'
@@ -49,6 +54,7 @@ const needsOf = (v: PuppyView): PuppyNeeds => ({
   happiness: hundredths(v.care.happiness),
   weightKg: hundredths(v.care.weightKg),
   bowl: hundredths(v.bowl),
+  wet: hundredths(v.care.wet),
 })
 
 const sameNeeds = (a: PuppyNeeds[], b: PuppyNeeds[]) =>
@@ -109,6 +115,10 @@ export function createThreeStage(
       stowBall() {},
       trick() {},
       feed() {},
+      bath() {},
+      rinse() {},
+      dryer() {},
+      finishBath() {},
       onChange: hub.onChange,
       dispose: hub.clear,
     }
@@ -116,6 +126,7 @@ export function createThreeStage(
 
   const ball = createBall()
   const messes = createMessLayer(room.scene)
+  const baths = createBathLayer(room.scene)
   const mounted = new Map<string, PuppyView>()
   /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
   const failed = new Set<string>()
@@ -126,6 +137,8 @@ export function createThreeStage(
   let disposed = false
   const now = () => performance.now() / 1000
   const free = () => views.every((v) => v.fetch.task === 'free')
+  /** The puppy in its bath, if any: one at a time. */
+  const inBath = () => views.find((v) => v.bath.phase !== 'off')
   const mood = (v: PuppyView) => ({
     happy: v.behaviour.happy,
     energy: v.persona.energy,
@@ -209,18 +222,21 @@ export function createThreeStage(
     onBall: (ray) => ball.state === 'air' && rayHitsBall(ray, ball.pos),
     free,
     petStart(hit, t) {
+      if (hit.bathZone) return rubBath(hit.view, hit.bathZone, hit.point)
       petView = hit.view
       touch(hit.view.routine)
       startPet(hit.view.behaviour, hit.zone, hit.point, t)
       if (hit.view.fetch.task === 'free') hit.view.motion.goal = null
     },
     petMove(hit, t, px) {
+      if (hit.bathZone) return rubBath(hit.view, hit.bathZone, hit.point)
       if (hit.view !== petView) return
       if (movePet(hit.view.behaviour, hit.zone, hit.point, t, px)) room.emitHeart(hit.point)
     },
     petEnd() {
       if (petView) endPet(petView.behaviour)
       petView = null
+      for (const v of views) liftBath(v)
     },
     look(ray, t) {
       for (const v of views) pointLook(v, ray, room.camera, t)
@@ -236,7 +252,7 @@ export function createThreeStage(
       } else if (g.kind === 'takeBall') offerBall(views, ball)
       else if (g.kind === 'goTo')
         for (const v of views) {
-          if (touch(v.routine) || keepsEating(v.routine, v.care)) continue
+          if (touch(v.routine) || v.routine.bath || keepsEating(v.routine, v.care)) continue
           goTo(v.motion, g.x, g.z, mood(v))
           v.behaviour.perk = 1
         }
@@ -270,6 +286,7 @@ export function createThreeStage(
       const at = headWorld(views[i]!)
       for (let n = 0; n < 3; n++) room.emitHeart(at)
     })
+    baths.sync(views, dt, room.camera.position)
     messes.begin()
     for (const v of views) for (const m of v.care.messes) messes.show(m, room.cam)
     messes.end()
@@ -345,6 +362,22 @@ export function createThreeStage(
     feed() {
       for (const v of views) v.bowl = 1
     },
+    bath(index) {
+      const v = views[index]
+      if (v && !inBath()) bathe(v)
+    },
+    rinse() {
+      const v = inBath()
+      if (v) rinse(v.bath)
+    },
+    dryer() {
+      const v = inBath()
+      if (v) takeDryer(v.bath)
+    },
+    finishBath() {
+      const v = inBath()
+      if (v) finishBath(v)
+    },
     toMud() {
       const v = views[0],
         spots = room.furniture?.spots
@@ -363,6 +396,7 @@ export function createThreeStage(
       detach()
       offResize()
       messes.dispose()
+      baths.dispose()
       for (const v of mounted.values()) v.dispose()
       mounted.clear()
       room.dispose()

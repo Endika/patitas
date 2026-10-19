@@ -15,6 +15,7 @@ export interface PuppyNeeds {
   happiness: number
   weightKg: number
   bowl: number
+  wet: number
 }
 
 /** What the room tells the screen: the hint, the happiness bar and the ball button. */
@@ -38,6 +39,17 @@ export interface RoomStage {
   trick(pose: TrickPose): void
   /** Fills the bowl of every puppy in the room. */
   feed(): void
+  /**
+   * Starts the bath of the puppy at `index` where it stands: rubbing it lathers and scrubs it.
+   * One bath at a time, and not while it plays ball.
+   */
+  bath(index: number): void
+  /** «Aclarar»: washes the foam off and soaks it; it shakes itself and is ready for the dryer. */
+  rinse(): void
+  /** «Secador»: from the rinse on, the finger dries the fur it passes over. */
+  dryer(): void
+  /** «Terminar»: the bath is over and it dries by itself whatever is left. */
+  finishBath(): void
   /** Debug page only: sends the first puppy into the puddle, if it is awake and doing nothing else. */
   toMud?(): void
   /** Debug page only: the first puppy squats where it stands, if it is awake and doing nothing else. */
