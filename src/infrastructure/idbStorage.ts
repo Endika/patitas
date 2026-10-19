@@ -13,7 +13,17 @@ interface PatitasDb extends DBSchema {
 
 const ROOM_KEY = 'room'
 
-export async function openGameStorage(): Promise<GameStorage> {
+/** What the storage needs from the page when another tab holds a different version open. */
+export interface StorageHooks {
+  /** Another tab keeps the old version open, so this one cannot upgrade until it closes. */
+  blocked(): void
+  /** Another tab wants to upgrade: this connection is already closed, so the page must reload. */
+  reload(): void
+}
+
+const NO_HOOKS: StorageHooks = { blocked() {}, reload: () => globalThis.location?.reload() }
+
+export async function openGameStorage(hooks: StorageHooks = NO_HOOKS): Promise<GameStorage> {
   try {
     const db = await openDB<PatitasDb>('patitas', 2, {
       upgrade(upgrading, oldVersion) {
@@ -22,6 +32,11 @@ export async function openGameStorage(): Promise<GameStorage> {
           upgrading.createObjectStore('meta')
         }
         if (oldVersion < 2) upgrading.createObjectStore('care')
+      },
+      blocked: () => hooks.blocked(),
+      blocking() {
+        db.close()
+        hooks.reload()
       },
     })
     return {

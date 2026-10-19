@@ -1,5 +1,5 @@
-import { lazy, Suspense, useState } from 'react'
-import { openGameStorage } from '@/infrastructure/idbStorage'
+import { lazy, Suspense, useCallback, useState } from 'react'
+import { openGameStorage, type StorageHooks } from '@/infrastructure/idbStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 import type { RoomStage } from './roomStage'
 import type { CreatePreview } from './components/AdoptPreview'
@@ -9,7 +9,13 @@ import { useGame } from './useGame'
 // The room brings three.js: it loads only once there is a puppy to show
 const RoomScreen = lazy(() => import('./screens/RoomScreen'))
 
-const Blank = () => <main aria-busy="true" className="min-h-dvh bg-ground" />
+const Blank = ({ blocked = false }: { blocked?: boolean }) => (
+  <main aria-busy="true" className="min-h-dvh bg-ground">
+    {blocked && <p role="status">Cierra las otras pestañas de Patitas</p>}
+  </main>
+)
+
+const reloadPage = () => window.location.reload()
 
 /** Adoption when there are no puppies, the room when there are. */
 export default function App({
@@ -17,18 +23,26 @@ export default function App({
   createStage,
   createPreview,
   now,
+  reload = reloadPage,
 }: {
-  openStorage?: () => Promise<GameStorage>
+  openStorage?: (hooks: StorageHooks) => Promise<GameStorage>
+  /** Starts the page over, for when another tab needs to upgrade the storage. */
+  reload?: () => void
   /** Wall-clock milliseconds, for the time a puppy was away. */
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   createPreview?: CreatePreview
 }) {
-  const game = useGame(openStorage)
+  const [blocked, setBlocked] = useState(false)
+  const open = useCallback(
+    () => openStorage({ blocked: () => setBlocked(true), reload }),
+    [openStorage, reload],
+  )
+  const game = useGame(open)
   const [adopting, setAdopting] = useState(false)
   // A puppy adopted into a full room, until the player moves someone
   const [outside, setOutside] = useState<string | null>(null)
-  if (!game.state) return <Blank />
+  if (!game.state) return <Blank blocked={blocked} />
   const { puppies, room, persistent } = game.state
 
   if (adopting || !puppies.length)
