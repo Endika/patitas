@@ -71,7 +71,13 @@ export interface RoomStage {
   resume(cares: ReadonlyMap<string, Care>, away: number): void
   takeBall(): void
   stowBall(): void
-  trick(pose: TrickPose): void
+  /** The puppy at `index` does the trick, if it is free to. */
+  trick(index: number, pose: TrickPose): void
+  /**
+   * Rings the puppy at `index` on the floor as the one the buttons are for, or nobody: only while
+   * two are in the room and neither is in its bath or being brushed.
+   */
+  select(index: number | null): void
   /** Fills the bowl of the puppy at `index`, or every bowl in the room. */
   feed(index?: number): void
   /**

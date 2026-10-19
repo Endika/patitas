@@ -35,6 +35,8 @@ export function createFakeStage(place?: PlaceAccident) {
   const calls: string[] = []
   const canvases: HTMLCanvasElement[] = []
   const shown: Puppy[][] = []
+  /** Each puppy the screen pointed out to the room, in order. */
+  const selected: (number | null)[] = []
   /** The care each puppy came in with, in order of arrival. */
   const arrived: { id: string; care: Care }[] = []
   const held = new Map<string, Care>()
@@ -66,7 +68,8 @@ export function createFakeStage(place?: PlaceAccident) {
     },
     takeBall: () => void calls.push('takeBall'),
     stowBall: () => void calls.push('stowBall'),
-    trick: (pose) => void calls.push(`trick:${pose}`),
+    trick: (index, pose) => void calls.push(`trick:${index}:${pose}`),
+    select: (index) => void selected.push(index),
     feed: (index) => void calls.push(`feed:${index}`),
     bath: (index) => void calls.push(`bath:${index}`),
     rinse: () => void calls.push('rinse'),
@@ -84,6 +87,7 @@ export function createFakeStage(place?: PlaceAccident) {
   }
   return {
     calls,
+    selected,
     arrived,
     /** Changes the care the room keeps for a puppy, as time in it would. */
     hold: (id: string, care: Care) => void held.set(id, care),
