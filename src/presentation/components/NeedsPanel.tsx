@@ -1,6 +1,6 @@
-import { useCallback, useId, useRef, useState } from 'react'
+import { useCallback, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import type { PuppyNeeds } from '../roomStage'
-import { useDismiss, type Dismissal } from './useDismiss'
+import { useDismiss, type Closable, type Dismissal } from './useDismiss'
 
 const BARS: ['happiness' | 'hunger' | 'cleanliness' | 'energy', string][] = [
   ['happiness', 'Felicidad'],
@@ -38,12 +38,15 @@ export default function NeedsPanel({
   selected,
   onSelect,
   breedOf,
+  ref,
 }: {
   needs: PuppyNeeds[]
   selected: number
   onSelect(id: string): void
   /** The breed's name of the puppy with this id. */
   breedOf(id: string): string
+  /** Closes the open card, as Escape does. */
+  ref?: Ref<Closable>
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -59,6 +62,17 @@ export default function NeedsPanel({
   )
   const shown = needs.find((n) => n.id === open)
   useDismiss(box, !!shown, close)
+  useImperativeHandle(
+    ref,
+    () => ({
+      close: () => {
+        if (!shown) return false
+        close('escape')
+        return true
+      },
+    }),
+    [shown, close],
+  )
   if (!needs.length) return null
   const two = needs.length > 1
 

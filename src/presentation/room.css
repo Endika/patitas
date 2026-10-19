@@ -317,6 +317,21 @@
   position: static;
   max-width: none;
 }
+.room-sheet-foot {
+  display: flex;
+  gap: 6px;
+}
+.room-sheet-foot > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.room .room-fullscreen {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  padding: 0;
+}
 .room-roster {
   display: flex;
   flex-direction: column;
