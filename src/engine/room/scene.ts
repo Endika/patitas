@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { MAX_DT } from '@/engine/math'
 import { goTo, type MotionState } from '@/engine/motion/locomotion'
+import { createBackdrop } from './backdrop'
 import { BALL_R, type BallState } from './ball'
 import { cameraPosition, clampPlay, createCamera, fitCamera, type FixedCamera } from './camera'
 import { createFpsMeter } from './fpsMeter'
@@ -129,36 +130,6 @@ function roomEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
   })
   pmrem.dispose()
   return tex
-}
-
-function radialCanvas(): HTMLCanvasElement {
-  const c = document.createElement('canvas')
-  c.width = c.height = 256
-  const g = c.getContext('2d')!
-  const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128)
-  gr.addColorStop(0, '#fff')
-  gr.addColorStop(0.5, '#fff')
-  gr.addColorStop(1, '#000')
-  g.fillStyle = gr
-  g.fillRect(0, 0, 256, 256)
-  return c
-}
-
-function floorMesh(): THREE.Mesh {
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(2.6, 72),
-    new THREE.MeshStandardMaterial({
-      color: '#c49b70',
-      roughness: 0.78,
-      alphaMap: new THREE.CanvasTexture(radialCanvas()),
-      transparent: true,
-      depthWrite: false,
-    }),
-  )
-  floor.rotation.x = -Math.PI / 2
-  floor.receiveShadow = true
-  floor.renderOrder = -1
-  return floor
 }
 
 function tennisBall(): THREE.Mesh {
@@ -318,7 +289,8 @@ export function createRoomScene(
   const rim = new THREE.DirectionalLight(new THREE.Color(0.85, 0.92, 1), 1.1)
   rim.position.set(-2.2, 1.6, -2.8)
   scene.add(rim)
-  scene.add(floorMesh())
+  const backdrop = createBackdrop(cam)
+  scene.add(backdrop.group)
   const ballMesh = tennisBall()
   scene.add(ballMesh)
 
@@ -359,6 +331,7 @@ export function createRoomScene(
     camera.lookAt(cam.target)
     camera.updateMatrixWorld()
     room.furniture?.layout(cam)
+    backdrop.layout(cam, room.furniture?.spots.mud)
     for (const cb of resizeListeners) cb()
   }
 
@@ -417,6 +390,7 @@ export function createRoomScene(
       if (!room.furniture || room.furniture.puppies === puppies) return false
       room.furniture.dispose()
       room.furniture = addFurniture(scene, cam, puppies)
+      backdrop.layout(cam, room.furniture.spots.mud)
       return true
     },
     add(view) {
@@ -458,6 +432,7 @@ export function createRoomScene(
       for (const v of views) scene.remove(v.group)
       views.clear()
       room.furniture?.dispose()
+      backdrop.dispose()
       for (const f of floaters) f.s.material.dispose()
       heartMap.dispose()
       zMap.dispose()
