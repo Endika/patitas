@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BREEDS, type Breed } from '@/domain/breeds'
-import { addMess, createCare, type Care } from '@/domain/care'
+import { addMess, createCare, weightStatus, type Care, type WeightStatus } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -22,11 +22,13 @@ import {
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import {
   createRoutineState,
-  holdForBath,
+  goWeigh,
+  holdStill,
   keepsEating,
-  releaseFromBath,
+  letGo,
   stepRoutine,
   touch,
+  weighing,
   type RoutineState,
 } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
@@ -42,11 +44,19 @@ import {
   withCoat,
   type Bath,
   type BathReach,
-  type BathTouch,
+  type CoatTouch,
   type Coat,
 } from '@/engine/room/bath'
+import {
+  beginBrush,
+  createBrush,
+  endBrush,
+  grainOf,
+  stepBrush,
+  type Brush,
+} from '@/engine/room/brush'
 import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
-import { claimBall, separate } from '@/engine/room/crowd'
+import { claimBall, keepOff, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
 import { messLocal } from '@/engine/room/messes'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
@@ -147,8 +157,13 @@ export interface PuppyView extends BehaviourRig, SceneView {
   bathZones: BathZone[]
   /** Where else on the coat a stroke reaches. */
   bathReach: BathReach
-  /** The finger scrubbing or drying it, or null. */
-  bathTouch: BathTouch | null
+  /** The finger scrubbing, drying or brushing it, or null. */
+  coatTouch: CoatTouch | null
+  brush: Brush
+  /** The way its fur lies, for the brush. */
+  grain: THREE.Vector3
+  /** What the scale read the last time it was weighed, and how that is for its breed. */
+  weighed: { kg: number; status: WeightStatus } | null
   /** Seconds to the next «z» while asleep. */
   snoreT: number
   /** Where a held ball sits, in the jaw's frame. */
@@ -397,7 +412,10 @@ export function mountPuppyView(
     bath: createBath(),
     bathZones,
     bathReach: bathReach(A),
-    bathTouch: null,
+    coatTouch: null,
+    brush: createBrush(),
+    grain: grainOf(breed.fur),
+    weighed: null,
     mouth: new THREE.Vector3(0, -0.01, mi.mEnd + 0.045 - mi.hinge[2]),
     reach: A.tongue[2] - 0.12,
     setQuality: (q) => setShells(q.shells),
@@ -456,7 +474,7 @@ export const bathWork = (b: Bath): boolean =>
   b.phase === 'scrub' || (b.phase === 'drying' && b.dryer)
 
 /** The bath sphere under the ray: legs, tail and belly included. */
-export function hitBath(
+export function hitCoat(
   view: Pick<PuppyView, 'bathZones'>,
   ray: THREE.Ray,
 ): { zone: ZoneId; point: THREE.Vector3; distance: number; bathZone: BathZone } | null {
@@ -476,11 +494,15 @@ export function hitBath(
 
 export type PuppyViewHit = PuppyHit & { view: PuppyView; bathZone?: BathZone }
 
-/** The nearest hit among several puppies; on one being bathed, where the bath can reach. */
+/** The finger works on its coat, in the bath or with the brush, instead of petting it. */
+export const coatWork = (view: Pick<PuppyView, 'bath' | 'brush'>): boolean =>
+  bathWork(view.bath) || view.brush.on
+
+/** The nearest hit among several puppies; on one being bathed or brushed, its whole coat. */
 export function hitPuppy(views: PuppyView[], ray: THREE.Ray): PuppyViewHit | null {
   let best: PuppyViewHit | null = null
   for (const view of views) {
-    const h = bathWork(view.bath) ? hitBath(view, ray) : hitZone(view, ray)
+    const h = coatWork(view) ? hitCoat(view, ray) : hitZone(view, ray)
     if (h && (!best || h.distance < best.distance)) best = { ...h, view }
   }
   return best
@@ -493,16 +515,16 @@ const was = new THREE.Vector3()
  * it has slid, and which way it is moving, in the puppy's frame, once it has moved far enough to
  * tell.
  */
-export function rubBath(
-  view: Pick<PuppyView, 'bath' | 'bathTouch' | 'motion'>,
+export function rubCoat(
+  view: Pick<PuppyView, 'bath' | 'coatTouch' | 'motion'>,
   z: BathZone,
   point: Vec3,
 ): void {
-  let t = view.bathTouch
+  let t = view.coatTouch
   const moved = !!t
   if (t) t.bone.localToWorld(was.copy(t.local))
   else
-    t = view.bathTouch = {
+    t = view.coatTouch = {
       bone: z.bone,
       local: new THREE.Vector3(),
       rest: new THREE.Vector3(),
@@ -522,7 +544,7 @@ export function rubBath(
   if (was.lengthSq() > 1e-6) t.dir.copy(was).normalize()
 }
 
-export const liftBath = (view: Pick<PuppyView, 'bathTouch'>): void => void (view.bathTouch = null)
+export const liftCoat = (view: Pick<PuppyView, 'coatTouch'>): void => void (view.coatTouch = null)
 
 /**
  * The bath starts where the puppy stands: it stops what it was doing and holds still, a sleeper
@@ -533,15 +555,46 @@ export function bathe(view: PuppyView): boolean {
   if (task !== 'free' && task !== 'wait') return false
   view.fetch.task = 'free'
   beginBath(view.bath)
-  holdForBath(view.routine, view.motion)
+  holdStill(view.routine, view.motion, 'bathing')
   return true
 }
 
 /** «Terminar»: out of the bath, still wet as it is, and free again. */
 export function finishBath(view: PuppyView): void {
   endBath(view.bath)
-  releaseFromBath(view.routine)
-  view.bathTouch = null
+  letGo(view.routine)
+  view.coatTouch = null
+}
+
+/** Neither in the middle of a game of ball nor held for its coat: the ball goes back in hand. */
+function freeForCare(view: Pick<PuppyView, 'fetch' | 'routine'>): boolean {
+  const task = view.fetch.task
+  if ((task !== 'free' && task !== 'wait') || view.routine.held) return false
+  view.fetch.task = 'free'
+  return true
+}
+
+/** «Cepillo»: it stands still where it is, a sleeper after a stretch, and the finger brushes it. */
+export function brushPuppy(
+  view: Pick<PuppyView, 'fetch' | 'routine' | 'motion' | 'brush'>,
+): boolean {
+  if (!freeForCare(view)) return false
+  beginBrush(view.brush)
+  holdStill(view.routine, view.motion, 'brushing')
+  return true
+}
+
+export function stopBrushing(view: Pick<PuppyView, 'routine' | 'brush' | 'coatTouch'>): void {
+  endBrush(view.brush)
+  letGo(view.routine)
+  view.coatTouch = null
+}
+
+/** «Pesar»: off to the scale, a sleeper after a stretch. */
+export function weighPuppy(view: Pick<PuppyView, 'fetch' | 'routine' | 'motion'>): boolean {
+  if (!freeForCare(view)) return false
+  goWeigh(view.routine, view.motion)
+  return true
 }
 
 const plane = new THREE.Plane(),
@@ -577,6 +630,8 @@ export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
 
 /** Smallest distance kept between two puppies' bodies. */
 const PERSONAL_SPACE = 0.45
+/** How far from the scale's middle the others keep while one is weighed: a body's room and a step. */
+const SCALE_CLEAR = PERSONAL_SPACE + 0.05
 const SNORE = 1.2
 /** Just woken, a puppy walks this far in front of the room's middle to say hello. */
 const HELLO = 0.35
@@ -646,6 +701,8 @@ export function tickPuppies(
         view.behaviour.happy = Math.min(1, view.behaviour.happy + FED_HAPPY)
         view.behaviour.perk = 1
       }
+      if (r.weighed)
+        view.weighed = { kg: view.care.weightKg, status: weightStatus(view.care, view.breed) }
       if (r.yawn) yawn(view.behaviour)
       if (r.woke) {
         const { fx, fz } = playAxes(room.cam)
@@ -659,7 +716,20 @@ export function tickPuppies(
     }
     const depth = spots ? soilingDepth(view, spots, ctx.underfoot ?? NOTHING_UNDERFOOT) : 0
     if (stepDirt(view.coat.dirt, depth, dt)) view.coat.dirty = true
-    stepBath(view.bath, { coat: view.coat, touch: view.bathTouch, reach: view.bathReach }, dt)
+    // The brush, while in hand, uses up the finger's travel before the bath can
+    view.care = stepBrush(
+      view.brush,
+      {
+        coat: view.coat,
+        touch: view.coatTouch,
+        reach: view.bathReach,
+        grain: view.grain,
+        care: view.care,
+        cuddly: view.persona.cuddly,
+      },
+      dt,
+    )
+    stepBath(view.bath, { coat: view.coat, touch: view.coatTouch, reach: view.bathReach }, dt)
     if (flushCoat(view.coat, dt)) {
       view.coatAttr.needsUpdate = true
       view.care = withCoat(view.care, view.coat)
@@ -668,10 +738,22 @@ export function tickPuppies(
     fur.uBlowAt.value.copy(bath.blowAt)
     fur.uBlow.value.copy(bath.blowDir).multiplyScalar(bath.blow)
     fur.uBlowT.value = t
+    fur.uShine.value = view.care.shine
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
   if (room.furniture) showBowls(room.furniture, views)
+  // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
+  const owner = spots && views.length > 1 ? views.find((v) => weighing(v.routine)) : undefined
+  if (owner)
+    keepOff(
+      views.map((v) => v.motion),
+      owner.motion,
+      spots!.scale.center.x,
+      spots!.scale.center.z,
+      SCALE_CLEAR,
+      (x, z) => clampPlay(room.cam, x, z),
+    )
   if (views.length > 1)
     separate(
       views.map((v) => v.motion),
@@ -700,6 +782,7 @@ export function tickPuppies(
         camera: camPos,
         routine: view.routine.routine,
         bath: view.bath,
+        ...(view.brush.on && { brush: view.brush }),
         wet: view.care.wet,
         ...(ctx.random && { random: ctx.random }),
       },
@@ -727,7 +810,7 @@ export function soilingDepth(
   spots: Spots,
   underfoot: readonly Underfoot[],
 ): number {
-  if (view.routine.bath) return 0
+  if (view.routine.held) return 0
   return Math.max(mudDepth(spots, view.motion.pos, view.legs), messDepth(underfoot, view.legs))
 }
 
@@ -804,7 +887,7 @@ export function headWorld(view: PuppyView, out: Vec3 = new THREE.Vector3()): Vec
 
 /** Asleep, in the bath, or too hungry to leave its meal: the ball goes on without it. */
 const away = (v: Pick<PuppyView, 'routine' | 'care'>) =>
-  v.routine.routine === 'sleeping' || v.routine.bath || keepsEating(v.routine, v.care)
+  v.routine.routine === 'sleeping' || v.routine.held || keepsEating(v.routine, v.care)
 
 /**
  * The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on and a
@@ -867,7 +950,7 @@ export function throwBall(
 export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
   if (
     touch(view.routine) ||
-    view.routine.bath ||
+    view.routine.held ||
     view.fetch.task !== 'free' ||
     keepsEating(view.routine, view.care)
   )

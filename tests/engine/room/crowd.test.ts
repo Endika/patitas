@@ -16,7 +16,7 @@ import { setPose, stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
 import { clampPlay, createCamera, fitCamera, playLocal, PLAY } from '@/engine/room/camera'
-import { claimBall, separate } from '@/engine/room/crowd'
+import { claimBall, keepOff, separate } from '@/engine/room/crowd'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.beagle)
@@ -37,6 +37,24 @@ function puppy(x: number, z: number, heading = 0) {
 }
 
 const flat = (a: MotionState, b: MotionState) => Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z)
+
+describe('keepOff', () => {
+  it('keeps everyone but the one on the scale out of its circle, goals too', () => {
+    const on = createMotionState(),
+      other = createMotionState(),
+      far = createMotionState()
+    on.pos.set(0.5, 0, 0.5)
+    other.pos.set(0.6, 0, 0.5)
+    other.goal = new THREE.Vector3(0.5, 0, 0.45)
+    far.pos.set(-1, 0, 0)
+    keepOff([on, other, far], on, 0.5, 0.5, 0.5)
+    expect(on.pos.toArray()).toEqual([0.5, 0, 0.5])
+    expect(other.pos.x).toBeCloseTo(1)
+    expect(other.pos.z).toBeCloseTo(0.5)
+    expect(Math.hypot(other.goal.x - 0.5, other.goal.z - 0.5)).toBeCloseTo(0.5)
+    expect(far.pos.toArray()).toEqual([-1, 0, 0])
+  })
+})
 
 describe('separate', () => {
   it('keeps two puppies sent to the same spot at least 0.45 apart', () => {

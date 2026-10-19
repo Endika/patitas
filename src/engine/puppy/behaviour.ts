@@ -32,6 +32,13 @@ const MUD_PITCH = 0.75,
 /** From this cuddliness a puppy likes its bath: it wags while rubbed, getting happier. */
 const BATH_FONDNESS = 0.5,
   BATH_JOY = 0.08
+/**
+ * Every puppy enjoys the brush, a cuddly one more: happiness a second at no cuddliness and on top
+ * at full, and how far its head leans into the brush at full.
+ */
+const BRUSH_JOY = 0.03,
+  BRUSH_FONDNESS = 0.09,
+  BRUSH_LEAN = 0.25
 /** One who does not puts its ears back and looks away for a moment when the rubbing starts. */
 const LOOK_AWAY = 0.9,
   LOOK_AWAY_YAW = 1
@@ -245,6 +252,8 @@ export interface BehaviourInput {
   bath?: { phase: BathPhase; t: number; touched: boolean }
   /** How wet its coat is, 0 to 1: wet, it trembles. */
   wet?: number
+  /** Being brushed: whether it feels a stroke now, and on which side, +1 its left. */
+  brush?: { touched: boolean; side: number }
   random?: () => number
 }
 
@@ -300,7 +309,8 @@ export function stepBehaviour(
     splashing = input.routine === 'splashing'
   const bath = input.bath && input.bath.phase !== 'off' ? input.bath : null
   const likesBath = P.cuddly >= BATH_FONDNESS
-  const rubbed = !!bath?.touched
+  const rubbed = !!bath?.touched,
+    brushed = !!input.brush?.touched
   if (rubbed && !s.bathRubbed && !likesBath) s.lookAwayT = LOOK_AWAY
   s.bathRubbed = rubbed
   s.lookAwayT = Math.max(0, s.lookAwayT - dt)
@@ -314,7 +324,7 @@ export function stepBehaviour(
   const target = new THREE.Vector3()
   if (eating || splashing)
     target.set(M.pos.x + Math.sin(M.heading) * 0.45, 0.05, M.pos.z + Math.cos(M.heading) * 0.45)
-  else if (begging || bath) target.copy(input.camera)
+  else if (begging || bath || input.brush) target.copy(input.camera)
   else if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
   else if (task === 'present' || (petting && petHead)) target.copy(input.camera)
   else if (petting) target.copy(s.petPoint)
@@ -387,7 +397,11 @@ export function stepBehaviour(
   }
   s.tiltT = Math.max(0, s.tiltT - dt)
   if (s.tiltT === 0) s.tilt = 0
-  const leanT = petHead ? clamp(input.petHeadX * 4, -0.3, 0.3) : 0
+  const leanT = petHead
+    ? clamp(input.petHeadX * 4, -0.3, 0.3)
+    : brushed
+      ? BRUSH_LEAN * P.cuddly * input.brush!.side
+      : 0
   s.lean = damp(s.lean, leanT, 4, dt)
   spring(s.roll, s.tilt + s.lean, 40, 10, dt)
   s.perk = Math.max(0, s.perk - dt * 0.8)
@@ -395,6 +409,7 @@ export function stepBehaviour(
   // Happiness, breathing and panting
   s.happy = Math.max(0.12, s.happy - dt * (petting || task !== 'free' ? 0 : 0.012))
   if (rubbed && likesBath) s.happy = Math.min(1, s.happy + dt * BATH_JOY)
+  if (brushed) s.happy = Math.min(1, s.happy + dt * (BRUSH_JOY + BRUSH_FONDNESS * P.cuddly))
   s.pant = damp(s.pant, !asleep && (s.happy > 0.62 || body.k > 0.5) ? 1 : 0, 2, dt)
   s.breath += dt * (1.6 + s.pant * 6.5 + (SLEEP.breath - 1.6 - s.pant * 6.5) * sw)
   const br = Math.sin(s.breath)

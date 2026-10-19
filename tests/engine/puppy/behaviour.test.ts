@@ -266,6 +266,35 @@ describe('bath', () => {
   })
 })
 
+describe('brushing', () => {
+  /** Brushed for `secs` with `persona` on `side`: how much happier, and how far the head leans. */
+  const brushed = (persona: Persona, secs: number, touched = true, side = 1) => {
+    const { rig, s, input } = world(persona)
+    input.routine = 'brushing'
+    const happy = s.happy
+    for (let f = 1; f * DT <= secs; f++) {
+      input.now = f * DT
+      input.brush = { touched, side }
+      stepBehaviour(rig, s, input, DT, input.now)
+    }
+    return { gain: s.happy - happy, lean: s.lean }
+  }
+  const FOND = { energy: 0.5, cuddly: 0.9, curious: 0.5 },
+    SHY = { energy: 0.5, cuddly: 0.1, curious: 0.5 }
+
+  it('every puppy enjoys it, a cuddly one more, and leans into the brush', () => {
+    const fond = brushed(FOND, 3),
+      shy = brushed(SHY, 3),
+      untouched = brushed(FOND, 3, false)
+    expect(shy.gain).toBeGreaterThan(untouched.gain + 0.03)
+    expect(fond.gain).toBeGreaterThan(shy.gain + 0.05)
+    expect(fond.lean).toBeGreaterThan(0.1)
+    expect(brushed(FOND, 3, true, -1).lean).toBeLessThan(-0.1)
+    expect(Math.abs(shy.lean)).toBeLessThan(fond.lean / 3)
+    expect(untouched.lean).toBeCloseTo(0, 3)
+  })
+})
+
 describe('pickHint', () => {
   it('says the puppy is asleep', () => {
     const motion = createMotionState()

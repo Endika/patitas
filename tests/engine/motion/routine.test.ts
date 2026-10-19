@@ -1,4 +1,5 @@
 // @vitest-environment node
+import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '@/domain/breeds'
 import { addMess, createCare, MESS_GLOOM_MAX, type Care, type MessKind } from '@/domain/care'
@@ -18,25 +19,28 @@ import {
   createRoutineState,
   followBed,
   forgetRoute,
-  holdForBath,
+  goWeigh,
+  holdStill,
   keepsEating,
   MEAL_TIME,
   mealSpot,
   MUD_EVERY,
   RELIEF_TIME,
-  releaseFromBath,
+  letGo,
   relieveNow,
   SPLASH_TIME,
   stepRoutine,
   touch,
   tuckIn,
+  WEIGH_TIME,
+  weighing,
   type Routine,
   type RoutineCtx,
   type RoutineState,
 } from '@/engine/motion/routine'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
-import { separate } from '@/engine/room/crowd'
+import { keepOff, separate } from '@/engine/room/crowd'
 import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
 
 const DT = 1 / 60
@@ -63,6 +67,8 @@ interface Pup {
   fed: number
   /** What it left on the floor, in world coordinates, as the room keeps it. */
   left: { kind: MessKind; x: number; z: number }[]
+  /** Times it stepped onto the scale. */
+  weighed: number
 }
 
 function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
@@ -78,6 +84,7 @@ function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
     time: {},
     fed: 0,
     left: [],
+    weighed: 0,
   }
 }
 
@@ -109,6 +116,7 @@ function run(
       p.care = ev.care
       p.bowl = ev.bowl
       if (ev.fed) p.fed++
+      if (ev.weighed) p.weighed++
       if (ev.mess) {
         p.left.push({ ...ev.mess })
         p.care = addMess(p.care, { ...ev.mess, createdAt: ctx.now })
@@ -118,6 +126,17 @@ function run(
       stepPoses(p.m, DT)
       stepLocomotion(p.m, p.legs, DT)
     }
+    // As the room does: the scale is the weighed puppy's, then they keep apart
+    const owner = pups.find((p) => weighing(p.r))
+    if (owner)
+      keepOff(
+        pups.map((p) => p.m),
+        owner.m,
+        spots.scale.center.x,
+        spots.scale.center.z,
+        0.5,
+        clamp,
+      )
     separate(
       pups.map((p) => p.m),
       0.45,
@@ -721,7 +740,7 @@ describe('bath', () => {
   it('woken for a bath it stretches, then stands still for it, even at bedtime', () => {
     const p = pup(0.12, -0.12)
     tuckIn(p.r, p.m)
-    holdForBath(p.r, p.m)
+    holdStill(p.r, p.m, 'bathing')
     expect(p.r.routine).toBe('stretch')
     run([p], 2, at(22))
     expect(p.seen).toEqual(['stretch', 'bathing'])
@@ -733,7 +752,7 @@ describe('bath', () => {
   it('called away from its meal, it leaves the bowl and what it ate counts', () => {
     const p = pup(0.12, -0.12, 0.8, 0.8, 1)
     run([p], 20, at(12), SPOTS, () => {
-      if (p.r.routine === 'eating' && p.r.t > 1 && !p.r.bath) holdForBath(p.r, p.m)
+      if (p.r.routine === 'eating' && p.r.t > 1 && !p.r.held) holdStill(p.r, p.m, 'bathing')
     })
     expect(p.seen).toEqual(['toBowl', 'eating', 'bathing'])
     expect(p.care.hunger).toBeLessThan(0.75)
@@ -744,11 +763,11 @@ describe('bath', () => {
   it('in the bath it neither wanders, eats, nor squats; afterwards it does', () => {
     const p = pup(0.12, -0.12, 0.8, 0.8, 1)
     p.care = { ...p.care, bladder: 1 }
-    holdForBath(p.r, p.m)
+    holdStill(p.r, p.m, 'bathing')
     expect(still(p, 60, at(12), { curious: 1, random: () => 0 })).toBeLessThan(0.02)
     expect(p.seen).toEqual(['bathing'])
     expect([p.bowl, p.left.length]).toEqual([1, 0])
-    releaseFromBath(p.r)
+    letGo(p.r)
     run([p], 1, at(12), SPOTS, undefined, undefined, { random: () => 0.9 })
     expect(p.seen.slice(0, 2)).toEqual(['bathing', 'relieving'])
   })
@@ -757,10 +776,115 @@ describe('bath', () => {
     const p = pup(0.12, -0.12, 0.8, 0.8, 1)
     run([p], 0.3, at(12))
     expect(p.r.routine).toBe('toBowl')
-    holdForBath(p.r, p.m)
+    holdStill(p.r, p.m, 'bathing')
     expect([p.r.routine, p.m.goal, p.m.face]).toEqual(['bathing', null, null])
     expect(touch(p.r)).toBe(false)
     expect(p.r.routine).toBe('bathing')
+  })
+})
+
+describe('the scale', () => {
+  const offScale = (p: Pup, spots: Spots = SPOTS) =>
+    Math.hypot(p.m.pos.x - spots.scale.center.x, p.m.pos.z - spots.scale.center.z)
+
+  it('«Pesar»: walks to the scale, stands on it still for 3 s, then steps off', () => {
+    const p = pup(-0.3, -0.1)
+    goWeigh(p.r, p.m)
+    let on = 0,
+      drift = 0
+    run([p], 20, at(12), SPOTS, () => {
+      if (p.r.routine !== 'onScale') return
+      on += DT
+      drift = Math.max(drift, offScale(p))
+    })
+    expect(p.seen.slice(0, 3)).toEqual(['toScale', 'onScale', 'none'])
+    expect(p.weighed).toBe(1)
+    expect(on).toBeCloseTo(WEIGH_TIME, 1)
+    expect(drift).toBeLessThan(0.08)
+    expect(offScale(p)).toBeGreaterThan(SPOTS.scale.radius + 0.2)
+    expect(weighing(p.r)).toBe(false)
+  })
+
+  it('stands side on, facing the room, so the display stays in view', () => {
+    const p = pup(-0.3, -0.1)
+    goWeigh(p.r, p.m)
+    let heading: number | null = null
+    run([p], 20, at(12), SPOTS, () => {
+      if (p.r.routine === 'onScale') heading ??= p.m.heading
+    })
+    const turn = Math.atan2(
+      Math.sin(heading! - SPOTS.scale.facing),
+      Math.cos(heading! - SPOTS.scale.facing),
+    )
+    expect(turn).toBeCloseTo(-1.2, 1)
+  })
+
+  it('a sleeper stretches first and then goes, even at night', () => {
+    const p = pup(0.12, -0.12)
+    tuckIn(p.r, p.m)
+    goWeigh(p.r, p.m)
+    expect(weighing(p.r)).toBe(true)
+    run([p], 20, at(22))
+    expect(p.seen.slice(0, 4)).toEqual(['stretch', 'toScale', 'onScale', 'none'])
+    expect(p.weighed).toBe(1)
+  })
+
+  it('a call on the way, or once on the scale, calls it off; so does the ball', () => {
+    const walking = pup(-0.3, -0.1)
+    goWeigh(walking.r, walking.m)
+    run([walking], 0.5, at(12))
+    touch(walking.r)
+    expect([walking.r.routine, weighing(walking.r)]).toEqual(['none', false])
+
+    const called = pup(-0.3, -0.1)
+    goWeigh(called.r, called.m)
+    run([called], 20, at(12), SPOTS, () => {
+      if (called.r.routine === 'onScale' && called.r.t > 1)
+        called.m.goal = new THREE.Vector3(-0.3, 0, -0.1)
+    })
+    expect(called.seen.slice(0, 3)).toEqual(['toScale', 'onScale', 'none'])
+
+    const played = pup(-0.3, -0.1)
+    goWeigh(played.r, played.m)
+    run([played], 0.5, at(12), SPOTS, undefined, undefined, { busy: true })
+    expect([played.r.routine, weighing(played.r)]).toEqual(['none', false])
+  })
+
+  it('is dropped from a meal: what it ate counts', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([p], 20, at(12), SPOTS, () => {
+      if (p.r.routine === 'eating' && p.r.t > 1) goWeigh(p.r, p.m)
+    })
+    expect(p.seen.slice(0, 4)).toEqual(['toBowl', 'eating', 'toScale', 'onScale'])
+    expect(p.care.hunger).toBeLessThan(0.75)
+  })
+
+  it('in portrait with two, the chosen one gets there from its start, and the other stays off', () => {
+    const [l, r] = START_PLACES[1]!
+    const a = pup(l!.x, l!.z),
+      b = pup(r!.x, r!.z)
+    goWeigh(b.r, b.m)
+    let closest = Infinity
+    run([a, b], 20, at(12), SPOTS2, () => {
+      // The other one is called right onto the scale meanwhile
+      if (b.r.routine === 'toScale' && !a.m.goal) a.m.goal = SPOTS2.scale.center.clone()
+      if (weighing(b.r)) closest = Math.min(closest, offScale(a, SPOTS2))
+    })
+    expect(b.seen.slice(0, 3)).toEqual(['toScale', 'onScale', 'none'])
+    expect([a.weighed, b.weighed]).toEqual([0, 1])
+    expect(a.seen).not.toContain('toScale')
+    expect(closest).toBeGreaterThan(0.45)
+  })
+
+  it('in portrait with two, a walk from the start to the right-hand bed goes round the scale', () => {
+    const [l, r] = START_PLACES[1]!
+    const a = pup(l!.x, l!.z),
+      b = pup(r!.x, r!.z)
+    let closest = Infinity
+    run([a, b], 40, at(20), SPOTS2, () => (closest = Math.min(closest, offScale(b, SPOTS2))))
+    expect(b.r.routine).toBe('sleeping')
+    expect(inBed(b.m, SPOTS2.beds[1]!)).toBeLessThan(0.25)
+    expect(closest).toBeGreaterThan(SPOTS2.scale.radius + 0.1)
   })
 })
 

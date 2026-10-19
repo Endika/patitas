@@ -177,6 +177,51 @@ export function formatKg(kg: number | null): string {
     .replace('.', ',')} kg`
 }
 
+/** Seconds the scale keeps showing a weight once the puppy has stepped off. */
+export const READING_HOLD = 4
+
+/** What the scale shows, and what it last drew and on which furniture. */
+export interface ScaleDisplay {
+  kg: number | null
+  hold: number
+  tenths: number
+  on: object | null
+}
+
+export const createScaleDisplay = (): ScaleDisplay => ({ kg: null, hold: 0, tenths: 0, on: null })
+
+/**
+ * One frame of the scale's readout: `kg` of the puppy on it, or null with nobody there, when it
+ * keeps the last weight READING_HOLD seconds before going back to zero. It draws only when what
+ * it shows changes, so the display's texture is not uploaded every frame.
+ */
+export function showScale(
+  d: ScaleDisplay,
+  furniture: Pick<Furniture, 'scaleReading'> | null,
+  kg: number | null,
+  dt: number,
+): void {
+  if (kg != null) {
+    d.kg = kg
+    d.hold = READING_HOLD
+  } else if (d.kg != null) {
+    d.hold -= dt
+    if (d.hold <= 0) d.kg = null
+  }
+  if (!furniture) return
+  const tenths = Math.round(Math.max(0, d.kg ?? 0) * 10)
+  if (d.on === furniture && tenths === d.tenths) return
+  // Fresh furniture already reads zero
+  if (d.on !== furniture && !tenths) {
+    d.on = furniture
+    d.tenths = 0
+    return
+  }
+  d.on = furniture
+  d.tenths = tenths
+  furniture.scaleReading(d.kg)
+}
+
 export interface Furniture {
   group: THREE.Group
   /** How many puppies it is laid out for: one bed and one bowl each. */

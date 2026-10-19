@@ -6,26 +6,31 @@ import { createCare } from '@/domain/care'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
-import { createRoutineState, tuckIn } from '@/engine/motion/routine'
+import { createRoutineState, holdStill, tuckIn, weighing } from '@/engine/motion/routine'
 import { createBehaviourState } from '@/engine/puppy/behaviour'
-import { createBath } from '@/engine/room/bath'
+import { beginBath, createBath } from '@/engine/room/bath'
+import { createBrush } from '@/engine/room/brush'
 import { createCamera, fitCamera } from '@/engine/room/camera'
 import { computeSpots } from '@/engine/room/furniture'
 import { createLegStates } from '@/engine/motion/locomotion'
 import { legRigs } from '@/engine/motion/ik'
 import { anatomy } from '@/engine/puppy/anatomy'
 import {
+  brushPuppy,
+  coatWork,
   disposeOwn,
-  hitBath,
+  hitCoat,
   hitZone,
-  liftBath,
-  rubBath,
+  liftCoat,
+  rubCoat,
   soilingDepth,
   type BathZone,
   type PuppyView,
   offerBall,
   ownGeometry,
   restBounds,
+  stopBrushing,
+  weighPuppy,
   type ZoneRig,
 } from '@/engine/puppy/view'
 import { createBall } from '@/engine/room/ball'
@@ -164,32 +169,73 @@ describe('the bath', () => {
   it('reaches the paws, which petting never does', () => {
     const ray = new THREE.Ray(new THREE.Vector3(0.2, 0.04, 3), new THREE.Vector3(0, 0, -1))
     expect(hitZone({ motion: createMotionState(), zones: [] }, ray)).toBeNull()
-    const hit = hitBath({ bathZones: [z] }, ray)
+    const hit = hitCoat({ bathZones: [z] }, ray)
     expect(hit?.bathZone).toBe(z)
     expect(hit!.point.z).toBeCloseTo(0.06, 2)
   })
 
   it('knows where the finger is at rest and which way it moves, in the puppy frame', () => {
-    const view: Pick<PuppyView, 'bath' | 'bathTouch' | 'motion'> = {
+    const view: Pick<PuppyView, 'bath' | 'coatTouch' | 'motion'> = {
       bath: createBath(),
-      bathTouch: null,
+      coatTouch: null,
       motion: createMotionState(),
     }
     view.motion.heading = Math.PI / 2
     const at = paw.localToWorld(new THREE.Vector3(0.03, -0.05, 0))
-    rubBath(view, z, at)
-    const t = view.bathTouch!
+    rubCoat(view, z, at)
+    const t = view.coatTouch!
     expect(t.bone).toBe(paw)
     expect(t.rest.distanceTo(new THREE.Vector3(0.03, 0.05, 0.2))).toBeLessThan(1e-9)
     // Along the world's −z is the puppy's own +x, a quarter turn round
-    rubBath(view, z, at.clone().add(new THREE.Vector3(0, 0, -0.02)))
+    rubCoat(view, z, at.clone().add(new THREE.Vector3(0, 0, -0.02)))
     expect(t.dir.distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(1e-9)
     // The bath uses up how far it slid; off the puppy and back on, it starts again
     expect(t.travel).toBeCloseTo(0.02, 9)
-    liftBath(view)
-    expect(view.bathTouch).toBeNull()
-    rubBath(view, z, at)
-    expect(view.bathTouch!.travel).toBe(0)
+    liftCoat(view)
+    expect(view.coatTouch).toBeNull()
+    rubCoat(view, z, at)
+    expect(view.coatTouch!.travel).toBe(0)
+  })
+})
+
+describe('brushing and weighing', () => {
+  const pup = () => ({
+    motion: createMotionState(),
+    fetch: createFetchState(),
+    routine: createRoutineState(),
+    brush: createBrush(),
+    bath: createBath(),
+    coatTouch: null,
+  })
+
+  it('with the brush in hand the finger works the whole coat, as in the bath', () => {
+    const p = pup()
+    expect(coatWork(p)).toBe(false)
+    expect(brushPuppy(p)).toBe(true)
+    expect([coatWork(p), p.routine.routine, p.routine.held]).toEqual([true, 'brushing', 'brushing'])
+    stopBrushing(p)
+    expect([coatWork(p), p.routine.routine, p.routine.held]).toEqual([false, 'none', null])
+    const bathed = pup()
+    beginBath(bathed.bath)
+    expect(coatWork(bathed)).toBe(true)
+  })
+
+  it('a sleeper stretches first; a ball in hand goes back; not mid-game nor in its bath', () => {
+    const sleeper = pup()
+    tuckIn(sleeper.routine, sleeper.motion)
+    expect(brushPuppy(sleeper)).toBe(true)
+    expect(sleeper.routine.routine).toBe('stretch')
+    const waiting = pup()
+    waiting.fetch.task = 'wait'
+    expect(weighPuppy(waiting)).toBe(true)
+    expect([waiting.fetch.task, weighing(waiting.routine)]).toEqual(['free', true])
+    const chasing = pup()
+    chasing.fetch.task = 'chase'
+    expect([brushPuppy(chasing), weighPuppy(chasing)]).toEqual([false, false])
+    const bathed = pup()
+    holdStill(bathed.routine, bathed.motion, 'bathing')
+    expect([brushPuppy(bathed), weighPuppy(bathed)]).toEqual([false, false])
+    expect(bathed.routine.routine).toBe('bathing')
   })
 })
 
@@ -201,7 +247,7 @@ describe('soilingDepth', () => {
     const legs = createLegStates(legRigs(anatomy(BREEDS.shiba)), motion)
     const routine = createRoutineState()
     expect(soilingDepth({ routine, motion, legs }, spots, [])).toBeGreaterThan(0.5)
-    routine.bath = true
+    routine.held = 'bathing'
     expect(soilingDepth({ routine, motion, legs }, spots, [])).toBe(0)
   })
 })

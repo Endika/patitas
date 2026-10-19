@@ -1,10 +1,13 @@
-import type { MessKind } from '@/domain/care'
+import type { MessKind, WeightStatus } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 
 /** Shown instead of a stage when the browser has no WebGL. */
 export const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
 
 export type TrickPose = 'sit' | 'lie' | 'belly'
+
+/** What the player is doing for a puppy's care: bathing it, brushing it or weighing it. */
+export type CareMode = 'bath' | 'brush' | 'weigh'
 
 /** One puppy's care as the room keeps it, rounded to hundredths, and how full its bowl is. */
 export interface PuppyNeeds {
@@ -16,6 +19,12 @@ export interface PuppyNeeds {
   weightKg: number
   bowl: number
   wet: number
+  /** How glossy brushing has left its coat. */
+  shine: number
+  mode: CareMode | null
+  /** The scale's reading the last time it was weighed, as «4,3 kg», and how that is for its breed. */
+  reading: string | null
+  weightStatus: WeightStatus | null
 }
 
 /** What the room tells the screen: the hint, the happiness bar and the ball button. */
@@ -50,6 +59,18 @@ export interface RoomStage {
   dryer(): void
   /** «Terminar»: the bath is over and it dries by itself whatever is left. */
   finishBath(): void
+  /**
+   * «Cepillo» on the puppy at `index`: it stands still where it is and strokes with the grain make
+   * it shine. One puppy at a time, not in its bath, and not while it plays ball.
+   */
+  brush(index: number): void
+  /** The brush is put away. */
+  endBrush(): void
+  /**
+   * «Pesar» on the puppy at `index`: it walks to the scale and stands on it while the scale reads
+   * its weight. One at a time; a call, a trick or the ball calls it off.
+   */
+  weigh(index: number): void
   /** Debug page only: sends the first puppy into the puddle, if it is awake and doing nothing else. */
   toMud?(): void
   /** Debug page only: the first puppy squats where it stands, if it is awake and doing nothing else. */
