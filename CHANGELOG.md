@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/Endika/patitas/compare/v0.4.1...v0.5.0) (2026-10-19)
+
+
+### Features
+
+* **pwa:** open in fullscreen and stop overscroll from leaving the game ([001b370](https://github.com/Endika/patitas/commit/001b370aac5326614a88726fa63a1849f6ac1be6))
+* **room:** close what is open on the system back, ask before leaving and add a fullscreen button ([ce8485f](https://github.com/Endika/patitas/commit/ce8485fe448d23b5fa1ab57d12ae816432b657ec))
+
+
+### Bug Fixes
+
+* **app:** own the back guard in the app and leave natively on the second back ([91be916](https://github.com/Endika/patitas/commit/91be91647a157400adada03500ab74b03cb4f216))
+* **room:** close an installed app on the second back and put the guard back when it stays ([c805f2a](https://github.com/Endika/patitas/commit/c805f2a7644ed83ccec51feaf2031113efc58c64))
+
 ## [0.4.1](https://github.com/Endika/patitas/compare/v0.4.0...v0.4.1) (2026-10-19)
 
 
