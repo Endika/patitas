@@ -176,11 +176,10 @@ export function furnitureObstacles(spots: Spots): Circle[] {
   }))
 }
 
-/** The scale's readout: one decimal with a comma, and zero when nobody is on it. */
+/** The scale's readout: one decimal with a comma, and blank when nobody is on it. */
 export function formatKg(kg: number | null): string {
-  return `${Math.max(0, kg ?? 0)
-    .toFixed(1)
-    .replace('.', ',')} kg`
+  if (kg == null) return ''
+  return `${Math.max(0, kg).toFixed(1).replace('.', ',')} kg`
 }
 
 /** Seconds the scale keeps showing a weight once the puppy has stepped off. */
@@ -198,7 +197,7 @@ export const createScaleDisplay = (): ScaleDisplay => ({ kg: null, hold: 0, tent
 
 /**
  * One frame of the scale's readout: `kg` of the puppy on it, or null with nobody there, when it
- * keeps the last weight READING_HOLD seconds before going back to zero. It draws only when what
+ * keeps the last weight READING_HOLD seconds before going blank. It draws only when what
  * it shows changes, so the display's texture is not uploaded every frame.
  */
 export function showScale(
@@ -217,7 +216,7 @@ export function showScale(
   if (!furniture) return
   const tenths = Math.round(Math.max(0, d.kg ?? 0) * 10)
   if (d.on === furniture && tenths === d.tenths) return
-  // Fresh furniture already reads zero
+  // Fresh furniture is already blank
   if (d.on !== furniture && !tenths) {
     d.on = furniture
     d.tenths = 0
@@ -424,7 +423,7 @@ function scale(shade: THREE.Texture): {
   const map = new THREE.CanvasTexture(screen)
   map.colorSpace = THREE.SRGBColorSpace
   const display = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.18, 0.06),
+    new THREE.PlaneGeometry(0.22, 0.073),
     new THREE.MeshBasicMaterial({ map, toneMapped: false }),
   )
   display.position.set(0, 0.055, 0.157)
@@ -436,7 +435,8 @@ function scale(shade: THREE.Texture): {
 function drawReading(screen: HTMLCanvasElement, text: string) {
   const g = screen.getContext('2d')
   if (!g) return
-  g.fillStyle = INK
+  // With nobody on it the display is off, a pale screen rather than a dark one
+  g.fillStyle = text ? INK : '#b9c7c1'
   g.fillRect(0, 0, screen.width, screen.height)
   g.fillStyle = '#cdeedb'
   g.font = '700 62px system-ui, sans-serif'
