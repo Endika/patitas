@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Hud, { HINT_MS } from '@/presentation/components/Hud'
@@ -54,6 +55,46 @@ describe('Hud', () => {
     rerender(hud(''))
     rerender(hud('Toca el suelo.'))
     expect(screen.getByText('Toca el suelo.')).toBeInTheDocument()
+  })
+
+  it('shows a hint again when another came and went back before it ran out', () => {
+    vi.useFakeTimers()
+    const hud = (hint: string) => (
+      <Hud status={status(hint)} idle={false} onBall={() => {}} onTrick={() => {}} />
+    )
+    const { rerender } = render(hud('Toca el suelo.'))
+    act(() => vi.advanceTimersByTime(HINT_MS))
+    rerender(hud('¡Allá va!'))
+    rerender(hud('Toca el suelo.'))
+    expect(screen.getByText('Toca el suelo.')).toBeInTheDocument()
+  })
+
+  it("moves focus into the mode's controls and back to «Cuidar» when it ends", async () => {
+    const user = userEvent.setup()
+    const { rerender } = show()
+    const hud = (mode?: ReactNode) => (
+      <Hud
+        status={status('')}
+        idle={false}
+        onBall={() => {}}
+        onTrick={() => {}}
+        care={<button type="button">Comida</button>}
+        mode={mode}
+      />
+    )
+    await user.click(screen.getByRole('button', { name: 'Cuidar' }))
+    await user.click(screen.getByRole('button', { name: 'Comida' }))
+    rerender(
+      hud(
+        <nav aria-label="Baño">
+          <button type="button">Aclarar</button>
+          <button type="button">Terminar</button>
+        </nav>,
+      ),
+    )
+    expect(screen.getByRole('button', { name: 'Aclarar' })).toHaveFocus()
+    rerender(hud())
+    expect(screen.getByRole('button', { name: 'Cuidar' })).toHaveFocus()
   })
 
   it('puts a tray after the buttons, starts on its first action and gives focus back', async () => {

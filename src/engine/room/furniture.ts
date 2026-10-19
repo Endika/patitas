@@ -176,10 +176,10 @@ export function furnitureObstacles(spots: Spots): Circle[] {
   }))
 }
 
-/** The scale's readout: one decimal with a comma, and blank when nobody is on it. */
+/** The scale's readout: two decimals with a comma, and blank when nobody is on it. */
 export function formatKg(kg: number | null): string {
   if (kg == null) return ''
-  return `${Math.max(0, kg).toFixed(1).replace('.', ',')} kg`
+  return `${Math.max(0, kg).toFixed(2).replace('.', ',')} kg`
 }
 
 /** Seconds the scale keeps showing a weight once the puppy has stepped off. */
@@ -189,11 +189,16 @@ export const READING_HOLD = 4
 export interface ScaleDisplay {
   kg: number | null
   hold: number
-  tenths: number
+  hundredths: number
   on: object | null
 }
 
-export const createScaleDisplay = (): ScaleDisplay => ({ kg: null, hold: 0, tenths: 0, on: null })
+export const createScaleDisplay = (): ScaleDisplay => ({
+  kg: null,
+  hold: 0,
+  hundredths: 0,
+  on: null,
+})
 
 /**
  * One frame of the scale's readout: `kg` of the puppy on it, or null with nobody there, when it
@@ -214,16 +219,16 @@ export function showScale(
     if (d.hold <= 0) d.kg = null
   }
   if (!furniture) return
-  const tenths = Math.round(Math.max(0, d.kg ?? 0) * 10)
-  if (d.on === furniture && tenths === d.tenths) return
+  const hundredths = Math.round(Math.max(0, d.kg ?? 0) * 100)
+  if (d.on === furniture && hundredths === d.hundredths) return
   // Fresh furniture is already blank
-  if (d.on !== furniture && !tenths) {
+  if (d.on !== furniture && !hundredths) {
     d.on = furniture
-    d.tenths = 0
+    d.hundredths = 0
     return
   }
   d.on = furniture
-  d.tenths = tenths
+  d.hundredths = hundredths
   furniture.scaleReading(d.kg)
 }
 

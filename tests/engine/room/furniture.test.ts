@@ -323,10 +323,10 @@ describe('furnitureObstacles', () => {
 })
 
 describe('formatKg', () => {
-  it('shows one decimal with a comma and «kg»', () => {
-    expect(formatKg(4.3)).toBe('4,3 kg')
-    expect(formatKg(4.26)).toBe('4,3 kg')
-    expect(formatKg(12)).toBe('12,0 kg')
+  it('shows two decimals with a comma and «kg»', () => {
+    expect(formatKg(5.24)).toBe('5,24 kg')
+    expect(formatKg(4.3)).toBe('4,30 kg')
+    expect(formatKg(12)).toBe('12,00 kg')
   })
 
   it('shows nothing with nobody on it', () => {
@@ -347,23 +347,23 @@ describe('showScale', () => {
     showScale(d, f, null, DT)
     expect(f.drawn).toEqual([])
     for (let t = 0; t < 3; t += DT) showScale(d, f, 4.26, DT)
-    expect(f.drawn).toEqual(['4,3 kg'])
+    expect(f.drawn).toEqual(['4,26 kg'])
     for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, DT)
-    expect(f.drawn).toEqual(['4,3 kg'])
+    expect(f.drawn).toEqual(['4,26 kg'])
     for (let t = 0; t < 0.2; t += DT) showScale(d, f, null, DT)
-    expect(f.drawn).toEqual(['4,3 kg', ''])
+    expect(f.drawn).toEqual(['4,26 kg', ''])
   })
 
-  it('draws again only when the tenths change, or on furniture laid out anew', () => {
+  it('draws again only when the hundredths change, or on furniture laid out anew', () => {
     const d = createScaleDisplay(),
       f = fake(),
       g = fake()
-    showScale(d, f, 4.31, DT)
-    showScale(d, f, 4.34, DT)
+    showScale(d, f, 4.311, DT)
+    showScale(d, f, 4.314, DT)
     showScale(d, f, 4.36, DT)
-    expect(f.drawn).toEqual(['4,3 kg', '4,4 kg'])
+    expect(f.drawn).toEqual(['4,31 kg', '4,36 kg'])
     showScale(d, g, 4.36, DT)
-    expect(g.drawn).toEqual(['4,4 kg'])
+    expect(g.drawn).toEqual(['4,36 kg'])
   })
 })
 
