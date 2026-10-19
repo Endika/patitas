@@ -141,10 +141,10 @@ export interface MessLayer {
   dispose(): void
 }
 
-const PEE_COLOR = '#dcbc4e',
+const PEE_COLOR = '#f7cf2a',
   POOP_COLOR = '#5a3a1e',
   SPARKLE_COLOR = '#fffbe8'
-const PEE_OPACITY = 0.75
+const PEE_OPACITY = 0.9
 
 /** Stacked, tapering blobs: the classic swirl, small and cartoonish. */
 const POOP_BLOBS: [y: number, r: number, squash: number][] = [
@@ -165,7 +165,10 @@ export function createMessLayer(scene: THREE.Scene): MessLayer {
   const star = sparkleGeometry()
   const peeBase = new THREE.MeshStandardMaterial({
     color: PEE_COLOR,
-    roughness: 0.3,
+    // A little light of its own lifts it off the floor, which is near its colour in shade
+    emissive: PEE_COLOR,
+    emissiveIntensity: 0.18,
+    roughness: 0.15,
     metalness: 0,
     transparent: true,
     opacity: PEE_OPACITY,
