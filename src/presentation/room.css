@@ -54,20 +54,24 @@
 .room-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
-  align-items: center;
+  gap: 10px 12px;
+  align-items: flex-start;
   justify-content: space-between;
 }
 .room-who {
+  flex: 1 1 11rem;
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 .room-name {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 1.75rem;
-  line-height: 1.05;
+  font-size: clamp(1.4rem, 1rem + 2.4vw, 1.75rem);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 .room-breed {
   font-size: 0.88rem;
@@ -114,160 +118,121 @@
   padding: 8px 16px;
   cursor: pointer;
 }
-.room-bottom {
-  bottom: 0;
-  padding-top: 14px;
-  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.room-hint {
-  margin: 0;
-  max-width: 34ch;
-  padding: 10px 16px;
-  border-radius: 16px;
-  background: var(--glass);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
-  font-size: 0.97rem;
-  line-height: 1.4;
-  text-align: center;
-  text-wrap: balance;
-}
-.room-ball {
-  pointer-events: auto;
-  font: 700 0.95rem var(--font-body);
-  color: var(--on-ink);
-  background: var(--ink);
-  border: 0;
-  border-radius: 999px;
-  padding: 11px 20px;
-  cursor: pointer;
-}
-.room-ball:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.room-tricks {
-  pointer-events: auto;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-}
-.room-tricks button {
-  font: 700 0.8rem var(--font-body);
-  color: var(--ink);
-  background: var(--glass);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 7px 10px;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-}
-.room-adopt {
-  pointer-events: auto;
+.room button {
+  min-height: 44px;
+  padding: 0 16px;
   font: 700 0.9rem var(--font-body);
   color: var(--ink);
   background: var(--glass);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 9px 15px;
   cursor: pointer;
   backdrop-filter: blur(10px);
+  transition:
+    background-color 0.15s ease-out,
+    border-color 0.15s ease-out;
 }
-.room-roster {
-  pointer-events: auto;
-  display: flex;
-  gap: 6px;
-  margin: 0 -16px;
-  padding: 2px 16px 4px;
-  list-style: none;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.room-roster li {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 5px 5px 12px;
-  border-radius: 999px;
-  background: var(--glass);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-.room-roster li[data-in] {
-  border-color: var(--coral);
-}
-.room-roster small {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--ink-soft);
-}
-.room-roster button {
-  font: 700 0.8rem var(--font-body);
-  color: var(--on-ink);
-  background: var(--ink);
-  border: 0;
-  border-radius: 999px;
-  min-height: 44px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
-.room-roster li[data-in] button {
-  color: var(--ink);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.room-note {
-  margin: 0;
-  max-width: 40ch;
-  padding: 8px 14px;
-  border-radius: 14px;
-  background: var(--glass);
-  border: 1px solid var(--coral);
-  backdrop-filter: blur(10px);
-  font-size: 0.88rem;
-  font-weight: 600;
-  line-height: 1.35;
+.room button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .room button:focus-visible,
 .room a:focus-visible {
   outline: 3px solid var(--coral);
   outline-offset: 2px;
 }
-.room-needs {
+.room .room-ball,
+.room .room-mode-end,
+.room .room-mode button[aria-pressed='true'] {
+  color: var(--on-ink);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.room button[aria-expanded='true'] {
+  background: #fff;
+  border-color: var(--ink-soft);
+}
+
+/* Who is in the room, at the top */
+.room-head > * {
   pointer-events: auto;
-  display: grid;
-  grid-template-columns: 1fr;
+}
+.room-needs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.room-pups {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
-.room-needs[data-two] {
-  grid-template-columns: 1fr 1fr;
+.room .room-pup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 0 12px;
+}
+.room .room-pup[aria-pressed='true'] {
+  border-color: var(--coral);
+  box-shadow: inset 0 0 0 1px var(--coral);
+}
+.room-pup-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.room-pup-health {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--health-ok);
+}
+.room-pup-health[data-health='Muy bien'],
+.room-need-head small[data-health='Muy bien']::before {
+  background: var(--health-good);
+}
+.room-pup-health[data-health='Necesita cuidados'],
+.room-need-head small[data-health='Necesita cuidados']::before {
+  background: var(--health-warn);
+}
+.room-pup-mood {
+  flex: none;
+  width: 24px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: hidden;
+}
+.room-pup-mood i,
+.room-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--coral-soft), var(--coral));
+  transform-origin: left center;
+  transition: transform 0.25s ease-out;
+}
+.room-pup-weight {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
 }
 .room-need {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px 10px;
-  align-content: start;
-  padding: 6px 10px 8px;
-  border-radius: 14px;
-  background: var(--glass);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
-}
-.room-needs[data-two] .room-need {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  cursor: pointer;
-}
-.room-need[data-selected] {
-  border-color: var(--coral);
-  box-shadow: inset 0 0 0 1px var(--coral);
+  gap: 6px 14px;
+  width: min(300px, 100%);
+  padding: 10px 14px 12px;
+  border-radius: 16px;
+  background: rgba(249, 252, 251, 0.94);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px -8px rgba(34, 48, 46, 0.25);
+  animation: room-pop 0.16s ease-out;
 }
 .room-need-head {
   grid-column: 1 / -1;
@@ -275,22 +240,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 28px;
+  margin: 0;
   font-weight: 700;
-  font-size: 0.92rem;
-}
-.room-need-head button {
-  margin: -8px -6px;
-  min-height: 44px;
-  padding: 0 6px;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
+  font-size: 0.95rem;
 }
 .room-need-head small {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--ink-soft);
   white-space: nowrap;
@@ -305,28 +260,15 @@
   vertical-align: 1px;
   background: var(--health-ok);
 }
-.room-need-head small[data-health='Muy bien']::before {
-  background: var(--health-good);
-}
-.room-need-head small[data-health='Necesita cuidados']::before {
-  background: var(--health-warn);
-}
 .room-need-bar {
   display: grid;
   gap: 3px;
   min-width: 0;
-  font-size: 0.66rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-soft);
-}
-.room-need-weight {
-  grid-column: 1 / -1;
-  margin: 2px 0 0;
-  font-size: 0.8rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 .room-bar {
   width: 100%;
@@ -335,56 +277,157 @@
   background: var(--line);
   overflow: hidden;
 }
-.room-bar i {
-  display: block;
-  height: 100%;
-  width: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--coral-soft), var(--coral));
-  transform: scaleX(0.25);
-  transform-origin: left center;
-  transition: transform 0.25s ease-out;
+.room-need-weight {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
-.room-controls {
+
+/* Every adopted puppy, behind «Cachorros» */
+.room-cast {
+  flex: none;
+}
+/* Anchored to the top bar, so it opens at the right edge wherever «Cachorros» wrapped to */
+.room-sheet {
+  position: absolute;
+  top: calc(100% - 8px);
+  right: max(16px, env(safe-area-inset-right, 0px));
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  border-radius: 20px;
+  background: rgba(249, 252, 251, 0.94);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px -8px rgba(34, 48, 46, 0.25);
+  animation: room-pop 0.16s ease-out;
 }
-.room-play {
+.room-cast:not(:has(.room-cast-toggle)) .room-sheet {
+  position: static;
+  max-width: none;
+}
+.room-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.room-roster li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 4px 4px 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.room-roster li[data-in] {
+  border-color: var(--coral);
+}
+.room-roster-who {
+  display: grid;
+  min-width: 0;
+  line-height: 1.15;
+}
+.room-roster-who span {
+  font-weight: 700;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.room-roster small {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.room .room-roster button {
+  flex: none;
+  min-width: 72px;
+  color: var(--on-ink);
+  background: var(--ink);
+  border-color: var(--ink);
+  font-size: 0.85rem;
+}
+.room .room-roster li[data-in] button {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+.room-note {
+  margin: 0;
+  max-width: 40ch;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--coral);
+  backdrop-filter: blur(10px);
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* What to do, at the bottom */
+.room-bottom {
+  bottom: 0;
+  padding-top: 10px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
 }
-.room-care {
+.room-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  width: max-content;
+  max-width: min(34ch, calc(100vw - 32px));
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+  transform: translateX(-50%);
+  animation: room-pop 0.2s ease-out;
+}
+.room-hint:empty {
+  visibility: hidden;
+}
+.room-tray,
+.room-actions,
+.room-mode {
   pointer-events: auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
 }
-.room-care button {
-  min-height: 44px;
-  padding: 0 16px;
-  font: 700 0.9rem var(--font-body);
-  color: var(--ink);
-  background: var(--glass);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
+.room-tray {
+  animation: room-pop 0.16s ease-out;
 }
-.room-care button[aria-pressed='true'],
-.room-care .room-care-end {
-  color: var(--on-ink);
-  background: var(--ink);
-  border-color: var(--ink);
+.room-actions,
+.room-mode {
+  gap: 8px;
 }
-.room-care button:disabled {
-  opacity: 0.45;
-  cursor: default;
+.room-actions button,
+.room-mode button {
+  min-height: 48px;
+  padding: 0 18px;
+  font-size: 0.95rem;
 }
+
 .room-toast {
   position: absolute;
   left: 50%;
@@ -405,52 +448,179 @@
     transform: translate(-50%, -30%) scale(0.9);
   }
 }
-@media (max-width: 380px) {
-  .room-care {
-    gap: 4px;
-  }
-  .room-care button {
-    padding: 0 11px;
+@keyframes room-pop {
+  from {
+    opacity: 0;
+    translate: 0 4px;
   }
 }
-@media (orientation: landscape) and (max-height: 500px) {
-  .room-needs,
-  .room-needs[data-two] {
-    width: 176px;
-    grid-template-columns: 1fr;
-  }
-  .room-needs .room-need,
-  .room-needs[data-two] .room-need {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px 10px;
-    padding: 2px 10px 6px;
-  }
-  .room-need-head {
-    min-height: 24px;
-    font-size: 0.85rem;
-  }
-  .room-need-bar {
-    gap: 2px;
-    font-size: 0.6rem;
-  }
-  .room-bottom {
-    gap: 8px;
-    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
-  }
-  .room-hint {
-    padding: 6px 14px;
-    font-size: 0.9rem;
-    max-width: 46ch;
-  }
-  .room-controls,
-  .room-play {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
+@media (max-width: 420px) {
+  .room-head {
     gap: 6px;
   }
-  .room-care button {
-    padding: 0 13px;
+  .room-pups {
+    gap: 4px;
+  }
+  .room .room-pup {
+    gap: 6px;
+    padding: 0 10px;
+  }
+  .room-pup-mood {
+    width: 20px;
+  }
+  .room .room-cast-toggle,
+  .room-tray button,
+  .room-actions button,
+  .room-mode button {
+    padding: 0 12px;
+    font-size: 0.9rem;
+  }
+}
+
+/*
+ * On a wide screen there is no room above and below the puppies: who is in the room goes to a
+ * rail on the left, what to do to a rail on the right, and the canvas takes the middle.
+ */
+@media (min-aspect-ratio: 5/4) {
+  .room {
+    --rail: clamp(160px, 20vw, 200px);
+    display: grid;
+    grid-template-columns:
+      calc(var(--rail) + env(safe-area-inset-left, 0px)) minmax(0, 1fr)
+      calc(var(--rail) + env(safe-area-inset-right, 0px));
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .room-stage {
+    position: relative;
+    inset: auto;
+    grid-column: 2;
+    grid-row: 1;
+    /* The floor fades into the rails instead of ending on a hard edge */
+    mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  }
+  .room-top,
+  .room-bottom {
+    position: static;
+    grid-row: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+    padding-top: max(12px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+  .room-top {
+    grid-column: 1;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: 4px;
+    gap: 8px;
+  }
+  .room-bottom {
+    grid-column: 3;
+    position: relative;
+    justify-content: flex-end;
+    align-items: stretch;
+    padding-left: 4px;
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .room-name {
+    font-size: 1.3rem;
+  }
+  .room-head {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .room-needs,
+  .room-pups {
+    align-items: stretch;
+  }
+  .room-pups {
+    flex-direction: column;
+  }
+  .room .room-pup {
+    justify-content: flex-start;
+  }
+  .room-pup-name {
+    flex: 1;
+    text-align: left;
+  }
+  .room-need {
+    width: auto;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 8px 10px 10px;
+    box-shadow: none;
+  }
+  .room-cast-toggle {
+    width: 100%;
+  }
+  .room-sheet {
+    position: static;
+    width: auto;
+    max-width: none;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+  .room-roster li {
+    gap: 6px;
+    padding-left: 10px;
+  }
+  .room-roster small {
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+  .room .room-roster button {
+    min-width: 0;
+    padding: 0 10px;
+    font-size: 0.82rem;
+  }
+  .room-note {
+    font-size: 0.82rem;
+  }
+  .room-hint {
+    position: static;
+    order: -1;
+    width: auto;
+    max-width: none;
+    margin-bottom: auto;
+    font-size: 0.85rem;
+    text-align: left;
+    text-wrap: pretty;
+    transform: none;
+  }
+  .room-tray,
+  .room-actions,
+  .room-mode {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+  .room-tray {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .room-tray button {
+    padding: 0 8px;
+    font-size: 0.85rem;
+  }
+  .room-tray button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .room-actions button,
+  .room-mode button {
+    padding: 4px 10px;
+    font-size: 0.9rem;
+    line-height: 1.15;
+  }
+  .room-toast,
+  .room-loading {
+    grid-column: 2;
+    grid-row: 1;
   }
 }
 .room-loading {
@@ -467,14 +637,16 @@
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
+  .room button,
+  .room-pup-mood i,
   .room-bar i {
     transition: none;
   }
-  .room-toast {
+  .room-toast,
+  .room-need,
+  .room-sheet,
+  .room-hint,
+  .room-tray {
     animation: none;
   }
-}
-.room-tricks button:disabled {
-  opacity: 0.45;
-  cursor: default;
 }

@@ -1,5 +1,6 @@
-import { useId } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 import type { PuppyNeeds } from '../roomStage'
+import { useDismiss } from './useDismiss'
 
 const BARS: ['happiness' | 'hunger' | 'cleanliness' | 'energy', string][] = [
   ['happiness', 'Felicidad'],
@@ -28,8 +29,9 @@ function Meter({ label, value }: { label: string; value: number }) {
 }
 
 /**
- * A card for each puppy in the room with its name, health, happiness, hunger, cleanliness and
- * energy, and what the scale read. With two, a card picks the puppy the care bar looks after.
+ * A chip for each puppy in the room with its name, how happy it is, its health and what the scale
+ * read; a tap opens its card with every need. With two, the chip tapped also picks the puppy the
+ * care actions look after.
  */
 export default function NeedsPanel({
   needs,
@@ -40,38 +42,56 @@ export default function NeedsPanel({
   selected: number
   onSelect(id: string): void
 }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const cardId = useId()
+  const close = useCallback(() => setOpen(null), [])
+  const shown = needs.find((n) => n.id === open)
+  useDismiss(box, !!shown, close)
   if (!needs.length) return null
   const two = needs.length > 1
+
   return (
-    <div className="room-needs" data-two={two || undefined}>
-      {needs.map((n, i) => (
-        <section
-          key={n.id}
-          aria-label={n.name}
-          className="room-need"
-          data-selected={(two && i === selected) || undefined}
-          onClick={two ? () => onSelect(n.id) : undefined}
-        >
-          <div className="room-need-head">
-            {two ? (
-              <button type="button" aria-pressed={i === selected}>
-                {n.name}
-              </button>
-            ) : (
-              <span>{n.name}</span>
-            )}
-            <small data-health={n.health}>{n.health}</small>
-          </div>
+    <div ref={box} className="room-needs">
+      <div className="room-pups">
+        {needs.map((n, i) => (
+          <button
+            key={n.id}
+            type="button"
+            className="room-pup"
+            aria-pressed={two ? i === selected : undefined}
+            aria-expanded={open === n.id}
+            aria-controls={cardId}
+            onClick={() => {
+              if (two) onSelect(n.id)
+              setOpen(open === n.id ? null : n.id)
+            }}
+          >
+            <span className="room-pup-name">{n.name}</span>
+            <span className="room-pup-health" data-health={n.health} aria-hidden="true" />
+            <span className="room-pup-mood" aria-hidden="true">
+              <i style={{ transform: `scaleX(${n.happiness})` }} />
+            </span>
+            {n.reading && <small className="room-pup-weight">{n.reading}</small>}
+          </button>
+        ))}
+      </div>
+      {shown && (
+        <section id={cardId} aria-label={shown.name} className="room-need">
+          <p className="room-need-head">
+            <span>{shown.name}</span>
+            <small data-health={shown.health}>{shown.health}</small>
+          </p>
           {BARS.map(([key, label]) => (
-            <Meter key={key} label={label} value={n[key]} />
+            <Meter key={key} label={label} value={shown[key]} />
           ))}
-          {n.reading && (
+          {shown.reading && (
             <p className="room-need-weight">
-              {n.reading} · {n.weightStatus}
+              {shown.reading} · {shown.weightStatus}
             </p>
           )}
         </section>
-      ))}
+      )}
     </div>
   )
 }

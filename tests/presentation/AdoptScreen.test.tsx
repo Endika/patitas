@@ -30,7 +30,7 @@ describe('AdoptScreen', () => {
     await user.type(screen.getByLabelText('Nombre'), 'Kuma')
     await user.click(screen.getByRole('button', { name: 'Adoptar' }))
 
-    expect(await screen.findByRole('button', { name: 'Adoptar otro' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Cachorros' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Kuma' })).toBeInTheDocument()
     await waitFor(() => expect(stage.names()).toEqual(['Kuma']))
     const saved = await storage.listPuppies()
