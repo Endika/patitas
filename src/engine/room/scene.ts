@@ -233,16 +233,19 @@ interface Floater {
 const HEART = { max: 1.3, rise: 0.22, size: 0.05, grow: 0.03, drift: 0, alpha: 1, fadeIn: false }
 const Z = { max: 2, rise: 0.1, size: 0.06, grow: 0.035, drift: 0.04, alpha: 0.75, fadeIn: true }
 
-/** With `?fps` in the URL: a corner readout of the frame rate, written straight to the DOM. */
-function fpsOverlay(canvas: HTMLCanvasElement) {
+/**
+ * With `?fps` in the URL: a readout of the frame rate in the top-left corner, over the HUD, written
+ * straight to the DOM.
+ */
+export function fpsOverlay(canvas: HTMLCanvasElement) {
   const host = canvas.parentElement
   if (!host || !new URLSearchParams(location.search).has('fps')) return null
   const meter = createFpsMeter()
   const el = document.createElement('div')
   Object.assign(el.style, {
     position: 'absolute',
-    right: '8px',
-    bottom: '8px',
+    left: 'max(8px, env(safe-area-inset-left, 0px))',
+    top: 'max(8px, env(safe-area-inset-top, 0px))',
     padding: '2px 6px',
     borderRadius: '6px',
     background: 'rgba(0, 0, 0, 0.55)',
@@ -250,7 +253,7 @@ function fpsOverlay(canvas: HTMLCanvasElement) {
     font: '12px/1.4 system-ui, sans-serif',
     fontVariantNumeric: 'tabular-nums',
     pointerEvents: 'none',
-    zIndex: '5',
+    zIndex: '10',
   })
   el.textContent = '-- fps'
   host.append(el)
