@@ -135,12 +135,12 @@ function run(
         spots.scale.center.x,
         spots.scale.center.z,
         0.5,
-        clamp,
+        more.clamp ?? clamp,
       )
     separate(
       pups.map((p) => p.m),
       0.45,
-      clamp,
+      more.clamp ?? clamp,
     )
     each?.()
   }
@@ -829,6 +829,18 @@ describe('the scale', () => {
     expect(p.weighed).toBe(1)
   })
 
+  it('woken by «Pesar», a call while it stretches calls the weighing off', () => {
+    const p = pup(0.12, -0.12)
+    tuckIn(p.r, p.m)
+    goWeigh(p.r, p.m)
+    run([p], 0.5, at(12))
+    expect(p.r.routine).toBe('stretch')
+    touch(p.r)
+    expect(weighing(p.r)).toBe(false)
+    run([p], 5, at(12))
+    expect(p.seen).not.toContain('toScale')
+  })
+
   it('a call on the way, or once on the scale, calls it off; so does the ball', () => {
     const walking = pup(-0.3, -0.1)
     goWeigh(walking.r, walking.m)
@@ -875,6 +887,41 @@ describe('the scale', () => {
     expect(a.seen).not.toContain('toScale')
     expect(closest).toBeGreaterThan(0.45)
   })
+
+  it.each([0.46, 1, 1.78])(
+    'at aspect %f with two, weighing one never shoves the other off its meal',
+    (aspect) => {
+      const framed = fitCamera(createCamera(), aspect)
+      const spots = computeSpots(framed, 2),
+        framedClamp = (x: number, z: number) => clampPlay(framed, x, z)
+      const [l, r] = START_PLACES[1]!
+      const a = pup(l!.x, l!.z),
+        b = pup(r!.x, r!.z, 0.8, 0.8, 1)
+      const meal = mealSpot(spots.bowls[1]!, MUZZLE)
+      let eating = false,
+        shoved = 0
+      run(
+        [a, b],
+        25,
+        at(12),
+        spots,
+        () => {
+          if (b.r.routine === 'eating' && !eating) {
+            eating = true
+            goWeigh(a.r, a.m)
+          }
+          if (b.r.routine === 'eating')
+            shoved = Math.max(shoved, Math.hypot(b.m.pos.x - meal.x, b.m.pos.z - meal.z))
+        },
+        undefined,
+        { clamp: framedClamp },
+      )
+      expect(eating).toBe(true)
+      expect(a.weighed).toBe(1)
+      expect(b.fed).toBe(1)
+      expect(shoved).toBeLessThan(0.08)
+    },
+  )
 
   it('in portrait with two, a walk from the start to the right-hand bed goes round the scale', () => {
     const [l, r] = START_PLACES[1]!

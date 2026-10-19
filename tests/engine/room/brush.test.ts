@@ -6,6 +6,9 @@ import { createCare, type Care } from '@/domain/care'
 import type { Anatomy } from '@/engine/puppy/anatomy'
 import { dirtRest, meanDirt, type DirtRest } from '@/engine/puppy/dirt'
 import { buildPuppyGeometry } from '@/engine/puppy/geometry'
+import { createMotionState } from '@/engine/motion/locomotion'
+import { rubCoat, type BathZone } from '@/engine/puppy/view'
+import { createCamera } from '@/engine/room/camera'
 import {
   bathReach,
   beginBath,
@@ -28,6 +31,12 @@ import {
 } from '@/engine/room/brush'
 
 const DT = 1 / 60
+
+/** A repeatable stream of draws, so the hearts land the same every run. */
+const seeded = (seed: number) => () => {
+  seed = (seed * 16807) % 2147483647
+  return seed / 2147483647
+}
 /** A brisk stroke: a unit of coat a second. */
 const SPEED = 1
 const HEAD_TO_TAIL = new THREE.Vector3(0, 0, -1)
@@ -189,10 +198,73 @@ describe('stepBrush', () => {
   })
 })
 
+describe('brushing through the finger, whichever way the puppy stands', () => {
+  const az = createCamera().az
+  const HEADINGS = {
+    facing: az,
+    'side-on to the left': az - Math.PI / 2,
+    'side-on to the right': az + Math.PI / 2,
+    'three-quarter': az + Math.PI / 4,
+  }
+
+  /** Shine after the finger slides `units` over its back along world `way`, as the room tracks it. */
+  const slide = (heading: number, way: (forward: THREE.Vector3) => THREE.Vector3, units = 0.5) => {
+    const group = new THREE.Group()
+    group.rotation.y = heading
+    const bone = new THREE.Bone()
+    bone.position.set(0, 0.4, 0)
+    group.add(bone)
+    group.updateMatrixWorld(true)
+    const zone: BathZone = {
+      zone: 'back',
+      bone,
+      off: new THREE.Vector3(),
+      r: 0.1,
+      rest: new THREE.Vector3(0, 0.4, 0),
+    }
+    const motion = createMotionState()
+    motion.heading = heading
+    const view = { bath: createBath(), coatTouch: null as CoatTouch | null, motion }
+    const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
+    const step = way(forward).normalize().multiplyScalar(0.02)
+    const p = bone.localToWorld(new THREE.Vector3(0, 0.05, 0))
+    const b = createBrush(),
+      coat = createCoat(rest, fresh())
+    beginBrush(b)
+    let care = fresh()
+    for (let f = 0; f < units / 0.02; f++) {
+      rubCoat(view, zone, p.add(step))
+      care = stepBrush(
+        b,
+        { coat, touch: view.coatTouch, reach, grain: GRAIN, care, cuddly: 0.5 },
+        DT,
+      )
+    }
+    for (let f = 0; f < 10; f++)
+      care = stepBrush(b, { coat, touch: null, reach, grain: GRAIN, care, cuddly: 0.5 }, DT)
+    return care.shine
+  }
+  const full = () => slide(az, (fw) => fw.negate())
+
+  it.each(Object.entries(HEADINGS))(
+    '%s: head to tail counts fully, tail to head barely',
+    (_, h) => {
+      const along = full()
+      expect(along).toBeGreaterThan(0.1)
+      expect(slide(h, (fw) => fw.negate())).toBeCloseTo(along, 3)
+      expect(slide(h, (fw) => fw)).toBeLessThan(along * 0.15)
+    },
+  )
+
+  it('facing the camera, down its front counts fully too', () => {
+    expect(slide(az, () => new THREE.Vector3(0, -1, 0))).toBeGreaterThan(full() * 0.95)
+  })
+})
+
 describe('createBrushLayer', () => {
   const setup = () => {
     const scene = new THREE.Scene()
-    const layer = createBrushLayer(scene)
+    const layer = createBrushLayer(scene, seeded(7))
     const camera = new THREE.PerspectiveCamera()
     camera.position.set(0, 1, 3)
     camera.lookAt(0, 0.3, 0)
@@ -208,6 +280,8 @@ describe('createBrushLayer', () => {
     const matrices = layer.hearts.instanceMatrix.array
     beginBrush(b)
     shown.coatTouch = finger(new THREE.Vector3(0, 0.4, 0), HEAD_TO_TAIL)
+    b.heartBone = shown.coatTouch.bone
+    b.heartAt.copy(shown.coatTouch.local)
     for (let f = 0; f < 120; f++) {
       b.hearts = 3
       layer.sync([shown], DT, camera)
@@ -235,6 +309,21 @@ describe('createBrushLayer', () => {
     for (let f = 0; f < 10; f++) layer.sync([shown], DT, camera)
     expect(layer.hearts.instanceMatrix.version).toBe(was)
     expect(layer.hearts.visible).toBe(false)
+  })
+
+  it('shows the hearts of the last stroke even once the finger has lifted', () => {
+    const { layer, camera, b, shown } = setup()
+    const coat = createCoat(rest, fresh())
+    const touch = finger(backPoint(), HEAD_TO_TAIL)
+    beginBrush(b)
+    for (let f = 0; f < 30 && !b.hearts; f++) {
+      touch.travel = 0.1
+      stepBrush(b, { coat, touch, reach, grain: GRAIN, care: fresh(), cuddly: 0.5 }, DT)
+    }
+    expect(b.hearts).toBeGreaterThan(0)
+    shown.coatTouch = null
+    layer.sync([shown], DT, camera)
+    expect(layer.hearts.count).toBeGreaterThan(0)
   })
 
   it('shows the brush in hand only while the finger is on the puppy being brushed', () => {

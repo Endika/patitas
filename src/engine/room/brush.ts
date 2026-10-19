@@ -53,6 +53,9 @@ export interface Brush {
   heartAcc: number
   /** Hearts earned and not yet shown: the layer takes them. */
   hearts: number
+  /** Where the last one was earned, on its bone, so it shows there even if the finger has lifted. */
+  heartBone: THREE.Object3D | null
+  heartAt: THREE.Vector3
   /** Seconds since the care was last written. */
   acc: number
 }
@@ -66,6 +69,8 @@ export const createBrush = (): Brush => ({
   joy: 0,
   heartAcc: 0,
   hearts: 0,
+  heartBone: null,
+  heartAt: new THREE.Vector3(),
   acc: 0,
 })
 
@@ -125,6 +130,10 @@ export function stepBrush(b: Brush, input: BrushInput, dt: number): Care {
         b.side = touch.rest.x >= 0 ? 1 : -1
         b.heartAcc = Math.min(b.heartAcc + gain, HEART_EVERY * HEART_BURST)
         for (; b.heartAcc >= HEART_EVERY; b.heartAcc -= HEART_EVERY) b.hearts++
+        if (b.hearts) {
+          b.heartBone = touch.bone
+          b.heartAt.copy(touch.local)
+        }
       }
       if (care.wet < DAMP) {
         const { field, rest } = coat.dirt
@@ -253,10 +262,11 @@ export function createBrushLayer(
       for (const s of shown) {
         const t = s.coatTouch
         if (s.brush.on && t) held ??= t
-        if (t)
-          for (; s.brush.hearts > 0; s.brush.hearts--)
-            spawn(t.bone.localToWorld(tmp.copy(t.local)), camera.position)
-        s.brush.hearts = 0
+        const b = s.brush
+        if (b.heartBone)
+          for (; b.hearts > 0; b.hearts--)
+            spawn(b.heartBone.localToWorld(tmp.copy(b.heartAt)), camera.position)
+        b.hearts = 0
       }
       let n = 0
       for (let i = 0; i < HEART_MAX; i++) {

@@ -36,6 +36,17 @@ export type Routine =
   | 'bathing'
   | 'brushing'
 
+/**
+ * The piece last walked round and the side taken, kept so the play area's edge is checked once
+ * per piece rather than every frame.
+ */
+interface Around {
+  x: number
+  z: number
+  lean: number
+  side: number
+}
+
 /** Where the player holds it still to look after its coat. */
 export type HeldRoutine = 'bathing' | 'brushing'
 
@@ -79,6 +90,7 @@ export interface RoutineState {
   held: HeldRoutine | null
   /** Asked to go on the scale: it goes once it has stretched, if it was asleep. */
   weigh: boolean
+  around: Around
 }
 
 export interface RoutineCtx {
@@ -205,6 +217,7 @@ export function createRoutineState(): RoutineState {
     sulking: 0,
     held: null,
     weigh: false,
+    around: { x: NaN, z: NaN, lean: 0, side: 0 },
   }
 }
 
@@ -218,20 +231,20 @@ function enter(r: RoutineState, next: Routine) {
 
 /**
  * A touch or a call: the idle count starts again, a walk to the bed, the garden, the mud or the
- * scale is dropped, and a sleeping puppy wakes with a stretch. Returns true
+ * scale is dropped (and a weighing it is stretching for), and a sleeping puppy wakes with a
+ * stretch. Returns true
  * when it was asleep, so the touch does nothing else.
  */
 export function touch(r: RoutineState): boolean {
   r.idle = 0
+  r.weigh = false
   if (
     r.routine === 'toBed' ||
     r.routine === 'toGarden' ||
     r.routine === 'toMud' ||
     r.routine === 'toScale'
-  ) {
-    r.weigh = false
+  )
     enter(r, 'none')
-  }
   if (r.routine !== 'sleeping') return false
   enter(r, 'stretch')
   return true
@@ -338,6 +351,7 @@ function detour(
   to: Vec3,
   circles: readonly Circle[],
   clamp: RoutineCtx['clamp'],
+  around: Around,
 ): { x: number; z: number } {
   const dx = to.x - from.x,
     dz = to.z - from.z,
@@ -352,10 +366,16 @@ function detour(
     const lateral = (c.x - from.x) * -fz + (c.z - from.z) * fx
     if (t <= 0 || t >= len || Math.abs(lateral) >= c.r + BODY_CLEARANCE || t >= bestT) continue
     // Pass on the side the path already leans to
-    let s = lateral > 0 ? 1 : -1
-    const R = c.r + DETOUR
-    const [x, z] = clamp(c.x + fz * s * R, c.z - fx * s * R)
-    if (Math.hypot(x - c.x, z - c.z) < c.r + BODY_CLEARANCE) s = -s
+    const lean = lateral > 0 ? 1 : -1,
+      R = c.r + DETOUR
+    if (around.x !== c.x || around.z !== c.z || around.lean !== lean) {
+      const [x, z] = clamp(c.x + fz * lean * R, c.z - fx * lean * R)
+      around.x = c.x
+      around.z = c.z
+      around.lean = lean
+      around.side = Math.hypot(x - c.x, z - c.z) < c.r + BODY_CLEARANCE ? -lean : lean
+    }
+    const s = around.side
     best = { x: c.x + fz * s * R, z: c.z - fx * s * R }
     bestT = t
   }
@@ -374,6 +394,7 @@ export function approach(r: RoutineState, m: MotionState, ctx: RoutineCtx, spot:
     r.target,
     furnitureObstacles(ctx.spots).filter((c) => c.x !== spot.center.x || c.z !== spot.center.z),
     ctx.clamp,
+    r.around,
   )
   if (!m.goal || Math.hypot(m.goal.x - way.x, m.goal.z - way.z) > 0.02)
     goTo(m, way.x, way.z, { happy: 0, energy: 0, gait: 'walk', clamp: ctx.clamp })
