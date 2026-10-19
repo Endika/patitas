@@ -1,7 +1,7 @@
 import type { Vec3 } from '@/engine/math'
 import type { FetchState } from '@/engine/motion/fetch'
 import type { MotionState } from '@/engine/motion/locomotion'
-import { APART_STEP, keepApart, type ClampTo } from './apart'
+import { keepApart, type ClampTo, type ScaleClear } from './apart'
 import type { BallState } from './ball'
 import { sphereAt, SPHERES, type Body } from './bodies'
 
@@ -14,7 +14,8 @@ const GOAL_SPACE = 0.45
  * a time (see `keepApart`), and two walking to the same spot get spots GOAL_SPACE apart. With
  * `clamp`, bodies and goals stay in the play area. A sleeper and those `fixed` (busy in their
  * place) stay put and the other takes the whole push. `dt` lets a turn into another be taken
- * back.
+ * back. While one is weighed, `scale` keeps the others and their goals out of its circle, within
+ * the same step a frame: so weighing starting never jumps one.
  */
 export function separate(
   states: readonly MotionState[],
@@ -22,8 +23,9 @@ export function separate(
   clamp?: ClampTo,
   fixed: readonly boolean[] | null = null,
   dt = 0,
+  scale: ScaleClear | null = null,
 ): void {
-  keepApart(states, bodies, clamp, fixed, dt)
+  keepApart(states, bodies, clamp, fixed, dt, scale)
   for (let i = 0; i < states.length; i++)
     for (let j = i + 1; j < states.length; j++) {
       const a = states[i]!.goal,
@@ -56,36 +58,6 @@ function move(p: Vec3, dx: number, dz: number, clamp?: ClampTo): number {
   p.z += dz
   clamp?.(p)
   return Math.hypot(p.x - x0, p.z - z0)
-}
-
-/**
- * Keeps everyone but `owner` out of the circle of radius `r` round (x, z), and their goals with
- * them: the scale while one puppy is weighed. A puppy is moved at most APART_STEP a frame, as by
- * `keepApart`, so weighing starting never jumps one; its goal is moved in full.
- */
-export function keepOff(
-  states: readonly MotionState[],
-  owner: MotionState,
-  x: number,
-  z: number,
-  r: number,
-  clamp?: ClampTo,
-): void {
-  for (const s of states) {
-    if (s === owner) continue
-    out(s.pos, x, z, r, clamp, APART_STEP)
-    if (s.goal) out(s.goal, x, z, r, clamp)
-  }
-}
-
-function out(p: Vec3, x: number, z: number, r: number, clamp?: ClampTo, most = Infinity) {
-  const dx = p.x - x,
-    dz = p.z - z,
-    d = Math.hypot(dx, dz)
-  if (d >= r) return
-  const by = Math.min(r - d, most)
-  if (d > 1e-6) move(p, (dx / d) * by, (dz / d) * by, clamp)
-  else move(p, by, 0, clamp)
 }
 
 /** How far to each side of the line from a chaser to the ball a body still stands in the way. */
