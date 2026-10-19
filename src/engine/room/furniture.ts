@@ -257,7 +257,7 @@ export function showBowls(
 
 const INK = '#22302e'
 
-function rng(seed: number) {
+export function rng(seed: number) {
   let s = seed >>> 0
   return () => {
     s = (s + 0x6d2b79f5) >>> 0
@@ -499,66 +499,24 @@ function blob(
   return geo
 }
 
-const BLADES = 900
-
-/** One tapered blade: two crossed triangles, so it shows from any side. */
-function bladeGeometry(): THREE.BufferGeometry {
-  const w = 0.0055,
-    h = 0.038
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute([-w, 0, 0, w, 0, 0, 0, h, 0, 0, 0, -w, 0, 0, w, 0, h, 0], 3),
-  )
-  // Lit like the ground under it, so the blades read as soft grass rather than facets
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(Array(6).fill([0, 1, 0]).flat(), 3))
-  return geo
-}
-
+/**
+ * The puddle, on the backdrop's garden ground: just clear of the floor, with a soft lip around a
+ * lower middle.
+ */
 function garden(): THREE.Group {
   const g = new THREE.Group()
-  const grassRim = (a: number) => wobble(a, 0.09, 1.3)
   const mudRim = (a: number) => wobble(a, 0.08, 4.1)
-  const light = new THREE.Color('#8fb35e'),
-    dark = new THREE.Color('#5f8a43')
-  const grass = new THREE.Mesh(
-    blob(
-      GARDEN.radius,
-      GARDEN.depth,
-      grassRim,
-      () => 0.002,
-      (t, a, out) => {
-        const x = t * Math.cos(a) * 9,
-          z = t * Math.sin(a) * 9
-        return out
-          .copy(dark)
-          .lerp(light, 0.55 + 0.25 * Math.sin(x + 1.3 * z) * Math.cos(1.7 * x - z))
-      },
-      (t) => 1 - smoothstep(0.78, 1, t),
-    ),
-    new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.95,
-      transparent: true,
-      depthWrite: false,
-    }),
-  )
-  grass.receiveShadow = true
-  grass.renderOrder = 1
   const wetEdge = new THREE.Color('#5a3b22'),
     deep = new THREE.Color('#3a2312')
-  const mudR = MUD.size * GARDEN.radius,
-    mudD = MUD.size * GARDEN.depth
   const mud = new THREE.Mesh(
     blob(
-      mudR,
-      mudD,
+      MUD.size * GARDEN.radius,
+      MUD.size * GARDEN.depth,
       mudRim,
-      (t) => -0.008 * (1 - t * t) + 0.004 * smoothstep(0.85, 1, t),
+      (t) => 0.002 + 0.005 * t * t * (1 - smoothstep(0.9, 1, t)),
       (t, _a, out) => out.copy(deep).lerp(wetEdge, smoothstep(0.55, 1, t)),
-      () => 1,
+      (t) => 1 - smoothstep(0.92, 1, t),
     ),
-    // Drawn after the see-through grass, which writes no depth, so the sunken middle shows.
     // Damp rather than glossy: seen this low, the rim light glances off it from behind and any
     // ordinary shine turns the puddle grey, so its specular is nearly off
     new THREE.MeshPhysicalMaterial({
@@ -567,41 +525,13 @@ function garden(): THREE.Group {
       specularIntensity: 0.03,
       envMapIntensity: 0.25,
       transparent: true,
+      depthWrite: false,
     }),
   )
-  mud.position.set(MUD.u * GARDEN.radius, 0.003, MUD.v * GARDEN.depth)
+  mud.position.set(MUD.u * GARDEN.radius, 0, MUD.v * GARDEN.depth)
   mud.receiveShadow = true
   mud.renderOrder = 2
-  // Short blades on the grass, thinning towards its edge and none in the puddle
-  const blades = new THREE.InstancedMesh(
-    bladeGeometry(),
-    new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }),
-    BLADES,
-  )
-  const rand = rng(11)
-  const m = new THREE.Matrix4(),
-    q = new THREE.Quaternion(),
-    e = new THREE.Euler(),
-    s = new THREE.Vector3(),
-    p = new THREE.Vector3(),
-    c = new THREE.Color()
-  let n = 0
-  while (n < BLADES) {
-    const a = rand() * Math.PI * 2,
-      t = Math.sqrt(rand())
-    if (t > 0.92 && rand() < 0.6) continue
-    const k = t * grassRim(a) * 0.95
-    p.set(k * GARDEN.radius * Math.cos(a), 0, -k * GARDEN.depth * Math.sin(a))
-    const mu = (p.x - mud.position.x) / mudR,
-      mv = (p.z - mud.position.z) / mudD
-    if (Math.hypot(mu, mv) < mudRim(Math.atan2(-mv, mu)) * 1.08) continue
-    e.set((rand() - 0.5) * 0.7, rand() * 6, (rand() - 0.5) * 0.7)
-    s.set(1, 0.6 + rand() * 0.8 * (1 - 0.5 * t), 1)
-    blades.setMatrixAt(n, m.compose(p, q.setFromEuler(e), s))
-    blades.setColorAt(n, c.copy(dark).lerp(light, rand()).offsetHSL(0, 0, 0.04))
-    n++
-  }
-  g.add(grass, mud, blades)
+  g.add(mud)
   return g
 }
 
