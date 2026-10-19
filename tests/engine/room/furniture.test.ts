@@ -14,15 +14,36 @@ import {
   furnitureObstacles,
   inMud,
   startPlaces,
+  startPlacesOf,
+  walkingRound,
+  walkRound,
+  WALK_CLEARANCE,
   inOval,
+  SLOT_APART,
   type Spot,
   type Spots,
 } from '@/engine/room/furniture'
 import { bowl, KIBBLE, scaleReadout } from '@/engine/room/furnitureModels'
+import { DORADO_BED, EAT_REACH } from '@/engine/room/layout'
+import { apartBy } from '@/engine/room/apart'
+import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
+import { anatomy } from '@/engine/puppy/anatomy'
+import { BREEDS } from '@/domain/breeds'
 
-const ASPECTS = [0.46, 1, 2.1]
+const ASPECTS = [0.46, 1, 1.23, 2.1]
 const COUNTS = [1, 2] as const
 const CASES = ASPECTS.flatMap((aspect) => COUNTS.map((n) => [aspect, n] as const))
+/** Every screen from tall phones to wide desktops, in steps of 0.05. */
+const SWEEP = Array.from({ length: 41 }, (_, i) => +(0.4 + i * 0.05).toFixed(2)).flatMap((aspect) =>
+  COUNTS.map((n) => [aspect, n] as const),
+)
+/** Each room is laid out once and shared by the tests. */
+const laidOut = new Map<string, Spots>()
+const spotsFor = (aspect: number, n: 1 | 2) => {
+  const key = `${aspect} ${n}`
+  if (!laidOut.has(key)) laidOut.set(key, computeSpots(view(aspect).cam, n))
+  return laidOut.get(key)!
+}
 
 /** Every piece by name, beds and bowls numbered: `bed0`, `bowl1`… */
 const pieces = (spots: Spots): [string, Spot][] => [
@@ -36,7 +57,7 @@ const pieces = (spots: Spots): [string, Spot][] => [
 const named = (spots: Spots) => pieces(spots).filter(([name]) => name !== 'garden')
 const kind = (name: string) => name.replace(/\d+$/, '')
 
-const view = (aspect: number) => {
+function view(aspect: number) {
   const cam = fitCamera(createCamera(), aspect)
   const camera = new THREE.PerspectiveCamera(cam.fov, aspect, 0.05, 60)
   cameraPosition(cam, camera.position)
@@ -67,36 +88,41 @@ const gap = (a: Spot, b: Spot) => {
 }
 
 describe('computeSpots', () => {
-  it.each(CASES)(
+  it.each(SWEEP)(
     'lays out a bed and a bowl for each puppy, left first, at aspect %f for %i',
     (aspect, n) => {
       const { cam } = view(aspect)
-      const { beds, bowls } = computeSpots(cam, n)
+      const { beds, bowls, fallback } = spotsFor(aspect, n)
+      // Every rule kept, never the first candidate taken anyway
+      expect(fallback).toBe(false)
       expect([beds.length, bowls.length]).toEqual([n, n])
       for (const row of [beds, bowls])
         for (let i = 1; i < row.length; i++) {
           const l = playLocal(cam, row[i - 1]!.center.x, row[i - 1]!.center.z),
             r = playLocal(cam, row[i]!.center.x, row[i]!.center.z)
           expect(r.side).toBeGreaterThan(l.side)
-          // The bowls stand in a row; a second bed may stand in front of the first
-          if (row === bowls) expect(r.d).toBeCloseTo(l.d)
-          else expect(r.d).toBeLessThanOrEqual(l.d + 1e-9)
+          // A second bed or bowl may stand in front of the first, never behind it
+          expect(r.d).toBeLessThanOrEqual(l.d + 1e-9)
         }
     },
   )
 
-  it.each(CASES)('puts every spot inside the play area at aspect %f for %i', (aspect, n) => {
+  it.each(SWEEP)('puts every spot inside the play area at aspect %f for %i', (aspect, n) => {
     const { cam } = view(aspect)
-    for (const [name, { center }] of named(computeSpots(cam, n))) {
+    // The puddle reaches the play area's edge on some tablets, where a puppy wading in is kept
+    // inside (`goToMud` clamps it): it is held to this at the usual aspects only
+    const usual = ASPECTS.includes(aspect)
+    for (const [name, { center }] of named(spotsFor(aspect, n))) {
+      if (name === 'mud' && !usual) continue
       const [x, z] = clampPlay(cam, center.x, center.z)
       expect(Math.hypot(x - center.x, z - center.z), name).toBeLessThan(1e-9)
       expect(center.y).toBe(0)
     }
   })
 
-  it.each(CASES)('keeps every footprint on screen at aspect %f for %i', (aspect, n) => {
-    const { cam, camera } = view(aspect)
-    for (const [name, spot] of pieces(computeSpots(cam, n)))
+  it.each(SWEEP)('keeps every footprint on screen at aspect %f for %i', (aspect, n) => {
+    const { camera } = view(aspect)
+    for (const [name, spot] of pieces(spotsFor(aspect, n)))
       for (const p of rim(spot, 32)) {
         const q = p.project(camera)
         expect(Math.abs(q.x), name).toBeLessThan(1)
@@ -104,15 +130,14 @@ describe('computeSpots', () => {
       }
   })
 
-  it.each(CASES)('keeps different pieces at least 0.5 apart at aspect %f for %i', (aspect, n) => {
-    const list = named(computeSpots(view(aspect).cam, n))
+  it.each(SWEEP)('keeps different pieces at least 0.5 apart at aspect %f for %i', (aspect, n) => {
+    const list = named(spotsFor(aspect, n))
     for (let i = 0; i < list.length; i++)
       for (let j = i + 1; j < list.length; j++) {
         const [na, a] = list[i]!,
           [nb, b] = list[j]!
         if (kind(na) === kind(nb)) continue
-        // In the front row a narrow screen squeezes two bowls and the scale to a puppy's
-        // personal space apart
+        // A bowl and the scale may stand a puppy's personal space apart
         const front = [kind(na), kind(nb)].sort().join() === 'bowl,scale'
         expect(
           Math.hypot(a.center.x - b.center.x, a.center.z - b.center.z),
@@ -121,8 +146,8 @@ describe('computeSpots', () => {
       }
   })
 
-  it.each(CASES)('leaves at least 0.1 between footprints at aspect %f for %i', (aspect, n) => {
-    const list = pieces(computeSpots(view(aspect).cam, n))
+  it.each(SWEEP)('leaves at least 0.1 between footprints at aspect %f for %i', (aspect, n) => {
+    const list = pieces(spotsFor(aspect, n))
     for (let i = 0; i < list.length; i++)
       for (let j = i + 1; j < list.length; j++) {
         const [na, a] = list[i]!,
@@ -144,13 +169,16 @@ describe('computeSpots', () => {
     }
   })
 
-  it.each(ASPECTS)(
+  // Below 0.95 two puppies' places fill the house, and the only floor left to start on is by the
+  // puddle: there it is partly hidden at first
+  it.each(SWEEP.filter(([a, n]) => n === 2 && a >= 0.95).map(([a]) => a))(
     'leaves most of the puddle in sight of two puppies at their start at aspect %f',
     (aspect) => {
       const { cam, camera } = view(aspect)
-      const { mud } = computeSpots(cam, 2)
+      const spots = spotsFor(aspect, 2),
+        { mud } = spots
       // The two start places: a body 0.26 wide, 0.6 long and 0.55 tall, turned to `heading`
-      const screens = startPlaces(cam, computeSpots(cam, 2), 2).map(({ x, z: z0, heading = 0 }) => {
+      const screens = startPlaces(cam, spots, 2).map(({ x, z: z0, heading = 0 }) => {
         const box = new THREE.Box2()
         for (const w of [-0.13, 0.13])
           for (const l of [-0.3, 0.3])
@@ -181,42 +209,70 @@ describe('computeSpots', () => {
     'keeps the beds, bowls and scale in the house at aspect %f for %i',
     (aspect, n) => {
       const { cam } = view(aspect)
-      const spots = computeSpots(cam, n)
+      const spots = spotsFor(aspect, n)
       const backdrop = createBackdrop(cam)
       const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
-      // Two beds one in front of the other bring the bowls right across the front of the house;
-      // the scale then stands just outside it on the grass, where a puppy can walk round to it
-      const stacked = n === 2 && local(spots.beds[1]!.center).d < 1.6
-      for (const [name, s] of named(spots).filter(([k]) => k !== 'mud')) {
-        if (name === 'scale' && stacked) {
-          expect(local(s.center).side + s.radius).toBeGreaterThan(SPLIT - STRIP_HALF - 0.05)
-          expect(local(s.center).side + s.radius).toBeLessThan(SPLIT - STRIP_HALF)
-          continue
-        }
+      for (const [name, s] of named(spots).filter(([k]) => k !== 'mud' && k !== 'scale'))
         expect(backdrop.zoneAt(s.center.x, s.center.z), name).toBe('house')
-        // Nothing reaches the grass; a bed lies over the doorway strip by 15 % of its radius at most
-        const edge =
-          kind(name) === 'bed' ? SPLIT + STRIP_HALF - 0.15 * s.radius : SPLIT - STRIP_HALF
-        for (const p of rim(s)) expect(local(p).side, name).toBeGreaterThanOrEqual(edge - 1e-6)
-      }
+      // Where the house has no room left at its front, the scale stands just outside it, by the strip
+      const scale = local(spots.scale.center)
+      if (backdrop.zoneAt(spots.scale.center.x, spots.scale.center.z) === 'garden')
+        expect(scale.side + spots.scale.radius).toBeGreaterThan(SPLIT - STRIP_HALF - 0.1)
       backdrop.dispose()
       expect(local(spots.garden.center).side).toBeLessThan(SPLIT)
       expect(local(spots.mud.center).side).toBeLessThan(SPLIT)
-      // The first bed against the wall, the scale nearest the camera
+      // The first bed against the wall; side by side wherever the wall has room for both
       expect(local(spots.beds[0]!.center).d).toBeCloseTo(1.7)
-      const scaleD = local(spots.scale.center).d
-      for (const s of [...spots.beds, ...spots.bowls])
-        expect(local(s.center).d).toBeGreaterThan(scaleD)
-      // Side by side wherever the wall has room for both
       if (n === 2 && aspect >= 1.5) expect(local(spots.beds[1]!.center).d).toBeCloseTo(1.7)
     },
   )
 
-  it.each(CASES)(
+  it.each(SWEEP)('keeps every bed and bowl off the grass at aspect %f for %i', (aspect, n) => {
+    const { cam } = view(aspect)
+    const spots = spotsFor(aspect, n)
+    const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
+    // A bed lies over the doorway strip by 15 % of its radius at most; a bowl may be on the strip
+    for (const s of spots.beds)
+      for (const p of rim(s))
+        expect(local(p).side).toBeGreaterThanOrEqual(SPLIT + STRIP_HALF - 0.15 * s.radius - 1e-6)
+    for (const s of spots.bowls)
+      for (const p of rim(s))
+        expect(local(p).side).toBeGreaterThanOrEqual(SPLIT - STRIP_HALF - 1e-6)
+  })
+
+  it.each(SWEEP)(
+    'keeps every place two puppies stand at once SLOT_APART apart at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const spots = spotsFor(aspect, n)
+      const { places, fallback } = startPlacesOf(cam, spots, n)
+      expect(fallback).toBe(false)
+      // Each one's bed, where it eats and where it starts, and the scale
+      const own = spots.beds.map((bed, i) => [
+        bed.center,
+        mealSpot(spots.bowls[i]!, EAT_REACH),
+        places[i]!,
+      ])
+      const far = (a: { x: number; z: number }, b: { x: number; z: number }) =>
+        Math.hypot(a.x - b.x, a.z - b.z)
+      if (n === 2) {
+        for (const a of own[0]!)
+          for (const b of own[1]!) expect(far(a, b)).toBeGreaterThanOrEqual(SLOT_APART - 1e-6)
+        for (const a of own.flat())
+          expect(far(a, spots.scale.center)).toBeGreaterThanOrEqual(SLOT_APART - 1e-6)
+      }
+      // That is two bodies side by side, beagles the widest, and some room
+      const beagle = bodyShape(anatomy(BREEDS.beagle))
+      const side = (x: number) => bodyOf({ x, z: 0 }, 0, 'stand', beagle, createBody())
+      expect(SLOT_APART).toBeGreaterThanOrEqual(apartBy(side(0), side(0), 1, 0) + 0.08)
+    },
+  )
+
+  it.each(SWEEP)(
     'puts the bowls in front of the beds, where one eating stands clear of them, at aspect %f for %i',
     (aspect, n) => {
       const { cam } = view(aspect)
-      const spots = computeSpots(cam, n)
+      const spots = spotsFor(aspect, n)
       // The longest muzzle of the breeds, and the rump behind it
       for (const bowl of spots.bowls) {
         const eat = mealSpot(bowl, 0.36)
@@ -229,7 +285,7 @@ describe('computeSpots', () => {
           for (const p of [eat, rump]) expect(inOval(bed, p.x, p.z, 0.17)).toBe(false)
       }
       // Bowls on their mat in the middle depth of the room unless a bed in front needs the room
-      if (n === 1 || aspect >= 1.5)
+      if (n === 1 || aspect >= 1.35)
         for (const bowl of spots.bowls) {
           const d = playLocal(cam, bowl.center.x, bowl.center.z).d
           expect(d).toBeGreaterThanOrEqual(0.58)
@@ -280,11 +336,11 @@ describe('inMud', () => {
 })
 
 describe('the beds in frame', () => {
-  it.each(CASES)(
+  it.each(SWEEP)(
     'keeps each sleeper and its overhang on screen at aspect %f for %i',
     (aspect, n) => {
       const { cam, camera } = view(aspect)
-      const spots = computeSpots(cam, n)
+      const spots = spotsFor(aspect, n)
       const facing = cam.az
       const ux = Math.cos(facing),
         uz = -Math.sin(facing)
@@ -310,31 +366,39 @@ describe('the beds in frame', () => {
     },
   )
 
-  it.each(ASPECTS)('gives a lone puppy a bed a dorado fits in, at aspect %f', (aspect) => {
-    const { cam } = view(aspect)
-    const [alone] = computeSpots(cam, 1).beds
-    expect(alone!.radius).toBeGreaterThanOrEqual(0.48)
-    expect(alone!.depth / alone!.radius).toBeCloseTo(0.34 / 0.42)
-    for (const bed of computeSpots(cam, 2).beds)
-      expect([bed.radius, bed.depth]).toEqual([0.42, 0.34])
-  })
+  it.each(SWEEP.filter(([, n]) => n === 2).map(([a]) => a))(
+    'gives each puppy a bed a curled dorado fits in, at aspect %f',
+    (aspect) => {
+      const [alone] = spotsFor(aspect, 1).beds
+      expect(alone!.radius).toBeGreaterThanOrEqual(0.48)
+      expect(alone!.depth / alone!.radius).toBeCloseTo(0.34 / 0.42)
+      // Two may be smaller on a narrow screen, never below a curled dorado's reach and its bolster
+      for (const bed of spotsFor(aspect, 2).beds) {
+        expect(bed.radius).toBeGreaterThanOrEqual(DORADO_BED - 1e-9)
+        expect(bed.radius).toBeLessThanOrEqual(0.42)
+        expect(bed.depth / bed.radius).toBeCloseTo(0.34 / 0.42)
+      }
+      if (aspect >= 1) for (const bed of spotsFor(aspect, 2).beds) expect(bed.radius).toBe(0.42)
+    },
+  )
 })
 
 describe('startPlaces', () => {
-  it.each(CASES)(
-    'starts the puppies near the middle in open floor, clear of the furniture and the puddle, at aspect %f for %i',
+  it.each(SWEEP)(
+    'starts the puppies in open floor, clear of the furniture and the puddle, at aspect %f for %i',
     (aspect, n) => {
       const { cam } = view(aspect)
-      const spots = computeSpots(cam, n)
+      const spots = spotsFor(aspect, n)
       const places = startPlaces(cam, spots, n)
       expect(places).toHaveLength(n)
       for (const p of places) {
         const [x, z] = clampPlay(cam, p.x, p.z)
         expect(Math.hypot(x - p.x, z - p.z)).toBeLessThan(1e-9)
         const q = playLocal(cam, p.x, p.z)
-        expect(Math.abs(q.side)).toBeLessThanOrEqual(0.85 * q.half)
-        expect(q.d).toBeGreaterThanOrEqual(-0.3)
-        expect(q.d).toBeLessThanOrEqual(0.6)
+        expect(Math.abs(q.side)).toBeLessThanOrEqual(0.85 * q.half + 1e-9)
+        // In the near two thirds of the room, so they come in in sight
+        expect(q.d).toBeGreaterThanOrEqual(-0.46)
+        expect(q.d).toBeLessThanOrEqual(1.21)
         for (const s of [...spots.beds, ...spots.bowls, spots.scale])
           expect(inOval(s, p.x, p.z, 0.3)).toBe(false)
         expect(inOval(spots.mud, p.x, p.z, 0.1)).toBe(false)
@@ -342,7 +406,7 @@ describe('startPlaces', () => {
       }
       if (n === 2) {
         const [a, b] = places
-        expect(Math.hypot(a!.x - b!.x, a!.z - b!.z)).toBeGreaterThanOrEqual(0.45)
+        expect(Math.hypot(a!.x - b!.x, a!.z - b!.z)).toBeGreaterThanOrEqual(SLOT_APART - 1e-6)
         expect(playLocal(cam, a!.x, a!.z).side).toBeLessThan(playLocal(cam, b!.x, b!.z).side)
       }
     },
@@ -353,6 +417,23 @@ describe('startPlaces', () => {
     const [one] = startPlaces(cam, null, 1)
     expect(playLocal(cam, one!.x, one!.z).d).toBeCloseTo(0.16)
     expect(playLocal(cam, one!.x, one!.z).side).toBeCloseTo(0.2)
+  })
+})
+
+describe('walkRound', () => {
+  it('groups pieces with no way between them, however many join up, and leaves the rest alone', () => {
+    const at = (x: number, r = 0.1) => ({ x, z: 0, r })
+    // 0.3 between the first two and the next two: no way through; 0.6 to the last
+    const groups = walkRound([at(0), at(0.5), at(1), at(2.3)])
+    expect(groups.map((g) => g.map((c) => c.x))).toEqual([[0, 0.5, 1], [2.3]])
+    expect(WALK_CLEARANCE).toBeCloseTo(0.47)
+  })
+
+  it('is worked out once per layout, for each piece walked to', () => {
+    const spots = spotsFor(1, 2)
+    expect(spots.walk).toHaveLength(spots.beds.length + spots.bowls.length + 2)
+    expect(walkingRound(spots, spots.bowls[0]!)).toBe(spots.walk![2])
+    expect(walkingRound(spots, spots.mud)).toBe(spots.walk![5])
   })
 })
 

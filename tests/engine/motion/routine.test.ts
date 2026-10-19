@@ -26,6 +26,7 @@ import {
   createRoutineState,
   followBed,
   forgetRoute,
+  giveWay,
   goWeigh,
   holdStill,
   keepsEating,
@@ -149,12 +150,20 @@ function run(
     }
     const ms = pups.map((p) => p.m)
     if (owner) keepOff(ms, owner.m, spots.scale.center.x, spots.scale.center.z, 0.5, clampTo)
+    const bodies = ms.map((m) => bodyOf(m.pos, m.heading, m.pose, SHAPE, createBody()))
     separate(
       ms,
-      ms.map((m) => bodyOf(m.pos, m.heading, m.pose, SHAPE, createBody())),
+      bodies,
       clampTo,
       pups.map((p) => staysPut(p.r)),
       DT,
+    )
+    giveWay(
+      pups.map((p) => p.r),
+      ms,
+      bodies,
+      pups.map((p) => p.r.routine === 'none' && p.m.pose === 'stand' && !p.r.held),
+      c,
     )
     each?.()
   }
