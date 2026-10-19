@@ -168,6 +168,10 @@ describe('attachPointer', () => {
         [],
         {
           hit: () => onPuppy,
+          tapsAt: (x, y, w, h) => {
+            events.push(`tapsAt:${[x, y, w, h].join(',')}`)
+            return mess
+          },
           petStart: () => void events.push('petStart'),
           petMove: () => void events.push('petMove'),
           petEnd: () => void events.push('petEnd'),
@@ -175,19 +179,20 @@ describe('attachPointer', () => {
       ),
     )
     press(canvas, 'pointerdown', 210, 620)
+    press(canvas, 'pointermove', 213, 622)
     press(canvas, 'pointerup', 211, 621)
-    expect(events).toEqual(['petStart', 'tap', 'petEnd'])
-    // A slide is a pat and never asks; a tap with no mess there is left to the puppy
+    expect(events).toEqual(['tapsAt:200,600,400,800', 'tap', 'petEnd'])
+    // A slide is a pat from where it starts and never asks; a tap with no mess there is the puppy's
     events.length = 0
     press(canvas, 'pointerdown', 210, 620)
     press(canvas, 'pointermove', 240, 620)
     press(canvas, 'pointerup', 260, 620)
-    expect(events).toEqual(['petStart', 'petMove', 'petEnd'])
+    expect(events.slice(1)).toEqual(['petStart', 'petMove', 'petEnd'])
     events.length = 0
     mess = false
     press(canvas, 'pointerdown', 210, 620)
     press(canvas, 'pointerup', 211, 621)
-    expect(events).toEqual(['petStart', 'tap', 'petEnd'])
+    expect(events.slice(1)).toEqual(['petStart', 'tap', 'petEnd'])
   })
 
   it('says when a stroke slides off the puppy, and keeps following it back on', () => {

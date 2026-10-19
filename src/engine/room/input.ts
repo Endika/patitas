@@ -107,6 +107,8 @@ export interface PointerHandlers<H extends PuppyHit = PuppyHit> {
    * slide), for the room to use first: true when it did, and it goes no further.
    */
   tap?(x: number, y: number, w: number, h: number): boolean
+  /** Whether `tap` would take a tap there: a press on a puppy there pets only once it slides. */
+  tapsAt?(x: number, y: number, w: number, h: number): boolean
 }
 
 const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
@@ -125,6 +127,12 @@ export function attachPointer<H extends PuppyHit>(
   let samples: Sample[] = []
   let last = { x: 0, y: 0 },
     start = last
+  /** A press on a puppy where a tap is the room's, until it slides into a stroke. */
+  let held: H | null = null
+  const inCanvas = (x: number, y: number) => {
+    const r = canvas.getBoundingClientRect()
+    return [x - r.left, y - r.top, r.width, r.height] as const
+  }
   const cast = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect()
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
@@ -143,7 +151,8 @@ export function attachPointer<H extends PuppyHit>(
     }
     const hit = h.hit(ray)
     mode = pointerMode(false, !!hit)
-    if (hit) h.petStart(hit, now / 1000)
+    held = hit && h.tapsAt?.(...inCanvas(e.clientX, e.clientY)) ? hit : null
+    if (hit && !held) h.petStart(hit, now / 1000)
     h.look(ray, now / 1000)
     canvas.style.cursor = hit ? 'pointer' : 'default'
   }
@@ -155,7 +164,11 @@ export function attachPointer<H extends PuppyHit>(
     if (samples.length > MAX_SAMPLES) samples.shift()
     const ray = cast(e)
     if (mode === 'throw') return
-    if (mode === 'pet') {
+    if (mode === 'pet' && held && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_PX) {
+      h.petStart(h.hit(ray) ?? held, now / 1000)
+      held = null
+    }
+    if (mode === 'pet' && !held) {
       const hit = h.hit(ray)
       if (hit) h.petMove(hit, now / 1000, px)
       else h.petOff?.()
@@ -169,8 +182,7 @@ export function attachPointer<H extends PuppyHit>(
       Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_PX
     )
       return false
-    const r = canvas.getBoundingClientRect()
-    return h.tap(e.clientX - r.left, e.clientY - r.top, r.width, r.height)
+    return h.tap(...inCanvas(e.clientX, e.clientY))
   }
   const up = (e: PointerEvent) => {
     if (mode && !tookTap(e)) {
@@ -189,6 +201,7 @@ export function attachPointer<H extends PuppyHit>(
       )
     }
     mode = null
+    held = null
     h.petEnd()
     canvas.style.cursor = 'default'
   }

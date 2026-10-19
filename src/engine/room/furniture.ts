@@ -44,17 +44,17 @@ export const START_PLACES: readonly (readonly { x: number; z: number; heading?: 
 ]
 
 /**
- * One bed holds one puppy, whether it is alone or not, so a bed keeps its size when a second puppy
- * comes; its long side faces the screen.
+ * One bed holds one puppy; side by side, two beds are a little smaller, and a lone one fits a
+ * curled dorado. Its long side faces the screen.
  */
-const BED = { radius: 0.42, depth: 0.34 },
+const BEDS = { alone: { radius: 0.48, depth: 0.39 }, two: { radius: 0.42, depth: 0.34 } },
   BOWL = { radius: 0.13, depth: 0.13 },
   SCALE = { radius: 0.2, depth: 0.16 }
 
 /** The beds' depth in the play area. */
 const BED_D = 1.7
 /** Centre to centre for beds side by side: a little over 0.1 between their rims. */
-const BED_STEP = 2 * BED.radius + 0.11
+const BED_STEP = 2 * BEDS.two.radius + 0.11
 /**
  * Bowls sit wider apart than their rims need: two puppies eating side by side stay outside each
  * other's personal space (0.45), so neither is pushed off its bowl.
@@ -101,12 +101,13 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     at(d, side * playHalf(cam, d), size)
   // On a narrow screen the beds come in from the edge so the sleepers in them stay in frame
   const frustumHalf = (playAxes(cam).camD + BED_D - SLEEPER.ahead) * cam.tanH
+  const bed = puppies === 1 ? BEDS.alone : BEDS.two
   const beds = row(
     puppies,
     BED_STEP,
     0.55 * playHalf(cam, BED_D),
-    SLEEPER_EDGE * frustumHalf - SLEEPER.reach,
-  ).map((side) => at(BED_D, side, BED))
+    SLEEPER_EDGE * frustumHalf - Math.max(SLEEPER.reach, bed.radius),
+  ).map((side) => at(BED_D, side, bed))
   const bowlD = -0.48,
     half = playHalf(cam, bowlD)
   const bowlSides = row(puppies, BOWL_STEP, -0.8 * half, 0.95 * half)
@@ -306,10 +307,10 @@ function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: numbe
   return m
 }
 
-function bed(shade: THREE.Texture): THREE.Group {
+function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
   const g = new THREE.Group()
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(BED.radius - 0.09, 0.09, 18, 64),
+    new THREE.TorusGeometry(radius - 0.09, 0.09, 18, 64),
     new THREE.MeshStandardMaterial({ color: '#d77d69', roughness: 0.95 }),
   )
   ring.rotation.x = -Math.PI / 2
@@ -320,10 +321,10 @@ function bed(shade: THREE.Texture): THREE.Group {
     new THREE.SphereGeometry(1, 40, 12),
     new THREE.MeshStandardMaterial({ color: '#f3d9cb', roughness: 1 }),
   )
-  pad.scale.set(BED.radius - 0.1, 0.04, 0.8 * (BED.radius - 0.1))
+  pad.scale.set(radius - 0.1, 0.04, 0.8 * (radius - 0.1))
   pad.position.y = 0.025
   pad.receiveShadow = true
-  g.add(ring, pad, contact(shade, BED.radius, BED.depth, 0.35))
+  g.add(ring, pad, contact(shade, radius, depth, 0.35))
   return g
 }
 
@@ -602,7 +603,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   const group = new THREE.Group()
   const shade = contactTexture()
   const spots = computeSpots(cam, puppies)
-  const beds = spots.beds.map(() => bed(shade)),
+  const beds = spots.beds.map((s) => bed(shade, s)),
     bowls = spots.bowls.map(() => bowl(shade)),
     scaleParts = scale(shade),
     gardenG = garden()
