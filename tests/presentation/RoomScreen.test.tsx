@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
-import { createCare } from '@/domain/care'
+import { createCare, health } from '@/domain/care'
 import type { GameStorage } from '@/infrastructure/storage'
 import { createFakePreview, createFakeStage, needs, savingStorage } from './fakeStage'
 
@@ -42,6 +42,17 @@ const ids = async (storage: GameStorage) =>
   new Map((await storage.listPuppies()).map((p) => [p.name, p.id]))
 
 const at = (d: number, h: number) => new Date(2026, 9, d, h).getTime()
+
+/** The page goes to the background or comes back, as a phone does. */
+const hide = (state: 'hidden' | 'visible') => {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+  act(() => void document.dispatchEvent(new Event('visibilitychange')))
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+})
 
 const roster = async () =>
   // React 19 holds a Suspense fallback at least 300 ms before showing the lazy screen
@@ -284,6 +295,80 @@ describe('RoomScreen', () => {
     expect(stage.names()).toEqual(['Kira'])
   })
 
+  it('saves every 30 s while shown, once as it hides, and catches up 3 days on return', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const storage = await adopted(['Luna'])
+    const luna = (await ids(storage)).get('Luna')!
+    await storage.saveCare(luna, createCare(BREEDS.beagle, at(15, 12)))
+    let now = at(15, 12)
+    const stage = start(storage, {
+      stage: createFakeStage(() => ({ x: 0, z: 0.5 })),
+      now: () => now,
+    })
+    await waitFor(() => expect(stage.arrived).toHaveLength(1))
+    const saved = async () => (await storage.loadCare(luna))!
+
+    stage.hold(luna, { ...stage.arrived[0]!.care, hunger: 0.2 })
+    now = at(15, 12) + 30_000
+    act(() => vi.advanceTimersByTime(30_000))
+    await waitFor(async () => expect((await saved()).lastSeen).toBe(now))
+
+    hide('hidden')
+    await waitFor(async () => expect((await saved()).lastSeen).toBe(at(15, 12) + 30_000))
+    // Nothing more is saved while hidden, so the absence stays on record
+    now = at(16, 12)
+    act(() => vi.advanceTimersByTime(120_000))
+    await new Promise((r) => setTimeout(r, 20))
+    expect((await saved()).lastSeen).toBe(at(15, 12) + 30_000)
+
+    now = at(18, 12) + 30_000
+    hide('visible')
+    expect(stage.calls).toContain(`resume:${3 * 24 * 3_600_000}`)
+    await waitFor(async () => expect((await saved()).lastSeen).toBe(now))
+    const back = await saved()
+    expect(back.hunger).toBeCloseTo(0.85)
+    expect(back.messes).toHaveLength(2)
+    expect(back.cleanliness).toBeCloseTo(1 - 0.275 - 0.06)
+    expect(health(back, BREEDS.beagle)).toBe('Bien')
+  })
+
+  it('saves the care of every puppy when the room closes', async () => {
+    const storage = await adopted(['Luna'])
+    const luna = (await ids(storage)).get('Luna')!
+    const stage = createFakeStage()
+    const { unmount } = render(
+      <App
+        openStorage={async () => storage}
+        createStage={stage.create}
+        createPreview={createFakePreview().create}
+        now={() => at(18, 9)}
+      />,
+    )
+    await waitFor(() => expect(stage.arrived).toHaveLength(1))
+    stage.hold(luna, { ...stage.arrived[0]!.care, energy: 0.33 })
+    unmount()
+    await waitFor(async () => expect((await storage.loadCare(luna))?.energy).toBe(0.33))
+  })
+
+  it('tells the player when the care could not be loaded, and the room still plays', async () => {
+    const storage = await adopted(['Luna'])
+    const broken: GameStorage = {
+      ...storage,
+      loadCare: () => Promise.reject(new Error('IDB down')),
+      saveCare: () => Promise.reject(new Error('IDB down')),
+    }
+    const user = userEvent.setup()
+    const stage = start(broken)
+    expect(await screen.findByText('No se han podido cargar los cuidados.')).toBeInTheDocument()
+    await waitFor(() => expect(stage.names()).toEqual(['Luna']))
+    expect(stage.arrived[0]!.care.hunger).toBe(0.3)
+    // Saves fail quietly: leaving and hiding do not throw
+    hide('hidden')
+    hide('visible')
+    await user.click((await roster()).getByRole('button', { name: 'Sacar a Luna' }))
+    await waitFor(() => expect(stage.names()).toEqual([]))
+  })
+
   it('keeps the care of every puppy when the app is hidden', async () => {
     const storage = await adopted(['Luna'])
     const luna = (await ids(storage)).get('Luna')!
@@ -291,9 +376,8 @@ describe('RoomScreen', () => {
     await waitFor(() => expect(stage.arrived).toHaveLength(1))
     stage.hold(luna, { ...stage.arrived[0]!.care, happiness: 0.77 })
 
-    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
-    act(() => void document.dispatchEvent(new Event('visibilitychange')))
-    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    hide('hidden')
+    hide('visible')
 
     await waitFor(async () => expect((await storage.loadCare(luna))?.happiness).toBe(0.77))
     expect((await storage.loadCare(luna))?.lastSeen).toBe(at(18, 9))

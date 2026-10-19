@@ -46,16 +46,18 @@ const inOval = (s: Spots['garden'], x: number, z: number, grow: number) => {
 /**
  * Where an accident while away lands: a random spot of open floor in the play area, clear of the
  * beds, bowls and scale, of the garden and its puddle, and of the messes already there. One placer
- * for every puppy in the room keeps their messes apart too.
+ * for every puppy in the room keeps their messes apart too, and `around` are those any puppy
+ * already left on the floor.
  */
 export function placeAccident(
   cam: FixedCamera,
   spots: Spots,
   random: () => number = Math.random,
+  around: readonly Pick<Mess, 'x' | 'z'>[] = [],
 ): PlaceAccident {
   const tmp = new THREE.Vector3(),
     other = new THREE.Vector3()
-  const placed: { x: number; z: number }[] = []
+  const placed = around.map(({ x, z }) => ({ x, z }))
   return (kind, taken) => {
     const r = MESS_R[kind]
     for (let n = 0; n < TRIES; n++) {

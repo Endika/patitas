@@ -2,7 +2,14 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '@/domain/breeds'
-import { addMess, createCare, MESS_GLOOM_MAX, type Care, type MessKind } from '@/domain/care'
+import {
+  addMess,
+  createCare,
+  HAPPINESS_DRIFT_PER_HOUR,
+  MESS_GLOOM_MAX,
+  type Care,
+  type MessKind,
+} from '@/domain/care'
 import { legRigs } from '@/engine/motion/ik'
 import {
   createLegStates,
@@ -301,7 +308,7 @@ describe('stepRoutine', () => {
     expect(stepRoutine(awake.r, awake.m, day, 60).care.energy).toBe(0.5)
   })
 
-  it('gets hungry awake or asleep and loses a little weight on the move, every few seconds', () => {
+  it('gets hungry, settles its mood and loses a little weight on the move, every few seconds', () => {
     const sleeper = pup(0, 0, 0.5, 0.3)
     tuckIn(sleeper.r, sleeper.m)
     const night = { ...base, now: at(23), care: sleeper.care, spots: SPOTS, place: 0, bowl: 0 }
@@ -310,6 +317,8 @@ describe('stepRoutine', () => {
     expect(
       stepRoutine(sleeper.r, sleeper.m, { ...night, care: once }, 3599).care.hunger,
     ).toBeCloseTo(0.42)
+    const glad = { ...night, care: { ...once, happiness: 1 } }
+    expect(stepRoutine(sleeper.r, sleeper.m, glad, 3600).care.happiness).toBeCloseTo(0.95)
     const walker = pup(0, 0, 0.8, 0.3)
     walker.m.speed = 0.3
     const day = { ...night, now: at(12), care: walker.care }
@@ -745,7 +754,9 @@ describe('pee and poop', () => {
     run([p], 60, at(12))
     expect(p.care.happiness).toBeLessThan(0.8)
     run([p], 1200, at(12))
-    expect(p.care.happiness).toBeCloseTo(0.8 - MESS_GLOOM_MAX)
+    // Besides easing back toward one half over the 21 min
+    const settled = (HAPPINESS_DRIFT_PER_HOUR * 1260) / 3600
+    expect(p.care.happiness).toBeCloseTo(0.8 - MESS_GLOOM_MAX - settled)
   })
 })
 

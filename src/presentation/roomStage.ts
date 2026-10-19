@@ -59,8 +59,16 @@ export interface RoomStage {
   setPuppies(puppies: Puppy[], cares?: ReadonlyMap<string, Care>): void
   /** The care of each puppy in the room as it is now, by id, those still loading included. */
   cares(): Map<string, Care>
-  /** One placer for the accidents of `count` puppies coming in together, kept apart. */
+  /**
+   * One placer for the accidents of `count` puppies caught up together: kept apart from each
+   * other and from every mess already on the floor.
+   */
   placeAccidents(count: number): PlaceAccident | undefined
+  /**
+   * Back after `away` milliseconds with the app hidden: each puppy in `cares` takes its caught-up
+   * care and its coat shows it; at night, after a while away, they are found asleep in their beds.
+   */
+  resume(cares: ReadonlyMap<string, Care>, away: number): void
   takeBall(): void
   stowBall(): void
   trick(pose: TrickPose): void

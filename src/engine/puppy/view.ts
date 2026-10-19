@@ -4,6 +4,7 @@ import {
   addMess,
   cheer,
   createCare,
+  messPenalty,
   weightStatus,
   type Care,
   type WeightStatus,
@@ -21,6 +22,7 @@ import {
   createLegStates,
   createMotionState,
   goTo,
+  restWorld,
   stepLocomotion,
   type BodyPose,
   type LegState,
@@ -35,7 +37,9 @@ import {
   letGo,
   stepRoutine,
   touch,
+  tuckIn,
   weighing,
+  type BedSlot,
   type RoutineState,
 } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
@@ -81,7 +85,15 @@ import {
   type BehaviourState,
 } from './behaviour'
 import { RIM } from './coat'
-import { dirtRest, messDepth, mudDepth, stepDirt, type DirtRest, type Underfoot } from './dirt'
+import {
+  dirtRest,
+  messDepth,
+  mudDepth,
+  redistributeDirt,
+  stepDirt,
+  type DirtRest,
+  type Underfoot,
+} from './dirt'
 import { eyeTexture, lidGeometry, makeTongue, noseGeometry, shapeTongue } from './face'
 import type { PuppyGeometry } from './geometry'
 import {
@@ -587,10 +599,77 @@ export function bathe(view: PuppyView): boolean {
 }
 
 /** «Terminar»: out of the bath, still wet as it is, and free again. */
-export function finishBath(view: PuppyView): void {
+export function finishBath(view: Pick<PuppyView, 'bath' | 'routine' | 'coatTouch'>): void {
   endBath(view.bath)
   letGo(view.routine)
   view.coatTouch = null
+}
+
+/**
+ * Stops playing ball where it is: a ball in its mouth drops to the floor, and one it was after
+ * rolls on for whoever wants it.
+ */
+export function dropFetch(view: Pick<PuppyView, 'fetch' | 'motion'>, ball: BallState): void {
+  const f = view.fetch
+  if (f.holding) {
+    ball.state = 'air'
+    ball.vel.set(0, 0, 0)
+  }
+  f.task = 'free'
+  f.holding = f.wading = false
+  view.motion.goal = null
+  view.motion.face = null
+}
+
+/**
+ * Found asleep in its bed after a night away, whatever it was doing when the app was put aside:
+ * out of its bath or brushing, the ball in its mouth put away.
+ */
+export function putToBed(
+  view: Pick<PuppyView, 'bath' | 'brush' | 'coatTouch' | 'fetch' | 'legs' | 'motion' | 'routine'>,
+  slot: BedSlot,
+  ball: BallState,
+): void {
+  if (view.bath.phase !== 'off') finishBath(view)
+  if (view.brush.on) stopBrushing(view)
+  const held = view.fetch.holding
+  dropFetch(view, ball)
+  if (held) ball.state = 'none'
+  view.routine.weigh = false
+  const m = view.motion
+  m.pos.set(slot.x, 0, slot.z)
+  m.heading = slot.heading
+  m.speed = 0
+  for (const L of view.legs) {
+    restWorld(L.rig, L.planted, m.pos, m.heading)
+    L.land.copy(L.planted)
+    L.pos.copy(L.planted)
+    L.swinging = false
+    L.s = 0
+  }
+  tuckIn(view.routine, m, slot.side)
+}
+
+/** Below this change in its dirt, time away leaves the mud where the coat shows it. */
+const DIRT_SHOWN = 0.005
+
+/**
+ * Its care caught up after time with the app hidden: the coat takes on the dirt it gathered,
+ * spread from the paws up, and dries as far as the care has.
+ */
+export function showCare(view: Pick<PuppyView, 'care' | 'coat'>, care: Care): void {
+  const { coat } = view
+  const was = 1 - view.care.cleanliness - messPenalty(view.care),
+    now = 1 - care.cleanliness - messPenalty(care)
+  if (Math.abs(now - was) > DIRT_SHOWN) {
+    redistributeDirt(coat.dirt.field, coat.dirt.rest, now)
+    coat.dirty = true
+  }
+  if (care.wet < view.care.wet) {
+    for (let i = 0; i < coat.wet.length; i++) coat.wet[i] = Math.min(coat.wet[i]!, care.wet)
+    coat.dirty = true
+  }
+  view.care = care
 }
 
 /** Neither in the middle of a game of ball nor held for its coat: the ball goes back in hand. */

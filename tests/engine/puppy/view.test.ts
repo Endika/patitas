@@ -6,18 +6,22 @@ import { createCare } from '@/domain/care'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
-import { createRoutineState, holdStill, tuckIn, weighing } from '@/engine/motion/routine'
+import { bedSlots, createRoutineState, holdStill, tuckIn, weighing } from '@/engine/motion/routine'
 import { createBehaviourState } from '@/engine/puppy/behaviour'
-import { beginBath, createBath } from '@/engine/room/bath'
+import { beginBath, createBath, createCoat } from '@/engine/room/bath'
 import { createBrush } from '@/engine/room/brush'
 import { createCamera, fitCamera } from '@/engine/room/camera'
 import { computeSpots } from '@/engine/room/furniture'
 import { createLegStates } from '@/engine/motion/locomotion'
+import { dirtRest, meanDirt } from '@/engine/puppy/dirt'
 import { legRigs } from '@/engine/motion/ik'
 import { anatomy } from '@/engine/puppy/anatomy'
 import {
   brushPuppy,
   cheerUp,
+  dropFetch,
+  putToBed,
+  showCare,
   coatWork,
   disposeOwn,
   hitCoat,
@@ -285,5 +289,93 @@ describe('cheerUp', () => {
     v.behaviour.happy = 0.9
     cheerUp(v)
     expect(v.care.happiness).toBeCloseTo(0.515)
+  })
+})
+
+describe('dropFetch', () => {
+  it('lets go of a ball it was bringing back and is free at once', () => {
+    const fetch = createFetchState(),
+      motion = createMotionState(),
+      ball = createBall()
+    fetch.task = 'return'
+    fetch.holding = true
+    ball.state = 'mouth'
+    motion.goal = new THREE.Vector3(1, 0, 1)
+    dropFetch({ fetch, motion }, ball)
+    expect([fetch.task, fetch.holding, ball.state, motion.goal]).toEqual([
+      'free',
+      false,
+      'air',
+      null,
+    ])
+  })
+
+  it('gives up a chase and leaves the ball rolling', () => {
+    const fetch = createFetchState(),
+      ball = createBall()
+    fetch.task = 'chase'
+    ball.state = 'air'
+    dropFetch({ fetch, motion: createMotionState() }, ball)
+    expect([fetch.task, ball.state]).toEqual(['free', 'air'])
+  })
+})
+
+describe('putToBed', () => {
+  it('carries a puppy in its bath with the ball to its bed, asleep, the ball put away', () => {
+    const A = anatomy(BREEDS.shiba)
+    const motion = createMotionState()
+    motion.pos.set(-0.4, 0, 0.6)
+    const v = {
+      motion,
+      legs: createLegStates(legRigs(A), motion),
+      fetch: createFetchState(),
+      routine: createRoutineState(),
+      bath: createBath(),
+      brush: createBrush(),
+      coatTouch: null,
+    }
+    beginBath(v.bath)
+    holdStill(v.routine, motion, 'bathing')
+    v.fetch.holding = true
+    const ball = createBall()
+    ball.state = 'mouth'
+    const slot = bedSlots(computeSpots(fitCamera(createCamera(), 0.46), 1))[0]!
+    putToBed(v, slot, ball)
+    expect([v.routine.routine, motion.pose, v.bath.phase, ball.state]).toEqual([
+      'sleeping',
+      'sleep',
+      'off',
+      'none',
+    ])
+    expect([motion.pos.x, motion.pos.z, motion.heading]).toEqual([slot.x, slot.z, slot.heading])
+    for (const L of v.legs) expect(Math.hypot(L.pos.x - slot.x, L.pos.z - slot.z)).toBeLessThan(0.6)
+  })
+})
+
+describe('showCare', () => {
+  // A column of fur from the floor up: dirt settles from the bottom
+  const n = 200
+  const position = new Float32Array(n * 3).map((_, i) => (i % 3 === 1 ? Math.floor(i / 3) / n : 0))
+  const normal = new Float32Array(n * 3).map((_, i) => (i % 3 === 0 ? 1 : 0))
+  const rest = dirtRest(position, normal, [0, 2, 0])
+  const shown = (care = createCare(BREEDS.shiba, 0)) => ({ care, coat: createCoat(rest, care) })
+
+  it('spreads the dirt and dries the coat to match a care caught up after time away', () => {
+    const v = shown({ ...createCare(BREEDS.shiba, 0), wet: 0.8 })
+    v.coat.wet.fill(0.8)
+    const back = { ...v.care, cleanliness: 0.7, wet: 0 }
+    showCare(v, back)
+    expect(v.care).toBe(back)
+    expect(meanDirt(v.coat.dirt.field)).toBeCloseTo(0.3, 2)
+    expect(Math.max(...v.coat.wet)).toBe(0)
+    expect(v.coat.dirty).toBe(true)
+  })
+
+  it('keeps the dirt where it is when time away barely changed it', () => {
+    const v = shown()
+    v.coat.dirt.field[0] = 0.5
+    const before = Float32Array.from(v.coat.dirt.field)
+    showCare(v, { ...v.care, cleanliness: 0.999, hunger: 0.9 })
+    expect(v.coat.dirt.field).toEqual(before)
   })
 })
