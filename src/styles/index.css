@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 
+@custom-variant phone-landscape (@media (orientation: landscape) and (max-height: 540px));
+
 @theme {
   --color-ground: #e6eeeb;
   --color-ground-low: #c9d8d3;
