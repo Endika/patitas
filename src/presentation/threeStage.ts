@@ -52,7 +52,7 @@ import {
   START_PLACES,
 } from '@/engine/room/furniture'
 import { createMessLayer, placeAccident } from '@/engine/room/messes'
-import { createSelectRing, ringRadius } from '@/engine/room/selectRing'
+import { createSelectRing, syncRing } from '@/engine/room/selectRing'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS, hintText, NIGHT_HINT } from './hints'
 import { needsBeat } from './needsBeat'
@@ -213,15 +213,6 @@ export function createThreeStage(
   const inBath = () => views.find((v) => v.bath.phase !== 'off')
   /** The puppy being brushed, if any: one at a time, and not while another is bathed. */
   const brushed = () => views.find((v) => v.brush.on)
-  /** The ring under the chosen puppy, or nowhere: bathing and brushing already single one out. */
-  const syncRing = () => {
-    const v = chosen === null || views.length < 2 ? undefined : views[chosen]
-    let busy = false
-    for (const w of views) busy ||= w.bath.phase !== 'off' || w.brush.on
-    if (!v || busy) return ring.hide()
-    const { chest, rump } = v.body
-    ring.follow((chest.x + rump.x) / 2, (chest.z + rump.z) / 2, ringRadius(v.shape))
-  }
   const mood = (v: PuppyView) => ({
     happy: v.behaviour.happy,
     energy: v.persona.energy,
@@ -376,7 +367,7 @@ export function createThreeStage(
     })
     baths.sync(views, dt, room.camera.position)
     brushes.sync(views, dt, room.camera)
-    syncRing()
+    syncRing(ring, views, chosen)
     const onScale = views.find((w) => w.routine.routine === 'onScale')
     showScale(scaleDisplay, room.furniture, onScale ? onScale.care.weightKg : null, dt)
     messes.begin()
