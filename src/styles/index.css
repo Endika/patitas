@@ -15,3 +15,9 @@
   --font-display: 'Trebuchet MS', system-ui, sans-serif;
   --font-sans: 'Segoe UI', system-ui, sans-serif;
 }
+
+/* A pull past the edge must not refresh the page or swipe it away mid-game */
+html,
+body {
+  overscroll-behavior: none;
+}
