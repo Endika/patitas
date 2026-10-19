@@ -1,7 +1,7 @@
 import type { Vec3 } from '@/engine/math'
 import type { FetchState } from '@/engine/motion/fetch'
 import type { MotionState } from '@/engine/motion/locomotion'
-import { keepApart, type ClampTo } from './apart'
+import { APART_STEP, keepApart, type ClampTo } from './apart'
 import type { BallState } from './ball'
 import { sphereAt, SPHERES, type Body } from './bodies'
 
@@ -60,7 +60,8 @@ function move(p: Vec3, dx: number, dz: number, clamp?: ClampTo): number {
 
 /**
  * Keeps everyone but `owner` out of the circle of radius `r` round (x, z), and their goals with
- * them: the scale while one puppy is weighed.
+ * them: the scale while one puppy is weighed. A puppy is moved at most APART_STEP a frame, as by
+ * `keepApart`, so weighing starting never jumps one; its goal is moved in full.
  */
 export function keepOff(
   states: readonly MotionState[],
@@ -72,18 +73,19 @@ export function keepOff(
 ): void {
   for (const s of states) {
     if (s === owner) continue
-    out(s.pos, x, z, r, clamp)
+    out(s.pos, x, z, r, clamp, APART_STEP)
     if (s.goal) out(s.goal, x, z, r, clamp)
   }
 }
 
-function out(p: Vec3, x: number, z: number, r: number, clamp?: ClampTo) {
+function out(p: Vec3, x: number, z: number, r: number, clamp?: ClampTo, most = Infinity) {
   const dx = p.x - x,
     dz = p.z - z,
     d = Math.hypot(dx, dz)
   if (d >= r) return
-  if (d > 1e-6) move(p, (dx / d) * (r - d), (dz / d) * (r - d), clamp)
-  else move(p, r, 0, clamp)
+  const by = Math.min(r - d, most)
+  if (d > 1e-6) move(p, (dx / d) * by, (dz / d) * by, clamp)
+  else move(p, by, 0, clamp)
 }
 
 /** How far to each side of the line from a chaser to the ball a body still stands in the way. */

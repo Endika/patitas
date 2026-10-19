@@ -87,10 +87,26 @@ describe('keepOff', () => {
     far.pos.set(-1, 0, 0)
     keepOff([on, other, far], on, 0.5, 0.5, 0.5)
     expect(on.pos.toArray()).toEqual([0.5, 0, 0.5])
-    expect(other.pos.x).toBeCloseTo(1)
+    expect(other.pos.x).toBeCloseTo(0.6 + APART_STEP)
     expect(other.pos.z).toBeCloseTo(0.5)
     expect(Math.hypot(other.goal.x - 0.5, other.goal.z - 0.5)).toBeCloseTo(0.5)
     expect(far.pos.toArray()).toEqual([-1, 0, 0])
+  })
+
+  it('moves a puppy in the circle out a step a frame, never a jump', () => {
+    const on = createMotionState(),
+      other = createMotionState()
+    on.pos.set(0.5, 0, 0.5)
+    other.pos.set(0.6, 0, 0.5)
+    let frames = 0
+    for (; frames < 40; frames++) {
+      const before = other.pos.clone()
+      keepOff([on, other], on, 0.5, 0.5, 0.5)
+      expect(other.pos.distanceTo(before)).toBeLessThanOrEqual(APART_STEP + 1e-9)
+      if (other.pos.distanceTo(before) === 0) break
+    }
+    expect(Math.hypot(other.pos.x - 0.5, other.pos.z - 0.5)).toBeCloseTo(0.5)
+    expect(frames).toBeGreaterThan(1)
   })
 })
 

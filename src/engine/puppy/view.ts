@@ -1153,10 +1153,6 @@ export function throwBall(
 }
 
 /**
- * Asks for a trick; only while the puppy is not playing ball or deep in a meal. A sleeping one
- * wakes instead.
- */
-/**
  * A tap on the floor at (x, z): the puppy at `index` comes over, or the only one in the room,
  * unless it is busy where it is.
  */
@@ -1173,6 +1169,10 @@ export function callOver<V extends Pick<PuppyView, 'motion' | 'routine' | 'behav
   v.behaviour.perk = 1
 }
 
+/**
+ * Asks for a trick; only while the puppy is not playing ball or deep in a meal. A sleeping one
+ * wakes instead.
+ */
 export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
   if (
     touch(view.routine) ||

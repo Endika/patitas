@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { PuppyView } from '@/engine/puppy/view'
 import type { BodyShape } from './bodies'
 
 /** The HUD's accent, so the ring reads as the controls' target. */
@@ -53,4 +54,24 @@ export function createSelectRing(scene: THREE.Scene): SelectRing {
       material.dispose()
     },
   }
+}
+
+/** What the ring needs of a puppy. */
+export type RingView = Pick<PuppyView, 'body' | 'shape' | 'bath' | 'brush'>
+
+/**
+ * Puts the ring under the puppy at `chosen`, or hides it: with fewer than two puppies there is
+ * nobody to tell apart, bathing and brushing already single one out, and a null or out-of-range
+ * index points at no one.
+ */
+export function syncRing(ring: SelectRing, views: readonly RingView[], chosen: number | null) {
+  let busy = false
+  for (let i = 0; i < views.length; i++) {
+    const w = views[i]!
+    busy ||= w.bath.phase !== 'off' || w.brush.on
+  }
+  const v = chosen === null || views.length < 2 ? undefined : views[chosen]
+  if (!v || busy) return ring.hide()
+  const { chest, rump } = v.body
+  ring.follow((chest.x + rump.x) / 2, (chest.z + rump.z) / 2, ringRadius(v.shape))
 }
