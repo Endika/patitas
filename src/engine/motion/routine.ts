@@ -163,6 +163,8 @@ const KEEP_EATING = 0.6
 /** Leaning in over the bowl to eat. */
 const EAT_BOW = 0.6
 const FACED = 0.08
+/** Turning slower than this, in radians a second, it has settled. */
+const SETTLED = 0.3
 /** At most one wander into the mud this often, and only after this long without a touch. */
 export const MUD_EVERY = 120
 const MUD_IDLE = 20
@@ -349,6 +351,41 @@ export function forgetRoute(r: RoutineState, m: MotionState): void {
 }
 
 /**
+ * The pieces as one walks round them: two with no room for a puppy between them, as the bowls on
+ * their mat, count as one circle round both. Each piece pairs up once, the closest pairs first, so
+ * a whole room never becomes one circle.
+ */
+export function walkRound(circles: readonly Circle[]): Circle[] {
+  const pairs: [number, number, number][] = []
+  for (let i = 0; i < circles.length; i++)
+    for (let j = i + 1; j < circles.length; j++) {
+      const a = circles[i]!,
+        b = circles[j]!
+      const gap = Math.hypot(b.x - a.x, b.z - a.z) - a.r - b.r
+      if (gap < 2 * BODY_CLEARANCE) pairs.push([gap, i, j])
+    }
+  pairs.sort((p, q) => p[0] - q[0])
+  const used = new Set<number>(),
+    out: Circle[] = []
+  for (const [, i, j] of pairs) {
+    if (used.has(i) || used.has(j)) continue
+    used.add(i).add(j)
+    const a = circles[i]!,
+      b = circles[j]!
+    const d = Math.hypot(b.x - a.x, b.z - a.z),
+      r = Math.max(a.r, b.r, (d + a.r + b.r) / 2)
+    if (r === a.r) out.push(a)
+    else if (r === b.r) out.push(b)
+    else {
+      const k = (r - a.r) / d
+      out.push({ x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, r })
+    }
+  }
+  circles.forEach((c, i) => used.has(i) || out.push(c))
+  return out
+}
+
+/**
  * The next point to walk to: straight to `to`, or round the side of the first circle in the way,
  * the side the path leans to unless the edge of the play area leaves no way round there.
  */
@@ -398,7 +435,9 @@ export function approach(r: RoutineState, m: MotionState, ctx: RoutineCtx, spot:
   const way = detour(
     m.pos,
     r.target,
-    furnitureObstacles(ctx.spots).filter((c) => c.x !== spot.center.x || c.z !== spot.center.z),
+    walkRound(
+      furnitureObstacles(ctx.spots).filter((c) => c.x !== spot.center.x || c.z !== spot.center.z),
+    ),
     ctx.clamp,
     r.around,
   )
@@ -488,6 +527,8 @@ const toBowl: Step = (r, m, ctx) => {
   }
   if (m.pose !== 'stand') setPose(m, 'stand')
   if (!approach(r, m, ctx, bowl) || !faceTarget(r, m)) return
+  // Come round from behind it, it eats once settled, not still swinging past the bowl
+  if (!r.beg && Math.abs(m.yawRate) > SETTLED) return
   if (!r.beg) return enter(r, 'eating')
   // The pause counts from here too, so a beg cut short by play does not start again at once
   r.begAgo = 0

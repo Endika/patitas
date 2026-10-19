@@ -49,7 +49,7 @@ import {
   createScaleDisplay,
   formatKg,
   showScale,
-  START_PLACES,
+  startPlaces,
 } from '@/engine/room/furniture'
 import { createMessLayer, placeAccident } from '@/engine/room/messes'
 import { createSelectRing, syncRing } from '@/engine/room/selectRing'
@@ -259,7 +259,7 @@ export function createThreeStage(
     if (disposed) return
     const spots = room.furniture?.spots
     const beds = spots && isNight(clock()) ? bedSlots(spots) : null
-    const places = beds ?? START_PLACES[wanted.length - 1] ?? []
+    const places = beds ?? startPlaces(room.cam, spots ?? null, wanted.length > 1 ? 2 : 1)
     let added = false
     wanted.forEach((p, i) => {
       if (mounted.has(p.id)) return

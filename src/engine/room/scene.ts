@@ -5,7 +5,8 @@ import { createBackdrop } from './backdrop'
 import { BALL_R, type BallState } from './ball'
 import { cameraPosition, clampPlay, createCamera, fitCamera, type FixedCamera } from './camera'
 import { createFpsMeter } from './fpsMeter'
-import { addFurniture, type Furniture } from './furniture'
+import type { Furniture } from './furniture'
+import { addFurniture } from './furnitureModels'
 
 /** Render budget: fur shells per puppy, device pixel ratio cap and shadow map size. */
 export interface Quality {
@@ -331,7 +332,7 @@ export function createRoomScene(
     camera.lookAt(cam.target)
     camera.updateMatrixWorld()
     room.furniture?.layout(cam)
-    backdrop.layout(cam, room.furniture?.spots.mud)
+    backdrop.layout(cam, room.furniture?.spots.mud, room.furniture?.spots.beds)
     for (const cb of resizeListeners) cb()
   }
 
@@ -390,7 +391,7 @@ export function createRoomScene(
       if (!room.furniture || room.furniture.puppies === puppies) return false
       room.furniture.dispose()
       room.furniture = addFurniture(scene, cam, puppies)
-      backdrop.layout(cam, room.furniture.spots.mud)
+      backdrop.layout(cam, room.furniture.spots.mud, room.furniture.spots.beds)
       return true
     },
     add(view) {
