@@ -54,9 +54,23 @@ afterEach(() => {
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
 })
 
-const roster = async () =>
+/** Every adopted puppy, behind «Cachorros» unless the room is empty. */
+const roster = async () => {
+  const list = () => screen.queryByRole('list', { name: 'Tus cachorros' })
   // React 19 holds a Suspense fallback at least 300 ms before showing the lazy screen
-  within(await screen.findByRole('list', { name: 'Tus cachorros' }, { timeout: 3000 }))
+  await waitFor(
+    () => expect(list() ?? screen.queryByRole('button', { name: 'Cachorros' })).toBeTruthy(),
+    { timeout: 3000 },
+  )
+  if (!list()) await userEvent.click(screen.getByRole('button', { name: 'Cachorros' }))
+  return within(list()!)
+}
+
+/** Opens «Cuidar» and chooses `action` in it. */
+const care = async (user: ReturnType<typeof userEvent.setup>, action: string) => {
+  await user.click(await screen.findByRole('button', { name: 'Cuidar' }))
+  await user.click(screen.getByRole('button', { name: action }))
+}
 
 beforeAll(() => import('@/presentation/screens/RoomScreen'))
 
@@ -72,7 +86,8 @@ describe('RoomScreen', () => {
     expect(screen.getByRole('heading', { name: 'Luna y Kira' })).toBeInTheDocument()
 
     const enterToby = list.getByRole('button', { name: 'Meter a Toby' })
-    expect(enterToby).toHaveTextContent('Meter a Toby')
+    // The chip already shows the name, so the button only shows the verb
+    expect(enterToby).toHaveTextContent(/^Meter$/)
     await user.click(enterToby)
     expect(
       await screen.findByText('Ya hay dos cachorros en la sala. Saca uno para que entre otro.'),
@@ -100,8 +115,10 @@ describe('RoomScreen', () => {
     expect(await screen.findByText('¡Allá va!')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Guardar la pelota' }))
 
-    for (const label of ['Sentado', 'Tumbado', 'Panza arriba'])
+    for (const label of ['Sentado', 'Tumbado', 'Panza arriba']) {
+      await user.click(screen.getByRole('button', { name: 'Trucos' }))
       await user.click(screen.getByRole('button', { name: label }))
+    }
     expect(stage.calls).toEqual(['takeBall', 'stowBall', 'trick:sit', 'trick:lie', 'trick:belly'])
   })
 
@@ -110,7 +127,8 @@ describe('RoomScreen', () => {
     const storage = await adopted(['Luna'])
     start(storage)
 
-    await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))
+    await roster()
+    await user.click(screen.getByRole('button', { name: 'Adoptar otro' }))
     await user.type(screen.getByLabelText('Nombre'), 'Kira')
     await user.click(screen.getByRole('button', { name: 'Adoptar' }))
 
@@ -123,7 +141,8 @@ describe('RoomScreen', () => {
     const storage = await adopted(['Luna', 'Kira'])
     const stage = start(storage)
 
-    await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))
+    await roster()
+    await user.click(screen.getByRole('button', { name: 'Adoptar otro' }))
     await user.type(screen.getByLabelText('Nombre'), 'Toby')
     await user.click(screen.getByRole('button', { name: 'Adoptar' }))
 
@@ -150,7 +169,8 @@ describe('RoomScreen', () => {
         />
       </StrictMode>,
     )
-    await user.click(await screen.findByRole('button', { name: 'Adoptar otro' }))
+    await roster()
+    await user.click(screen.getByRole('button', { name: 'Adoptar otro' }))
     await user.click(screen.getByRole('button', { name: 'Volver a la sala' }))
     await screen.findByRole('heading', { name: 'Luna' })
 
@@ -173,12 +193,14 @@ describe('RoomScreen', () => {
     const stage = start(storage)
     stage.emit({ needs: [needs(luna, 'Luna')] })
 
-    await user.click(await screen.findByRole('button', { name: 'Comida' }))
-    await user.click(screen.getByRole('button', { name: 'Baño' }))
+    await care(user, 'Comida')
+    await care(user, 'Baño')
     expect(stage.calls).toEqual(['feed:0', 'bath:0'])
 
+    // In the bath, its controls are the only ones
     act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'bath', bath: 'scrub' })] }))
-    expect(screen.queryByRole('button', { name: 'Comida' })).not.toBeInTheDocument()
+    for (const name of ['Cuidar', 'Trucos', 'Sacar la pelota'])
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Aclarar' }))
     act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'bath', bath: 'rinsed' })] }))
     expect(screen.queryByRole('button', { name: 'Aclarar' })).not.toBeInTheDocument()
@@ -187,22 +209,27 @@ describe('RoomScreen', () => {
     expect(stage.calls.slice(2)).toEqual(['rinse', 'dryer', 'finishBath'])
 
     act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
-    await user.click(screen.getByRole('button', { name: 'Cepillo' }))
+    await care(user, 'Cepillo')
     act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'brush' })] }))
+    expect(screen.queryByRole('button', { name: 'Cuidar' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Terminar' }))
     act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
-    await user.click(screen.getByRole('button', { name: 'Pesar' }))
+    await care(user, 'Pesar')
     expect(stage.calls.slice(5)).toEqual(['brush:0', 'endBrush', 'weigh:0'])
 
+    // The reading shows on the puppy's chip, and with how it is doing on its card
     act(() =>
       stage.emit({
         needs: [needs(luna, 'Luna', { reading: '4,3 kg', weightStatus: 'En su peso' })],
       }),
     )
+    const chip = screen.getByRole('button', { name: /^Luna/ })
+    expect(chip).toHaveTextContent('4,3 kg')
+    await user.click(chip)
     expect(screen.getByText('4,3 kg · En su peso')).toBeInTheDocument()
   })
 
-  it('shows each puppy its own needs and health, by name, and no single happiness bar', async () => {
+  it('shows each puppy its own needs and health on a card its chip opens', async () => {
     const user = userEvent.setup()
     const storage = await adopted(['Luna', 'Kira'])
     const byName = await ids(storage)
@@ -223,34 +250,50 @@ describe('RoomScreen', () => {
       }),
     )
 
-    const luna = within(screen.getByRole('region', { name: 'Luna' }))
-    const kira = within(screen.getByRole('region', { name: 'Kira' }))
-    const value = (card: typeof luna, name: string) =>
-      card.getByRole('meter', { name }).getAttribute('aria-valuenow')
-    expect(['Felicidad', 'Hambre', 'Limpieza', 'Energía'].map((n) => value(luna, n))).toEqual([
-      '90',
-      '20',
-      '100',
-      '80',
-    ])
-    expect(['Felicidad', 'Hambre', 'Limpieza', 'Energía'].map((n) => value(kira, n))).toEqual([
-      '30',
-      '95',
-      '40',
-      '10',
-    ])
-    expect(luna.getByText('Muy bien')).toBeInTheDocument()
-    expect(kira.getByText('Necesita cuidados')).toBeInTheDocument()
-    expect(screen.getAllByRole('meter', { name: 'Felicidad' })).toHaveLength(2)
+    // Each chip opens that puppy's card, one at a time
+    expect(screen.queryByRole('meter')).not.toBeInTheDocument()
+    const value = (name: string) =>
+      within(screen.getByRole('region')).getByRole('meter', { name }).getAttribute('aria-valuenow')
+    const bars = ['Felicidad', 'Hambre', 'Limpieza', 'Energía']
+    await user.click(screen.getByRole('button', { name: 'Luna' }))
+    expect(screen.getByRole('region', { name: 'Luna' })).toHaveTextContent('Muy bien')
+    expect(bars.map(value)).toEqual(['90', '20', '100', '80'])
+    await user.click(screen.getByRole('button', { name: 'Kira' }))
+    expect(screen.queryByRole('region', { name: 'Luna' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Kira' })).toHaveTextContent('Necesita cuidados')
+    expect(bars.map(value)).toEqual(['30', '95', '40', '10'])
+    await user.click(screen.getByRole('button', { name: 'Kira' }))
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
 
-    // The first is looked after until another is picked, on its card or in the room
-    await user.click(screen.getByRole('button', { name: 'Comida' }))
-    await user.click(kira.getByRole('button', { name: 'Kira' }))
-    expect(kira.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
-    await user.click(screen.getByRole('button', { name: 'Comida' }))
-    act(() => stage.emit({ touched: { id: byName.get('Luna')!, count: 1 } }))
-    await user.click(screen.getByRole('button', { name: 'Pesar' }))
-    expect(stage.calls).toEqual(['feed:0', 'feed:1', 'weigh:0'])
+    // Kira, picked on her chip, is looked after until another is picked, on a chip or in the room
+    expect(screen.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
+    await care(user, 'Comida')
+    await user.click(screen.getByRole('button', { name: 'Luna' }))
+    await care(user, 'Comida')
+    act(() => stage.emit({ touched: { id: byName.get('Kira')!, count: 1 } }))
+    expect(screen.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
+    await care(user, 'Pesar')
+    expect(stage.calls).toEqual(['feed:1', 'feed:0', 'weigh:1'])
+  })
+
+  it('keeps every puppy behind «Cachorros», and shows them when the room is empty', async () => {
+    const user = userEvent.setup()
+    start(await adopted(['Luna']))
+    const toggle = await screen.findByRole('button', { name: 'Cachorros' }, { timeout: 3000 })
+    const list = () => screen.queryByRole('list', { name: 'Tus cachorros' })
+    expect(list()).not.toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Adoptar otro' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(list()).not.toBeInTheDocument()
+
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'Sacar a Luna' }))
+    expect(await screen.findByRole('heading', { name: 'La sala está vacía' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Cachorros' })).not.toBeInTheDocument()
+    expect(list()).toBeInTheDocument()
   })
 
   it('says «¡Limpio!» while a mess is being cleaned up', async () => {

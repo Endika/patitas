@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
-import CareBar from '../components/CareBar'
+import { CareActions, CareMode } from '../components/CareBar'
 import Hud from '../components/Hud'
 import NeedsPanel from '../components/NeedsPanel'
 import Roster from '../components/Roster'
 import UnsavedNotice from '../components/UnsavedNotice'
+import { useDismiss } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
 import { useRoomStage } from '../useRoomStage'
@@ -71,6 +72,11 @@ export default function RoomScreen({
   const { hostRef, stageRef, status: reported } = useRoomStage(createStage, keep)
   const status = reported ?? WAITING
   const [full, setFull] = useState(false)
+  const [castOpen, setCastOpen] = useState(false)
+  const cast = useRef<HTMLDivElement>(null)
+  const castId = useId()
+  const closeCast = useCallback(() => setCastOpen(false), [])
+  useDismiss(cast, castOpen, closeCast)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
   const [unloaded, setUnloaded] = useState<ReadonlySet<string>>(() => new Set())
   const inRoom = useMemo(
@@ -176,26 +182,47 @@ export default function RoomScreen({
     } else setFull(!(await onEnter(puppy.id)))
   }
 
+  const empty = !inRoom.length
+  const stage = () => stageRef.current
+  const busy = status.needs.some((n) => n.mode === 'bath' || n.mode === 'brush')
+
   return (
     <div className="room">
       <div ref={hostRef} className="room-stage" />
       <header className="room-top">
+        <h1 className={empty ? 'room-name' : 'sr-only'}>
+          {empty ? 'La sala está vacía' : inRoom.map((p) => p.name).join(' y ')}
+        </h1>
+        {empty && <p className="room-breed">Mete a un cachorro para jugar.</p>}
         <div className="room-head">
-          <div className="room-who">
-            <h1 className="room-name">
-              {inRoom.length ? inRoom.map((p) => p.name).join(' y ') : 'La sala está vacía'}
-            </h1>
-            <span className="room-breed">
-              {inRoom.length
-                ? inRoom.map((p) => BREEDS[p.breedId].label).join(' y ')
-                : 'Mete a un cachorro para jugar.'}
-            </span>
+          <NeedsPanel
+            needs={status.needs}
+            selected={selected}
+            onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
+          />
+          {/* With nobody in the room, who to bring in is the only thing to do */}
+          <div ref={cast} className="room-cast">
+            {!empty && (
+              <button
+                type="button"
+                className="room-cast-toggle"
+                aria-expanded={castOpen}
+                aria-controls={castId}
+                onClick={() => setCastOpen((o) => !o)}
+              >
+                Cachorros
+              </button>
+            )}
+            {(castOpen || empty) && (
+              <div id={castId} className="room-sheet">
+                <Roster puppies={puppies} inRoom={room.inRoom} onToggle={toggle} />
+                <button type="button" onClick={onAdoptAnother}>
+                  Adoptar otro
+                </button>
+              </div>
+            )}
           </div>
-          <button type="button" className="room-adopt" onClick={onAdoptAnother}>
-            Adoptar otro
-          </button>
         </div>
-        <Roster puppies={puppies} inRoom={room.inRoom} onToggle={toggle} />
         {full && (
           <p role="alert" className="room-note">
             Ya hay dos cachorros en la sala. Saca uno para que entre otro.
@@ -212,11 +239,6 @@ export default function RoomScreen({
             No se han podido cargar los cuidados.
           </p>
         )}
-        <NeedsPanel
-          needs={status.needs}
-          selected={selected}
-          onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
-        />
       </header>
       {status.cleaned && (
         <p role="status" className="room-toast">
@@ -225,12 +247,12 @@ export default function RoomScreen({
       )}
       <Hud
         status={status}
-        idle={!inRoom.length}
+        idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
         onTrick={(pose) => stageRef.current?.trick(pose)}
-      >
-        <CareBar needs={status.needs} selected={selected} stage={() => stageRef.current} />
-      </Hud>
+        care={<CareActions selected={selected} idle={!status.needs.length} stage={stage} />}
+        mode={busy ? <CareMode needs={status.needs} stage={stage} /> : undefined}
+      />
       {status.notice && <div className="room-loading">{status.notice}</div>}
     </div>
   )
