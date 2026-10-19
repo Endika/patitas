@@ -8,6 +8,7 @@ import {
   askTrick,
   bathe,
   brushPuppy,
+  callOver,
   dropFetch,
   finishBath,
   headWorld,
@@ -33,13 +34,11 @@ import { createBathLayer, rinse, takeDryer } from '@/engine/room/bath'
 import { createBrushLayer } from '@/engine/room/brush'
 import { clampPlay } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
-import { goTo } from '@/engine/motion/locomotion'
 import {
   bedSlots,
   followBed,
   forgetRoute,
   goToMud,
-  keepsEating,
   relieveNow,
   touch,
   tuckIn,
@@ -192,7 +191,7 @@ export function createThreeStage(
   const baths = createBathLayer(room.scene)
   const brushes = createBrushLayer(room.scene)
   const ring = createSelectRing(room.scene)
-  /** The index the buttons are for, as the screen last said. */
+  /** The index the buttons and floor taps are for, as the screen last said. */
   let chosen: number | null = null
   const scaleDisplay = createScaleDisplay()
   const mounted = new Map<string, PuppyView>()
@@ -219,8 +218,9 @@ export function createThreeStage(
     const v = chosen === null || views.length < 2 ? undefined : views[chosen]
     let busy = false
     for (const w of views) busy ||= w.bath.phase !== 'off' || w.brush.on
-    if (v && !busy) ring.follow(v.group.position, ringRadius(v.shape))
-    else ring.follow(null, 0)
+    if (!v || busy) return ring.hide()
+    const { chest, rump } = v.body
+    ring.follow((chest.x + rump.x) / 2, (chest.z + rump.z) / 2, ringRadius(v.shape))
   }
   const mood = (v: PuppyView) => ({
     happy: v.behaviour.happy,
@@ -341,12 +341,7 @@ export function createThreeStage(
         const vel = throwVelocity(room.cam, g.swipe)
         if (vel) throwBall(views, ball, vel)
       } else if (g.kind === 'takeBall') offerBall(views, ball)
-      else if (g.kind === 'goTo')
-        for (const v of views) {
-          if (touch(v.routine) || v.routine.held || keepsEating(v.routine, v.care)) continue
-          goTo(v.motion, g.x, g.z, mood(v))
-          v.behaviour.perk = 1
-        }
+      else if (g.kind === 'goTo') callOver(views, chosen ?? 0, g.x, g.z, mood)
       else if (g.kind === 'puzzle') for (const v of views) puzzle(v.behaviour)
     },
     // A tap on a mess cleans it up rather than calling the puppies there

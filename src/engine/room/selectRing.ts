@@ -12,14 +12,15 @@ const RING_Y = 0.002
 
 /** The ring under the puppy that the care and trick buttons are for. */
 export interface SelectRing {
-  /** Stands under `at` with radius `r`, or hides with nobody. */
-  follow(at: { x: number; z: number } | null, r: number): void
+  /** Stands at (x, z) on the floor with radius `r`. */
+  follow(x: number, z: number, r: number): void
+  hide(): void
   dispose(): void
 }
 
-/** Far enough round the root to take in the chest and the rump of the puppy standing. */
-export function ringRadius({ stand }: BodyShape): number {
-  return Math.max(stand.chest.z + stand.chest.r, Math.abs(stand.rump.z) + stand.rump.r) + MARGIN
+/** Far enough round the middle of the chest and the rump to take in both, the puppy standing. */
+export function ringRadius({ stand: { chest, rump } }: BodyShape): number {
+  return (chest.z - rump.z) / 2 + Math.max(chest.r, rump.r) + MARGIN
 }
 
 export function createSelectRing(scene: THREE.Scene): SelectRing {
@@ -37,12 +38,14 @@ export function createSelectRing(scene: THREE.Scene): SelectRing {
   ring.visible = false
   scene.add(ring)
   return {
-    follow(at, r) {
-      ring.visible = !!at
-      if (!at) return
-      ring.position.x = at.x
-      ring.position.z = at.z
+    follow(x, z, r) {
+      ring.visible = true
+      ring.position.x = x
+      ring.position.z = z
       ring.scale.set(r, 1, r)
+    },
+    hide() {
+      ring.visible = false
     },
     dispose() {
       scene.remove(ring)
