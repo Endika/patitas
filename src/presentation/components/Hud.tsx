@@ -65,6 +65,15 @@ export default function Hud({
     if (open) footer.current?.querySelector<HTMLElement>('.room-tray button')?.focus()
   }, [open])
 
+  // The controls a mode brings take focus, and «Cuidar» gets it back when the mode ends
+  const inMode = Boolean(mode)
+  const wasInMode = useRef(false)
+  useEffect(() => {
+    if (inMode) footer.current?.querySelector<HTMLElement>('button')?.focus()
+    else if (wasInMode.current) careButton.current?.focus()
+    wasInMode.current = inMode
+  }, [inMode])
+
   const toggle = (which: 'care' | 'tricks') => setTray((t) => (t === which ? null : which))
   // Choosing in a tray is done with it
   const chose = (e: MouseEvent) => {

@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 
 /**
  * `value` for `ms` after it appears, then null: for messages that should not stay over the room.
- * A different value shows again, and so does the same one after a null in between.
+ * A different value shows again, and so does the same one after any other in between.
  */
 export function useFleeting<T>(value: T | null, ms: number): T | null {
   const [gone, setGone] = useState<T | null>(null)
   const [last, setLast] = useState(value)
   if (value !== last) {
     setLast(value)
-    if (value === null) setGone(null)
+    setGone(null)
   }
   useEffect(() => {
     if (value === null) return

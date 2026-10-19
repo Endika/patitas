@@ -257,13 +257,13 @@ describe('RoomScreen', () => {
     // The reading shows on the puppy's chip, and with how it is doing on its card
     act(() =>
       stage.emit({
-        needs: [needs(luna, 'Luna', { reading: '4,3 kg', weightStatus: 'En su peso' })],
+        needs: [needs(luna, 'Luna', { reading: '5,24 kg', weightStatus: 'En su peso' })],
       }),
     )
     const chip = screen.getByRole('button', { name: /^Luna,/ })
-    expect(chip).toHaveTextContent('4,3 kg')
+    expect(chip).toHaveTextContent('5,24 kg')
     await user.click(chip)
-    expect(screen.getByText('4,3 kg · En su peso')).toBeInTheDocument()
+    expect(screen.getByText('5,24 kg · En su peso')).toBeInTheDocument()
   })
 
   it('shows each puppy its own needs and health on a card its chip opens', async () => {
@@ -553,6 +553,21 @@ describe('RoomScreen', () => {
     const luna = (await ids(storage)).get('Luna')!
     await waitFor(async () => expect((await storage.loadCare(luna))?.lastSeen).toBe(now))
     expect((await storage.loadCare('stray'))?.lastSeen).toBe(at(18, 9))
+  })
+
+  it('counts the time away from the start when the room opens in the background', async () => {
+    const storage = await adopted(['Luna'])
+    let now = at(15, 12)
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    const stage = start(storage, {
+      stage: createFakeStage(() => ({ x: 0, z: 0.5 })),
+      now: () => now,
+    })
+    await waitFor(() => expect(stage.arrived).toHaveLength(1))
+
+    now = at(15, 12) + 90_000
+    hide('visible')
+    expect(stage.calls).toContain('resume:90000')
   })
 
   it('keeps the care of every puppy when the app is hidden', async () => {

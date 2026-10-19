@@ -31,7 +31,7 @@ export interface PuppyNeeds {
   dryer: boolean
   health: Health
   asleep: boolean
-  /** The scale's reading the last time it was weighed, as «4,3 kg», and how that is for its breed. */
+  /** The scale's reading the last time it was weighed, as «5,24 kg», and how that is for its breed. */
   reading: string | null
   weightStatus: WeightStatus | null
 }

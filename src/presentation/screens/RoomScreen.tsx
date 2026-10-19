@@ -142,7 +142,8 @@ export default function RoomScreen({
   // A phone can close the app without warning: save every so often and once as it is hidden.
   // Back from hidden, the time away passes for everyone in the room, as if it had been closed.
   useEffect(() => {
-    let hiddenAt: number | null = null
+    // Opened already in the background, the time away counts from now
+    let hiddenAt: number | null = document.visibilityState === 'hidden' ? now() : null
     const save = () => {
       if (stageRef.current && hiddenAt === null) keep(stageRef.current)
     }
