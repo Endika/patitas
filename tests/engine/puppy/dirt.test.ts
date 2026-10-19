@@ -7,7 +7,6 @@ import {
   createDirt,
   createDirtField,
   DIRT_STEP,
-  dirtRest,
   meanDirt,
   messDepth,
   redistributeDirt,
@@ -17,42 +16,7 @@ import {
   withDirt,
   type DirtRest,
 } from '@/engine/puppy/dirt'
-
-const NOSE = [0, 0.68, 0.58] as const
-
-type Part = 'paw' | 'belly' | 'back' | 'muzzle'
-
-/** A stand-in puppy: rows of vertices on its paws, belly, back and the tip of its muzzle. */
-function body(): { rest: DirtRest; parts: Part[]; position: Float32Array } {
-  const pos: number[] = [],
-    nrm: number[] = [],
-    parts: Part[] = []
-  const add = (part: Part, x: number, y: number, z: number, n: [number, number, number]) => {
-    pos.push(x, y, z)
-    nrm.push(...n)
-    parts.push(part)
-  }
-  for (let i = 0; i < 40; i++) {
-    const s = i / 39
-    add('paw', -0.15 + 0.3 * s, 0.02 + 0.099 * s, i % 2 ? 0.3 : -0.3, [0, -0.2, 0.98])
-    add('belly', -0.1 + 0.2 * s, 0.24, -0.25 + 0.5 * s, [0, -1, 0])
-    add('back', -0.1 + 0.2 * s, 0.5, -0.3 + 0.6 * s, [0, 1, 0])
-    add('muzzle', -0.03 + 0.06 * s, 0.66 + 0.02 * s, 0.6, [0, 0, 1])
-  }
-  const position = new Float32Array(pos)
-  return { rest: dirtRest(position, new Float32Array(nrm), NOSE), parts, position }
-}
-
-const meanOf = (field: Float32Array, parts: Part[], part: Part) => {
-  let s = 0,
-    n = 0
-  parts.forEach((p, i) => {
-    if (p !== part) return
-    s += field[i]!
-    n++
-  })
-  return s / n
-}
+import { meanOf, standIn as body, type Part } from './standIn'
 
 /** Stands `secs` in mud `depth` deep, soiled the way the room does it. */
 const wade = (field: Float32Array, rest: DirtRest, depth: number, secs: number) => {
@@ -100,6 +64,30 @@ describe('dirt', () => {
     expect(long.of('belly')).toBeGreaterThan(deep.of('belly'))
     expect(long.of('muzzle')).toBeGreaterThan(deep.of('muzzle'))
     expect(long.of('back')).toBe(0)
+  })
+
+  it('rolling soils the back and the flanks too; standing it never does', () => {
+    const { rest, parts } = body()
+    const stood = createDirtField(parts.length),
+      rolled = createDirtField(parts.length)
+    wade(stood, rest, 1, 2)
+    for (let t = 0; t < 2 - 1e-9; t += DIRT_STEP) soilFromMud(rolled, rest, 1, DIRT_STEP, 'roll')
+    expect([meanOf(stood, parts, 'back'), meanOf(stood, parts, 'flank')]).toEqual([0, 0])
+    expect(meanOf(rolled, parts, 'back')).toBeGreaterThan(0.2)
+    expect(meanOf(rolled, parts, 'flank')).toBeGreaterThan(0.2)
+    expect(meanOf(rolled, parts, 'belly')).toBeGreaterThan(meanOf(stood, parts, 'belly'))
+    expect(meanDirt(rolled)).toBeGreaterThan(2 * meanDirt(stood))
+  })
+
+  it('digging soils the paws, belly and muzzle faster, and not the back', () => {
+    const { rest, parts } = body()
+    const stood = createDirtField(parts.length),
+      dug = createDirtField(parts.length)
+    wade(stood, rest, 1, 1)
+    for (let t = 0; t < 1 - 1e-9; t += DIRT_STEP) soilFromMud(dug, rest, 1, DIRT_STEP, 'dig')
+    for (const part of ['paw', 'belly', 'muzzle'] as const)
+      expect(meanOf(dug, parts, part)).toBeGreaterThan(1.5 * meanOf(stood, parts, part))
+    expect(meanOf(dug, parts, 'back')).toBe(0)
   })
 
   it('says whether anything changed, and nothing changes out of the mud', () => {

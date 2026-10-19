@@ -21,9 +21,21 @@ describe('poses', () => {
     expect(at(8.54)).toBe('stand')
   })
 
-  it('keeps the prototype values and drops the roll', () => {
-    expect(POSE_TIME).toEqual({ sit: 5, lie: 7, belly: 6 })
-    expect(Object.keys(POSES).sort()).toEqual(['belly', 'lie', 'sleep'])
+  it('keeps the prototype values for the tricks; a roll in the mud lasts 2 s, digging 1.5 s', () => {
+    expect(POSE_TIME).toEqual({ sit: 5, lie: 7, belly: 6, roll: 2, dig: 1.5 })
+    expect(Object.keys(POSES).sort()).toEqual(['belly', 'lie', 'roll', 'sleep'])
+  })
+
+  it('rolls over lying low with the legs blended in, and digs standing', () => {
+    const m = createMotionState()
+    setPose(m, 'roll')
+    for (let n = 0; n < 60; n++) stepPoses(m, 1 / 60)
+    expect([m.pose, m.fk > 0.9, m.rollW > 0.9]).toEqual(['roll', true, true])
+    for (let n = 0; n < 62; n++) stepPoses(m, 1 / 60)
+    expect(m.pose).toBe('stand')
+    setPose(m, 'dig')
+    for (let n = 0; n < 60; n++) stepPoses(m, 1 / 60)
+    expect([m.pose, m.fk < 0.1, m.rollW < 0.1]).toEqual(['dig', true, true])
   })
 
   it('curls up to sleep from the lying legs and keeps sleeping until stood up', () => {

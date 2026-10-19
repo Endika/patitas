@@ -43,6 +43,7 @@ import {
   staysPut,
   touch,
   tuckIn,
+  wallowing,
   weighing,
   type BedSlot,
   type RoutineState,
@@ -516,7 +517,8 @@ export function hitZone(
   view: Pick<PuppyView, 'motion' | 'zones'>,
   ray: THREE.Ray,
 ): { zone: ZoneId; point: THREE.Vector3; distance: number } | null {
-  const lying = view.motion.pose !== 'stand' && view.motion.pose !== 'sit'
+  const { pose } = view.motion
+  const lying = pose !== 'stand' && pose !== 'sit' && pose !== 'dig'
   let best: ZoneRig | null = null,
     bt = Infinity
   for (const z of view.zones) {
@@ -867,7 +869,7 @@ export function tickPuppies(
       }
     }
     const depth = spots ? soilingDepth(view, spots, ctx.underfoot ?? NOTHING_UNDERFOOT) : 0
-    if (stepDirt(view.coat.dirt, depth, dt)) view.coat.dirty = true
+    if (stepDirt(view.coat.dirt, depth, dt, wallowing(view.routine, M))) view.coat.dirty = true
     // The brush, while in hand, uses up the finger's travel before the bath can
     view.care = stepBrush(
       view.brush,
@@ -1073,10 +1075,18 @@ function applyPose(view: PuppyView, pose: BehaviourPose, body: BodyPose, dt: num
     )
     if (fk > 0.001) {
       const lp = M.legPose[i]!,
-        kick = M.bellyW * (i < 2 ? 0.25 * Math.sin(t * 6 + i * 2) : 0.2 * Math.sin(t * 5 + i * 2.5))
+        kick =
+          (M.bellyW + M.rollW) *
+          (i < 2 ? 0.25 * Math.sin(t * 6 + i * 2) : 0.2 * Math.sin(t * 5 + i * 2.5))
       a1 += (lp[0] + kick - a1) * fk
       a2 += (lp[1] - a2) * fk
       a3 += (lp[2] + kick - a3) * fk
+    }
+    if (i < 2 && pose.dig > 0.01) {
+      const [d1, d2, d3] = pose.digLegs[i]!
+      a1 += (d1 - a1) * pose.dig
+      a2 += (d2 - a2) * pose.dig
+      a3 += (d3 - a3) * pose.dig
     }
     if (i === 3 && sc > 0.01) {
       a1 += (SCRATCH[0] - 0.28 * Math.sin(t * 19) - a1) * sc
@@ -1185,7 +1195,10 @@ export function callOver<V extends Pick<PuppyView, 'motion' | 'routine' | 'behav
  * Asks for a trick; only while the puppy is not playing ball or deep in a meal. A sleeping one
  * wakes instead.
  */
-export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
+export function askTrick(
+  view: PuppyView,
+  pose: Exclude<PoseId, 'stand' | 'sleep' | 'roll' | 'dig'>,
+): boolean {
   if (
     touch(view.routine) ||
     view.routine.held ||
