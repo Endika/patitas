@@ -351,6 +351,14 @@ describe('in the room', () => {
     expect(cheer(care, 0.1).happiness).toBeCloseTo(0.6)
     expect(cheer(care, 2).happiness).toBe(1)
   })
+
+  it('above one half, each gain shrinks with the room left, the brush too', () => {
+    const care = createCare(breed, 0)
+    expect(cheer({ ...care, happiness: 0.3 }, 0.1).happiness).toBeCloseTo(0.4)
+    expect(cheer({ ...care, happiness: 0.75 }, 0.1).happiness).toBeCloseTo(0.8)
+    expect(cheer({ ...care, happiness: 0.9 }, 0.1).happiness).toBeCloseTo(0.92)
+    expect(groom({ ...care, happiness: 0.9 }, 0, 0.1).happiness).toBeCloseTo(0.92)
+  })
 })
 
 describe('comeBack', () => {
