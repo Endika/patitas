@@ -56,6 +56,9 @@ const BED_D = 1.7
 const BED_STEP = 2 * BEDS.two.radius + 0.11
 /** How much of a bed's radius may lie over the doorway strip; none of it on the grass. */
 const BED_OVER_STRIP = 0.15
+/** How far a bed may lie over the doorway strip: never past it onto the grass. */
+export const overStrip = (bed: { radius: number }) =>
+  Math.min(BED_OVER_STRIP * bed.radius, 2 * STRIP_HALF)
 /** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
 const SLEEPER = { reach: 0.45, ahead: 0.3 }
 /** How far a sleeper's head lies from its bed's middle, along its heading (bodies.ts: 0.41). */
@@ -176,7 +179,7 @@ const bedRight = (
   frame: (d: number) => number,
 ) =>
   Math.min(half(d), SLEEPER_EDGE * frame(d - SLEEPER.ahead) - Math.max(SLEEPER.reach, bed.radius))
-const bedLeft = (bed: { radius: number }) => HOUSE - BED_OVER_STRIP * bed.radius + bed.radius
+const bedLeft = (bed: { radius: number }) => HOUSE - overStrip(bed) + bed.radius
 
 /** Where the beds may go, the most wanted first. */
 function* bedRows(
@@ -210,7 +213,7 @@ function* bedRows(
 
 function bedsOk(beds: Oval[], half: (d: number) => number, frame: (d: number) => number) {
   for (const b of beds) {
-    if (b.side - b.radius < HOUSE - BED_OVER_STRIP * b.radius - 1e-9) return false
+    if (b.side - b.radius < HOUSE - overStrip(b) - 1e-9) return false
     if (b.side > bedRight(b, b.d, half, frame) + 1e-9) return false
     if (b.side - Math.max(SLEEPER.reach, b.radius) < -SLEEPER_EDGE * frame(b.d - SLEEPER.ahead))
       return false

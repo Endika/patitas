@@ -23,7 +23,7 @@ import {
   type Spot,
   type Spots,
 } from '@/engine/room/furniture'
-import { bowl, KIBBLE, scaleReadout } from '@/engine/room/furnitureModels'
+import { bowl, bowlMats, KIBBLE, scaleReadout } from '@/engine/room/furnitureModels'
 import { DORADO_BED, EAT_REACH } from '@/engine/room/layout'
 import { apartBy } from '@/engine/room/apart'
 import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
@@ -35,6 +35,10 @@ const COUNTS = [1, 2] as const
 const CASES = ASPECTS.flatMap((aspect) => COUNTS.map((n) => [aspect, n] as const))
 /** Every screen from tall phones to wide desktops, in steps of 0.05. */
 const SWEEP = Array.from({ length: 41 }, (_, i) => +(0.4 + i * 0.05).toFixed(2)).flatMap((aspect) =>
+  COUNTS.map((n) => [aspect, n] as const),
+)
+/** Wider still, from 0.3 to 3.5, for what must hold at any aspect. */
+const WIDE = Array.from({ length: 65 }, (_, i) => +(0.3 + i * 0.05).toFixed(2)).flatMap((aspect) =>
   COUNTS.map((n) => [aspect, n] as const),
 )
 /** Each room is laid out once and shared by the tests. */
@@ -227,17 +231,22 @@ describe('computeSpots', () => {
     },
   )
 
-  it.each(SWEEP)('keeps every bed and bowl off the grass at aspect %f for %i', (aspect, n) => {
+  it.each(WIDE)('keeps every bed, bowl and mat off the grass at aspect %f for %i', (aspect, n) => {
     const { cam } = view(aspect)
     const spots = spotsFor(aspect, n)
-    const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
-    // A bed lies over the doorway strip by 15 % of its radius at most; a bowl may be on the strip
+    const grass = SPLIT - STRIP_HALF
+    const local = (v: { x: number; z: number }) => playLocal(cam, v.x, v.z)
+    // A bed lies over the doorway strip by 15 % of its radius at most, never past the strip
     for (const s of spots.beds)
-      for (const p of rim(s))
+      for (const p of rim(s)) {
         expect(local(p).side).toBeGreaterThanOrEqual(SPLIT + STRIP_HALF - 0.15 * s.radius - 1e-6)
+        expect(local(p).side).toBeGreaterThanOrEqual(grass - 1e-6)
+      }
+    // A bowl, and the mat under it, may be on the strip
     for (const s of spots.bowls)
-      for (const p of rim(s))
-        expect(local(p).side).toBeGreaterThanOrEqual(SPLIT - STRIP_HALF - 1e-6)
+      for (const p of rim(s)) expect(local(p).side).toBeGreaterThanOrEqual(grass - 1e-6)
+    for (const mat of bowlMats(cam, spots))
+      expect(local(mat).side - mat.across).toBeGreaterThanOrEqual(grass - 1e-6)
   })
 
   it.each(SWEEP)(
