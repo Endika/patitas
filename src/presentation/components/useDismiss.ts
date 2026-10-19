@@ -3,6 +3,11 @@ import { useEffect, type RefObject } from 'react'
 /** How a popover was dismissed: Escape gives focus back to what opened it, a press elsewhere not. */
 export type Dismissal = 'escape' | 'outside'
 
+/** A popover the system back can close: `close` says whether there was one open. */
+export interface Closable {
+  close(): boolean
+}
+
 /** While `open`, a press outside `ref` or the Escape key calls `close`. */
 export function useDismiss(
   ref: RefObject<HTMLElement | null>,

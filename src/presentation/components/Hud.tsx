@@ -2,14 +2,16 @@ import {
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
+  type Ref,
 } from 'react'
 import type { StageStatus, TrickPose } from '../roomStage'
 import { useFleeting } from '../useFleeting'
-import { useDismiss, type Dismissal } from './useDismiss'
+import { useDismiss, type Closable, type Dismissal } from './useDismiss'
 
 const TRICKS: [TrickPose, string][] = [
   ['sit', 'Sentado'],
@@ -31,6 +33,7 @@ export default function Hud({
   onTrick,
   care,
   mode,
+  ref,
 }: {
   status: StageStatus
   /** No puppy to play with. */
@@ -41,6 +44,8 @@ export default function Hud({
   care?: ReactNode
   /** Controls that take the place of everything else while they last. */
   mode?: ReactNode
+  /** Closes the open tray, as Escape does. */
+  ref?: Ref<Closable>
 }) {
   const [tray, setTray] = useState<'care' | 'tricks' | null>(null)
   const footer = useRef<HTMLElement>(null)
@@ -61,6 +66,17 @@ export default function Hud({
   const hint = useFleeting(status.hint || null, HINT_MS)
 
   const open = mode ? null : tray
+  useImperativeHandle(
+    ref,
+    () => ({
+      close: () => {
+        if (!open) return false
+        close('escape')
+        return true
+      },
+    }),
+    [open, close],
+  )
   useEffect(() => {
     if (open) footer.current?.querySelector<HTMLElement>('.room-tray button')?.focus()
   }, [open])

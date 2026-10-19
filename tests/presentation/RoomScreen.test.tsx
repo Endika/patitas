@@ -583,4 +583,43 @@ describe('RoomScreen', () => {
     await waitFor(async () => expect((await storage.loadCare(luna))?.happiness).toBe(0.77))
     expect((await storage.loadCare(luna))?.lastSeen).toBe(at(18, 9))
   })
+
+  it('closes what is open on the system back, one thing at a time, before asking to leave', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna'])
+    const luna = (await ids(storage)).get('Luna')!
+    const stage = start(storage)
+    const toggle = await screen.findByRole('button', { name: 'Cachorros' }, { timeout: 3000 })
+    act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
+    const back = () => act(() => void window.dispatchEvent(new PopStateEvent('popstate')))
+    const asked = () => screen.queryByText('Pulsa atrás otra vez para salir')
+
+    await user.click(screen.getByRole('button', { name: 'Cuidar' }))
+    back()
+    expect(screen.queryByRole('navigation', { name: 'Cuidados' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cuidar' })).toHaveFocus()
+
+    const chip = screen.getByRole('button', { name: /^Luna,/ })
+    await user.click(chip)
+    back()
+    expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    expect(chip).toHaveFocus()
+
+    await user.click(toggle)
+    back()
+    expect(screen.queryByRole('list', { name: 'Tus cachorros' })).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+
+    act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'bath', bath: 'scrub' })] }))
+    back()
+    act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'brush' })] }))
+    back()
+    expect(stage.calls).toEqual(['finishBath', 'endBrush'])
+    expect(asked()).not.toBeInTheDocument()
+
+    act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
+    back()
+    expect(asked()).toHaveAttribute('role', 'status')
+    expect(window.history.state).toEqual({ patitas: 'guard' })
+  })
 })

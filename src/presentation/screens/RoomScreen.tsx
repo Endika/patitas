@@ -4,13 +4,15 @@ import { comeBack, createCare, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
 import { CareActions, CareMode } from '../components/Care'
+import FullscreenButton from '../components/FullscreenButton'
 import Hud from '../components/Hud'
 import NeedsPanel from '../components/NeedsPanel'
 import Roster from '../components/Roster'
 import UnsavedNotice from '../components/UnsavedNotice'
-import { useDismiss, type Dismissal } from '../components/useDismiss'
+import { useDismiss, type Closable, type Dismissal } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
+import { EXIT_MS, useBackGuard } from '../useBackGuard'
 import { useFleeting } from '../useFleeting'
 import { useRoomStage } from '../useRoomStage'
 import '../room.css'
@@ -206,7 +208,22 @@ export default function RoomScreen({
     return puppy ? BREEDS[puppy.breedId].label : ''
   }
   const stage = () => stageRef.current
-  const busy = status.needs.some((n) => n.mode === 'bath' || n.mode === 'brush')
+  const busy = status.needs.find((n) => n.mode === 'bath' || n.mode === 'brush')?.mode
+
+  // The system back closes what is open, as Escape or «Terminar» would, before it leaves
+  const hud = useRef<Closable>(null),
+    card = useRef<Closable>(null)
+  const closeTop = (): boolean => {
+    if (card.current?.close() || hud.current?.close()) return true
+    if (castOpen && !empty) {
+      closeCast('escape')
+      return true
+    }
+    if (busy === 'bath') stageRef.current?.finishBath()
+    else if (busy === 'brush') stageRef.current?.endBrush()
+    return Boolean(busy)
+  }
+  const leaving = useFleeting(useBackGuard(closeTop) || null, EXIT_MS)
 
   return (
     <div className="room">
@@ -218,6 +235,7 @@ export default function RoomScreen({
         {empty && <p className="room-breed">Mete a un cachorro para jugar.</p>}
         <div className="room-head">
           <NeedsPanel
+            ref={card}
             needs={status.needs}
             selected={selected}
             onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
@@ -240,9 +258,12 @@ export default function RoomScreen({
             {(castOpen || empty) && (
               <div id={castId} className="room-sheet">
                 <Roster puppies={puppies} inRoom={room.inRoom} onToggle={toggle} />
-                <button type="button" onClick={onAdoptAnother}>
-                  Adoptar otro
-                </button>
+                <div className="room-sheet-foot">
+                  <button type="button" onClick={onAdoptAnother}>
+                    Adoptar otro
+                  </button>
+                  <FullscreenButton />
+                </div>
               </div>
             )}
           </div>
@@ -255,6 +276,11 @@ export default function RoomScreen({
         {waiting && (
           <p role="status" className="room-note">
             {waiting} espera fuera: saca a uno para que entre.
+          </p>
+        )}
+        {leaving && (
+          <p role="status" className="room-note">
+            Pulsa atrás otra vez para salir
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}
@@ -270,6 +296,7 @@ export default function RoomScreen({
         </p>
       )}
       <Hud
+        ref={hud}
         status={status}
         idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
