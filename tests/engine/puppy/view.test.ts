@@ -6,7 +6,14 @@ import { createCare, settle } from '@/domain/care'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
-import { bedSlots, createRoutineState, holdStill, tuckIn, weighing } from '@/engine/motion/routine'
+import {
+  bedSlots,
+  createRoutineState,
+  goWeigh,
+  holdStill,
+  tuckIn,
+  weighing,
+} from '@/engine/motion/routine'
 import {
   behaviourRig,
   createBehaviourState,
@@ -35,6 +42,7 @@ import {
   disposeOwn,
   hitCoat,
   hitZone,
+  mayStepAside,
   liftCoat,
   rubCoat,
   soilingDepth,
@@ -475,5 +483,50 @@ describe('showCare', () => {
     const before = Float32Array.from(v.coat.dirt.field)
     showCare(v, { ...v.care, cleanliness: 0.999, hunger: 0.9 })
     expect(v.coat.dirt.field).toEqual(before)
+  })
+})
+
+describe('mayStepAside', () => {
+  const idle = () => ({
+    motion: createMotionState(),
+    routine: createRoutineState(),
+    behaviour: createBehaviourState(),
+  })
+  const now = 100
+
+  it('lets a puppy standing about with nothing to do step aside', () => {
+    expect(mayStepAside(idle(), { petting: null, now })).toBe(true)
+  })
+
+  it('never moves one being petted, or touched a moment ago', () => {
+    const v = idle()
+    expect(mayStepAside(v, { petting: v as never, now })).toBe(false)
+    v.behaviour.petLast = now - 1
+    expect(mayStepAside(v, { petting: null, now })).toBe(false)
+    v.behaviour.petLast = now - 5
+    expect(mayStepAside(v, { petting: null, now })).toBe(true)
+  })
+
+  it('never stands up one doing a trick', () => {
+    for (const pose of ['sit', 'lie', 'belly'] as const) {
+      const v = idle()
+      setPose(v.motion, pose)
+      expect(mayStepAside(v, { petting: null, now })).toBe(false)
+    }
+  })
+
+  it('never takes one from its meal, the scale, its business or the bath', () => {
+    for (const routine of ['eating', 'onScale', 'relieving', 'splashing', 'sleeping'] as const) {
+      const v = idle()
+      v.routine.routine = routine
+      expect(mayStepAside(v, { petting: null, now })).toBe(false)
+    }
+    const weighed = idle()
+    goWeigh(weighed.routine, weighed.motion)
+    expect(weighing(weighed.routine)).toBe(true)
+    expect(mayStepAside(weighed, { petting: null, now })).toBe(false)
+    const bathed = idle()
+    holdStill(bathed.routine, bathed.motion, 'bathing')
+    expect(mayStepAside(bathed, { petting: null, now })).toBe(false)
   })
 })

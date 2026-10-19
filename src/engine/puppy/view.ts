@@ -10,7 +10,7 @@ import {
   type WeightStatus,
 } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
-import { clamp, damp, type Vec3 } from '@/engine/math'
+import { clamp, damp, MAX_DT, type Vec3 } from '@/engine/math'
 import {
   createFetchState,
   stepFetch,
@@ -38,6 +38,7 @@ import {
   letGo,
   stepAside,
   stepRoutine,
+  staysPut,
   touch,
   tuckIn,
   weighing,
@@ -69,7 +70,8 @@ import {
   type Brush,
 } from '@/engine/room/brush'
 import { bodyOf, bodyShape, createBody, type Body, type BodyShape } from '@/engine/room/bodies'
-import { cameraPosition, clampPlay, playAxes } from '@/engine/room/camera'
+import type { ClampTo } from '@/engine/room/apart'
+import { cameraPosition, clampPlay, clampPlayTo, playAxes } from '@/engine/room/camera'
 import { claimBall, inTheWay, keepOff, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
 import { messLocal } from '@/engine/room/messes'
@@ -225,6 +227,22 @@ const Z = new THREE.Vector3(0, 0, 1)
 const crowd: MotionState[] = []
 const bodies: Body[] = []
 const clamps = new WeakMap<RoomScene, (x: number, z: number) => [number, number]>()
+const clampsTo = new WeakMap<RoomScene, ClampTo>()
+/** Who may step aside for a chase this frame, and who stays put, in the order of the views. */
+const free: boolean[] = [],
+  fixed: boolean[] = []
+/** Touched this recently (pointer seconds), a puppy is the player's: no chase moves it. */
+const TOUCHED = 3
+
+/** One in-place clamp to the play area per room. */
+function clampToIn(room: RoomScene): ClampTo {
+  let c = clampsTo.get(room)
+  if (!c) {
+    c = (p) => clampPlayTo(room.cam, p)
+    clampsTo.set(room, c)
+  }
+  return c
+}
 
 /** One clamp to the play area per room, rather than a closure each frame. */
 function clampIn(room: RoomScene): (x: number, z: number) => [number, number] {
@@ -760,10 +778,8 @@ const NOTHING_UNDERFOOT: readonly Underfoot[] = []
 export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
   view.bones.jaw!.localToWorld(out.copy(view.mouth))
 
-/** Smallest distance kept between where two puppies are headed; their bodies part by spheres. */
-const PERSONAL_SPACE = 0.45
 /** How far from the scale's middle the others keep while one is weighed: a body's room and a step. */
-const SCALE_CLEAR = PERSONAL_SPACE + 0.05
+const SCALE_CLEAR = 0.5
 const SNORE = 1.2
 /** Just woken, a puppy walks this far in front of the room's middle to say hello. */
 const HELLO = 0.35
@@ -879,29 +895,33 @@ export function tickPuppies(
   const motions = crowd
   motions.length = 0
   bodies.length = 0
+  fixed.length = 0
   let owner: MotionState | null = null,
     catcher = -1
   for (let i = 0; i < views.length; i++) {
     const v = views[i]!
     motions.push(v.motion)
+    fixed.push(staysPut(v.routine))
     if (weighing(v.routine)) owner = v.motion
     // The ball goes through the puppy catching it, carrying it or just letting it go
     if (v.fetch.holding || v.fetch.task === 'grab' || v.fetch.task === 'present') catcher = i
   }
-  const inPlay = clampIn(room)
-  // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
+  const inPlay = clampToIn(room)
+  // The scale is the weighed puppy's: the other keeps clear of it, and cannot push it off
   if (views.length > 1 && owner && spots)
     keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
   for (const v of views) bodies.push(placeBody(v))
-  if (views.length > 1) separate(motions, PERSONAL_SPACE, inPlay, bodies)
+  if (views.length > 1) separate(motions, bodies, inPlay, fixed, Math.min(dt, MAX_DT))
   bounceOff(ball, bodies, catcher)
   rollOut(ball, bodies, catcher, room.cam, dt)
-  // A chase that gets no nearer: the awake one in the way walks off; a sleeper stays, and the
-  // ball rolls out from it instead
+  // A chase that gets no nearer: one standing about in the way walks off. One the player is
+  // busy with, or that is busy itself, stays; the ball rolls out from it or the chase gives up
   for (let i = 0; i < views.length; i++) {
     if (!moved[i]!.ev.blocked) continue
-    const k = inTheWay(motions, bodies, i, ball.pos)
-    if (k >= 0) stepAside(motions[k]!, ball.pos.x, ball.pos.z, inPlay)
+    free.length = 0
+    for (const v of views) free.push(mayStepAside(v, ctx))
+    const k = inTheWay(motions, bodies, free, i, ball.pos)
+    if (k >= 0) stepAside(motions[k]!, ball.pos.x, ball.pos.z, clampIn(room))
   }
   cameraPosition(room.cam, camPos)
   views.forEach((view, i) => {
@@ -946,6 +966,24 @@ export function tickPuppies(
     } else view.snoreT = 0
   })
   return moved.map((m) => m.ev)
+}
+
+/**
+ * Standing about with nothing to do: not touched lately, not doing a trick or lying down, in no
+ * routine (a meal, the scale, the bath…). Only such a puppy steps aside for a chase.
+ */
+export function mayStepAside(
+  view: Pick<PuppyView, 'motion' | 'routine' | 'behaviour'>,
+  ctx: Pick<PuppyTickCtx, 'petting' | 'now'>,
+): boolean {
+  return (
+    ctx.petting !== view &&
+    ctx.now - view.behaviour.petLast >= TOUCHED &&
+    view.motion.pose === 'stand' &&
+    view.routine.routine === 'none' &&
+    !view.routine.held &&
+    !weighing(view.routine)
+  )
 }
 
 /** Its spheres where it stands now; sitting to present the ball counts as sitting. */

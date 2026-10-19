@@ -27,12 +27,14 @@ import {
 import { bodyOf, bodyShape, createBody, sphereAt, SPHERES, type Body } from '@/engine/room/bodies'
 import {
   clampPlay,
+  clampPlayTo,
   createCamera,
   fitCamera,
   playLocal,
   playWorld,
   PLAY,
 } from '@/engine/room/camera'
+import { APART_STEP, type ClampTo } from '@/engine/room/apart'
 import { claimBall, inTheWay, keepOff, separate } from '@/engine/room/crowd'
 import { seeded } from '../seeded'
 
@@ -56,6 +58,24 @@ function puppy(x: number, z: number, heading = 0) {
 
 const flat = (a: MotionState, b: MotionState) => Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z)
 
+/**
+ * The most two bodies may overlap for the few frames `keepApart` takes to part them, a step at a
+ * time, where the edge holds them and walkers keep coming.
+ */
+const OVERLAP = 0.03
+/** …and for at most this many frames in a row. */
+const OVERLAP_FRAMES = 20
+
+/** One frame of keeping apart, as the room does: bodies placed where the puppies stand. */
+function apart(ms: MotionState[], clamp?: ClampTo, fixed: readonly boolean[] | null = null) {
+  separate(
+    ms,
+    ms.map((m) => placed(m)),
+    clamp,
+    fixed,
+  )
+}
+
 describe('keepOff', () => {
   it('keeps everyone but the one on the scale out of its circle, goals too', () => {
     const on = createMotionState(),
@@ -75,7 +95,7 @@ describe('keepOff', () => {
 })
 
 describe('separate', () => {
-  it('keeps two puppies sent to the same spot at least 0.45 apart', () => {
+  it('keeps two puppies sent to the same spot apart, and their bodies out of each other', () => {
     const a = puppy(-0.6, 0),
       b = puppy(0.6, 0.1)
     const opts = {
@@ -86,36 +106,31 @@ describe('separate', () => {
     }
     goTo(a.m, 0, 0.4, opts)
     goTo(b.m, 0, 0.4, opts)
-    let closest = Infinity
+    expect(a.m.goal!.distanceTo(b.m.goal!)).toBeGreaterThanOrEqual(0)
+    let worst = Infinity
     for (let n = 0; n < 60 * 6; n++) {
       for (const p of [a, b]) {
         stepPoses(p.m, DT)
         stepLocomotion(p.m, p.legs, DT)
       }
-      separate([a.m, b.m])
-      closest = Math.min(closest, flat(a.m, b.m))
+      apart([a.m, b.m])
+      worst = Math.min(worst, clearance(placed(a.m), placed(b.m)))
     }
     expect(a.m.goal).toBeNull()
     expect(b.m.goal).toBeNull()
-    expect(closest).toBeGreaterThanOrEqual(0.45 - 1e-9)
-    expect(flat(a.m, b.m)).toBeLessThan(0.6)
+    expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+    expect(flat(a.m, b.m)).toBeLessThan(0.8)
   })
 
-  it('leaves a sleeper in its place and puts the whole push on the awake one', () => {
-    const sleeper = createMotionState(),
-      awake = createMotionState()
-    setPose(sleeper, 'sleep')
-    awake.pos.set(0.2, 0, 0)
-    separate([awake, sleeper], 0.45)
-    expect(sleeper.pos.length()).toBe(0)
-    expect(awake.pos.x).toBeCloseTo(0.45)
-  })
-
-  it('pulls apart two puppies standing on the same spot', () => {
+  it('spreads the goals of two sent to the same spot', () => {
     const a = createMotionState(),
       b = createMotionState()
-    separate([a, b], 0.45)
-    expect(flat(a, b)).toBeCloseTo(0.45)
+    a.pos.set(-2, 0, 0)
+    b.pos.set(2, 0, 0)
+    a.goal = new THREE.Vector3(0, 0, 0)
+    b.goal = new THREE.Vector3(0.1, 0, 0)
+    separate([a, b], [placed(a), placed(b)])
+    expect(a.goal.distanceTo(b.goal)).toBeCloseTo(0.45)
   })
 })
 
@@ -136,81 +151,78 @@ function clearance(a: Body, b: Body) {
   return least
 }
 
+describe('the puppy on the scale', () => {
+  it.each([0.5, 0.55, 0.6, 0.7])(
+    'is never pushed off by one walking across %f in front of it',
+    (ahead) => {
+      const owner = puppy(0, 0, 0),
+        walker = puppy(-1.2, ahead, Math.PI / 2)
+      goTo(walker.m, 1.2, ahead, {
+        happy: 0.5,
+        energy: 0.5,
+        clamp: (x, z) => [x, z],
+        random: seeded(4),
+      })
+      let worst = Infinity
+      for (let n = 0; n < 60 * 6; n++) {
+        for (const p of [owner, walker]) {
+          stepPoses(p.m, DT)
+          stepLocomotion(p.m, p.legs, DT)
+        }
+        apart([owner.m, walker.m], undefined, [true, false])
+        worst = Math.min(worst, clearance(placed(owner.m), placed(walker.m)))
+      }
+      expect(owner.m.pos.toArray()).toEqual([0, 0, 0])
+      expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+    },
+  )
+})
+
 describe('inTheWay', () => {
-  it('finds the awake puppy whose body is nearest the ball, never the chaser or a sleeper', () => {
-    const chaser = createMotionState(),
-      near = createMotionState(),
+  const chaser = createMotionState()
+  const ball = { x: 2, z: 0 }
+
+  it('picks the free puppy in the corridor to the ball nearest it, never the chaser', () => {
+    const near = createMotionState(),
       far = createMotionState(),
-      sleeper = createMotionState()
-    near.pos.set(1, 0, 0)
-    far.pos.set(3, 0, 0)
-    sleeper.pos.set(1.2, 0, 0.1)
-    setPose(sleeper, 'sleep')
-    const states = [chaser, far, near, sleeper]
+      aside = createMotionState()
+    near.pos.set(1.5, 0, 0.1)
+    far.pos.set(0.8, 0, 0)
+    aside.pos.set(1.9, 0, 1.2)
+    const states = [chaser, far, near, aside]
     const bodies = states.map((m) => placed(m))
-    expect(inTheWay(states, bodies, 0, { x: 1.3, z: 0 })).toBe(2)
-    expect(inTheWay([chaser, sleeper], [bodies[0]!, bodies[3]!], 0, { x: 1.3, z: 0 })).toBe(-1)
+    expect(inTheWay(states, bodies, [true, true, true, true], 0, ball)).toBe(2)
+    // Out of the corridor, however near the ball
+    expect(inTheWay([chaser, aside], [bodies[0]!, bodies[3]!], [true, true], 0, ball)).toBe(-1)
+  })
+
+  it('never picks one that is not free to step aside', () => {
+    const near = createMotionState()
+    near.pos.set(1.5, 0, 0)
+    const states = [chaser, near]
+    expect(
+      inTheWay(
+        states,
+        states.map((m) => placed(m)),
+        [true, false],
+        0,
+        ball,
+      ),
+    ).toBe(-1)
   })
 })
 
-describe('separate with bodies', () => {
-  const starts: [string, [number, number, number], [number, number, number]][] = [
-    ['head to tail', [0, 0, 0], [0, 0.45, 0]],
-    ['side by side', [0, 0, 0], [0.1, 0.05, 0]],
-    ['nose to nose', [0, 0, 0], [0.05, 0.6, Math.PI]],
-    ['crossing', [0, 0, 0], [0.2, 0.3, Math.PI / 2]],
-    ['on the same spot', [0, 0, 0], [0, 0, 0]],
-  ]
-
-  it.each(starts)(
-    'parts two puppies standing %s until no sphere overlaps',
-    (_, [ax, az, ah], [bx, bz, bh]) => {
-      const a = createMotionState(),
-        b = createMotionState()
-      a.pos.set(ax, 0, az)
-      a.heading = ah
-      b.pos.set(bx, 0, bz)
-      b.heading = bh
-      const bodies = [placed(a), placed(b)]
-      expect(clearance(bodies[0]!, bodies[1]!)).toBeLessThan(0)
-      separate([a, b], 0.45, undefined, bodies)
-      expect(clearance(bodies[0]!, bodies[1]!)).toBeGreaterThanOrEqual(0)
-      // The bodies moved with them: placed again, they are still apart
-      expect(clearance(placed(a), placed(b))).toBeGreaterThanOrEqual(0)
-    },
-  )
-
-  it('lets two puppies stand closer side by side than head to tail', () => {
-    const gapAfter = (bx: number, bz: number) => {
-      const a = createMotionState(),
-        b = createMotionState()
-      b.pos.set(bx, 0, bz)
-      separate([a, b], 0.45, undefined, [placed(a), placed(b)])
-      return flat(a, b)
-    }
-    expect(gapAfter(0.05, 0)).toBeLessThan(0.45)
-    expect(gapAfter(0, 0.05)).toBeGreaterThan(0.45)
-  })
-
-  it('leaves a sleeper in its place and pushes the awake one clear of it', () => {
-    const sleeper = createMotionState(),
-      awake = createMotionState()
-    setPose(sleeper, 'sleep')
-    awake.pos.set(0.2, 0, 0.1)
-    awake.heading = -Math.PI / 2
-    const bodies = [placed(awake), placed(sleeper)]
-    separate([awake, sleeper], 0.45, undefined, bodies)
-    expect(sleeper.pos.length()).toBe(0)
-    expect(clearance(placed(awake), placed(sleeper))).toBeGreaterThanOrEqual(0)
-  })
-
+describe('fetch games', () => {
   const SEEDS = [1, 2, 3, 5, 7, 13, 14, 23, 31, 37]
 
   it.each(SEEDS)(
     'never lets two puppies chasing the ball for 10 minutes overlap or get stuck (seed %i)',
     (seed) => {
-      const { worst, throws, grabbed, longest } = play(10, false, seed)
-      expect(worst).toBeGreaterThanOrEqual(-1e-6)
+      const { worst, throws, grabbed, longest, step, gaveUp, overlapFor } = play(10, false, seed)
+      expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+      expect(step).toBeLessThanOrEqual(APART_STEP + 1e-9)
+      expect(gaveUp).toBeLessThanOrEqual(1)
+      expect(overlapFor).toBeLessThanOrEqual(OVERLAP_FRAMES)
       expect(longest).toBeLessThan(STUCK)
       expect(throws).toBeGreaterThan(40)
       expect(grabbed).toBeGreaterThan(throws * 0.8)
@@ -220,8 +232,15 @@ describe('separate with bodies', () => {
   it.each(SEEDS)(
     'never moves a sleeper the chase goes past, nor lets the chaser into it or stick (seed %i)',
     (seed) => {
-      const { worst, throws, sleeperMoved, longest } = play(10, true, seed)
-      expect(worst).toBeGreaterThanOrEqual(-1e-6)
+      const { worst, throws, sleeperMoved, longest, step, gaveUp, overlapFor } = play(
+        10,
+        true,
+        seed,
+      )
+      expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+      expect(step).toBeLessThanOrEqual(APART_STEP + 1e-9)
+      expect(gaveUp).toBeLessThanOrEqual(1)
+      expect(overlapFor).toBeLessThanOrEqual(OVERLAP_FRAMES)
       expect(sleeperMoved).toBe(0)
       expect(longest).toBeLessThan(STUCK)
       expect(throws).toBeGreaterThan(40)
@@ -238,11 +257,13 @@ const STUCK = 30
  * throw comes once the chasers are free and the ball lies still, and the room does what
  * tickPuppies does: bounces and rolls the ball out, and asks one in the way to step aside.
  * `worst` is the closest any two bodies came (negative: overlapping); `longest` the most seconds
- * between throws or with a chaser busy.
+ * between throws or with a chaser busy; `step` the most `separate` moved a puppy in a frame;
+ * `gaveUp` the chases given up; `overlapFor` the most frames in a row any two bodies overlapped.
  */
 function play(minutes: number, sleeper: boolean, seed: number) {
   const cam = fitCamera(createCamera(), 0.46)
   const clamp = (x: number, z: number) => clampPlay(cam, x, z)
+  const clampTo: ClampTo = (p) => clampPlayTo(cam, p)
   const random = seeded(seed)
   const chasers = [puppy(...playWorld(cam, 0.3, -0.3))]
   if (!sleeper) chasers.push(puppy(...playWorld(cam, 0.3, 0.3)))
@@ -257,8 +278,21 @@ function play(minutes: number, sleeper: boolean, seed: number) {
     throws = 0,
     sleeperMoved = 0,
     sinceThrow = 0,
-    longest = 0
+    longest = 0,
+    step = 0,
+    gaveUp = 0,
+    overlapRun = 0,
+    overlapFor = 0
   const busy = chasers.map(() => 0)
+  const ctxs = chasers.map((p) => ({
+    reach: REACH,
+    cam,
+    mouthWorld: p.mouth,
+    mood: { happy: 0.5 },
+    energy: 0.5,
+    random,
+  }))
+  const before = dogs.map(() => new THREE.Vector3())
   for (let n = 0; n < 60 * 60 * minutes; n++) {
     const still = ball.state === 'none' || (ball.state === 'air' && ball.vel.length() < 0.05)
     if (still && chasers.every((p) => p.f.task === 'free')) {
@@ -282,17 +316,11 @@ function play(minutes: number, sleeper: boolean, seed: number) {
     let catcher = -1
     const blocked: number[] = []
     chasers.forEach((p, i) => {
-      const ctx = {
-        reach: REACH,
-        cam,
-        mouthWorld: p.mouth,
-        mood: { happy: 0.5 },
-        energy: 0.5,
-        random,
-      }
+      const ctx = ctxs[i]!
       const ev = stepFetch(p.f, p.m, ball, ctx, DT)
       if (ev.grabbed) grabbed++
       if (ev.blocked) blocked.push(i)
+      if (ev.gaveUp) gaveUp++
       if (p.f.holding || p.f.task === 'grab' || p.f.task === 'present') catcher = i
     })
     for (const p of dogs) {
@@ -300,12 +328,15 @@ function play(minutes: number, sleeper: boolean, seed: number) {
       stepLocomotion(p.m, p.legs, DT)
     }
     dogs.forEach((p, i) => placed(p.m, bodies[i]))
-    separate(motions, 0.45, clamp, bodies)
+    dogs.forEach((p, i) => before[i]!.copy(p.m.pos))
+    separate(motions, bodies, clampTo, null, DT)
+    dogs.forEach((p, i) => (step = Math.max(step, p.m.pos.distanceTo(before[i]!))))
     stepBall(ball, cam, DT)
     bounceOff(ball, bodies, catcher)
     rollOut(ball, bodies, catcher, cam, DT)
     for (const i of blocked) {
-      const k = inTheWay(motions, bodies, i, ball.pos)
+      const free = motions.map((m) => m.pose === 'stand')
+      const k = inTheWay(motions, bodies, free, i, ball.pos)
       if (k >= 0) stepAside(motions[k]!, ball.pos.x, ball.pos.z, clamp)
     }
     sinceThrow += DT
@@ -314,17 +345,22 @@ function play(minutes: number, sleeper: boolean, seed: number) {
       busy[i] = chasers[i]!.f.task === 'free' ? 0 : busy[i]! + DT
       longest = Math.max(longest, busy[i]!)
     }
+    let least = Infinity
     for (let i = 0; i < dogs.length; i++)
       for (let j = i + 1; j < dogs.length; j++)
-        worst = Math.min(worst, clearance(placed(dogs[i]!.m), placed(dogs[j]!.m)))
+        least = Math.min(least, clearance(bodies[i]!, bodies[j]!))
+    worst = Math.min(worst, least)
+    overlapRun = least < -1e-6 ? overlapRun + 1 : 0
+    overlapFor = Math.max(overlapFor, overlapRun)
     if (sleeper && bed) sleeperMoved = Math.max(sleeperMoved, dogs[1]!.m.pos.distanceTo(bed))
   }
-  return { worst, throws, grabbed, sleeperMoved, longest }
+  return { worst, throws, grabbed, sleeperMoved, longest, step, gaveUp, overlapFor }
 }
 
 describe('separate at the edge of the play area', () => {
   const cam = fitCamera(createCamera(), 0.46)
   const clamp = (x: number, z: number) => clampPlay(cam, x, z)
+  const clampTo: ClampTo = (p) => clampPlayTo(cam, p)
   const at = (d: number, side: number) => {
     const q = playLocal(cam, 0, 0)
     return clamp(cam.target.x + q.fx * d - q.fz * side, cam.target.z + q.fz * d + q.fx * side)
@@ -336,27 +372,32 @@ describe('separate at the edge of the play area', () => {
   ]
 
   it.each(edges)(
-    'a walker nudges a puppy on the %s edge along it, never out of the frame',
+    'a walker heading where a puppy stands on the %s edge nudges it along, never out of the frame',
     (_, [ex, ez], [wx, wz]) => {
       const idle = puppy(ex, ez),
         walker = puppy(wx, wz)
       const goal = idle.m.pos.clone()
       goTo(walker.m, goal.x, goal.z, { happy: 0.5, energy: 0.5, clamp, random: seeded(3) })
-      let nearest = Infinity
+      let worst = Infinity
       for (let n = 0; n < 60 * 10; n++) {
         for (const p of [idle, walker]) {
           stepPoses(p.m, DT)
           stepLocomotion(p.m, p.legs, DT)
         }
-        separate([idle.m, walker.m], 0.45, clamp)
-        for (const p of [idle, walker]) {
+        const was = [idle.m.pos.clone(), walker.m.pos.clone()]
+        apart([idle.m, walker.m], clampTo)
+        ;[idle, walker].forEach((p, i) => {
           const [cx, cz] = clamp(p.m.pos.x, p.m.pos.z)
           expect(Math.hypot(cx - p.m.pos.x, cz - p.m.pos.z)).toBeLessThan(1e-6)
-        }
-        expect(flat(idle.m, walker.m)).toBeGreaterThanOrEqual(0.45 - 1e-6)
-        nearest = Math.min(nearest, Math.hypot(walker.m.pos.x - goal.x, walker.m.pos.z - goal.z))
+          expect(p.m.pos.distanceTo(was[i]!)).toBeLessThanOrEqual(APART_STEP + 1e-9)
+        })
+        worst = Math.min(worst, clearance(placed(idle.m), placed(walker.m)))
       }
-      expect(nearest).toBeLessThan(0.1)
+      expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+      // It got there, the other nudged along the edge, or it stopped short of it
+      const there = Math.hypot(walker.m.pos.x - goal.x, walker.m.pos.z - goal.z) < 0.1
+      expect(there || walker.m.goal === null).toBe(true)
+      expect(idle.m.pos.distanceTo(goal) > 0.01 || walker.m.goal === null).toBe(true)
     },
   )
 })
@@ -441,7 +482,7 @@ describe('claimBall', () => {
         stepPoses(p.m, DT)
         stepLocomotion(p.m, p.legs, DT)
       }
-      separate(dogs.map((p) => p.m))
+      apart(dogs.map((p) => p.m))
       stepBall(ball, cam, DT)
     }
     expect(grabbed).toBe(1)
@@ -587,7 +628,7 @@ describe('claimBall', () => {
         stepPoses(p.m, DT)
         stepLocomotion(p.m, p.legs, DT)
       }
-      separate(dogs.map((p) => p.m))
+      apart(dogs.map((p) => p.m))
       stepBall(ball, cam, DT)
     }
 

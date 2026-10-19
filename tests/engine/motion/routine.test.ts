@@ -38,6 +38,7 @@ import {
   SPLASH_TIME,
   stepAside,
   stepRoutine,
+  staysPut,
   touch,
   tuckIn,
   WEIGH_TIME,
@@ -48,12 +49,14 @@ import {
 } from '@/engine/motion/routine'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, PLAY, playLocal } from '@/engine/room/camera'
+import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
 import { keepOff, separate } from '@/engine/room/crowd'
 import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
 import { seeded } from '../seeded'
 
 const DT = 1 / 60
 const A = anatomy(BREEDS.shiba)
+const SHAPE = bodyShape(A)
 const cam = fitCamera(createCamera(), 0.46)
 const SPOTS = computeSpots(cam, 1),
   SPOTS2 = computeSpots(cam, 2)
@@ -137,21 +140,20 @@ function run(
       stepPoses(p.m, DT)
       stepLocomotion(p.m, p.legs, DT)
     }
-    // As the room does: the scale is the weighed puppy's, then they keep apart
+    // As the room does: the scale is the weighed puppy's, then their bodies keep apart
     const owner = pups.find((p) => weighing(p.r))
-    if (owner)
-      keepOff(
-        pups.map((p) => p.m),
-        owner.m,
-        spots.scale.center.x,
-        spots.scale.center.z,
-        0.5,
-        more.clamp ?? clamp,
-      )
+    const c = more.clamp ?? clamp
+    const clampTo = (p: { x: number; z: number }) => {
+      ;[p.x, p.z] = c(p.x, p.z)
+    }
+    const ms = pups.map((p) => p.m)
+    if (owner) keepOff(ms, owner.m, spots.scale.center.x, spots.scale.center.z, 0.5, clampTo)
     separate(
-      pups.map((p) => p.m),
-      0.45,
-      more.clamp ?? clamp,
+      ms,
+      ms.map((m) => bodyOf(m.pos, m.heading, m.pose, SHAPE, createBody())),
+      clampTo,
+      pups.map((p) => staysPut(p.r)),
+      DT,
     )
     each?.()
   }
@@ -398,7 +400,8 @@ describe('meals', () => {
     ;[a, b].forEach((p, i) => {
       expect(p.seen).toEqual(['toBowl', 'eating', 'none'])
       expect(p.bowl).toBe(0)
-      expect(worst[i]).toBeLessThan(0.03)
+      // The other turning in beside it can nudge it a few cm before it settles, never off its bowl
+      expect(worst[i]).toBeLessThan(0.06)
     })
     expect(a.care.hunger).toBeCloseTo(0.1)
     expect(b.care.hunger).toBeCloseTo(0, 2)
