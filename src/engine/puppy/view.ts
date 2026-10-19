@@ -923,7 +923,7 @@ export function tickPuppies(
       routines.push(v.routine)
       free.push(mayStepAside(v, ctx))
     }
-    giveWay(routines, motions, bodies, free, clampIn(room))
+    giveWay(routines, motions, bodies, free, clampIn(room), spots)
   }
   bounceOff(ball, bodies, catcher)
   rollOut(ball, bodies, catcher, room.cam, dt)

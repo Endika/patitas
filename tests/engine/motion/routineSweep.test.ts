@@ -143,6 +143,7 @@ function run(
       bodies,
       pups.map((p) => p.r.routine === 'none' && p.m.pose === 'stand' && !p.r.held),
       clamp,
+      spots,
     )
     each?.(n * DT)
     if (done()) return n * DT

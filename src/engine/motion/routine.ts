@@ -19,7 +19,7 @@ import {
 import type { Vec3 } from '@/engine/math'
 import { sphereAt, SPHERES, type Body } from '@/engine/room/bodies'
 import { inTheWay } from '@/engine/room/crowd'
-import { walkingRound, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
+import { inOval, walkingRound, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
 import { SLEEP_TURN } from '@/engine/room/layout'
 import { goTo, type MotionState } from './locomotion'
 import { POSES, setPose } from './poses'
@@ -109,6 +109,8 @@ export interface RoutineState {
   asked: number
   /** Seconds two penned in nose to nose may still squeeze past each other: neither shoves. */
   passT: number
+  /** Times it was made to wait on this way somewhere. */
+  yields: number
   /** At the place it was walking to, turning in there: it holds its ground like one eating. */
   there: boolean
 }
@@ -253,6 +255,7 @@ export function createRoutineState(): RoutineState {
     yieldTo: null,
     asked: 0,
     passT: 0,
+    yields: 0,
     there: false,
   }
 }
@@ -268,6 +271,7 @@ function enter(r: RoutineState, next: Routine) {
   r.waitT = 0
   r.yieldTo = null
   r.asked = 0
+  r.yields = 0
   r.there = false
 }
 
@@ -408,7 +412,7 @@ function detour(
     fz = dz / len
   let best: { x: number; z: number } | null = null,
     bestT = Infinity
-  for (const group of groups) {
+  const consider = (group: readonly Circle[]) => {
     let near = Infinity,
       plus = -Infinity,
       minus = -Infinity,
@@ -424,7 +428,7 @@ function detour(
       if (lateral + c.r > plus) [plus, plusT] = [lateral + c.r, t]
       if (c.r - lateral > minus) [minus, minusT] = [c.r - lateral, t]
     }
-    if (near >= bestT || near === Infinity) continue
+    if (near >= bestT || near === Infinity) return
     const key = group[0]!
     if (around.x !== key.x || around.z !== key.z) {
       around.x = key.x
@@ -441,13 +445,14 @@ function detour(
     if (here > BODY_CLEARANCE) {
       const there = cut(-around.side)
       // Hemmed in against the edge both ways: straight on is the only way out
-      if (there > BODY_CLEARANCE) continue
+      if (there > BODY_CLEARANCE) return
       around.side = -around.side
     }
     const [x, z] = pass(from, fx, fz, around.side, plus, minus, plusT, minusT)
     best = { x, z }
     bestT = near
   }
+  for (const group of groups) consider(group)
   if (!best) around.x = around.z = NaN
   return best ?? to
 }
@@ -843,9 +848,17 @@ export function letGo(r: RoutineState): void {
   if (r.routine === 'bathing' || r.routine === 'brushing') enter(r, 'none')
 }
 
-/** Busy in its place (a meal, the scale, the bath or the brush): nobody shoves it off it. */
+/**
+ * Busy in its place (a meal, the scale, the bath or the brush), there and turning in, making way
+ * or squeezing past: nobody shoves it.
+ */
 export const staysPut = (r: RoutineState): boolean =>
-  !!r.held || r.routine === 'eating' || r.routine === 'onScale' || r.there || r.passT > 0
+  !!r.held ||
+  r.routine === 'eating' ||
+  r.routine === 'onScale' ||
+  r.there ||
+  r.passT > 0 ||
+  r.waitT > 0
 
 /** How far a puppy in the way of a chase walks off, and the least that counts as making way. */
 const STEP_ASIDE = 0.6,
@@ -921,6 +934,7 @@ export function giveWay(
   bodies: readonly Body[],
   free: readonly boolean[],
   clamp: RoutineCtx['clamp'],
+  spots?: Spots,
 ): void {
   for (let i = 0; i < rs.length; i++) {
     const r = rs[i]!
@@ -928,13 +942,31 @@ export function giveWay(
     for (let j = 0; j < rs.length; j++) {
       const o = rs[j]!
       if (j === i || !touching(bodies[i]!, bodies[j]!)) continue
-      if (walking(o) && o.waitT <= 0) {
+      // Waiting for it in its way after all: it makes way again, or they squeeze past
+      if (walking(o) && o.waitT > 0) {
+        if (!makeWay(ms[j]!, ms[i]!, r.target, spots, clamp)) r.passT = o.passT = SQUEEZE
+        r.stuckT = 0
+        r.nearest = Infinity
+        break
+      }
+      if (walking(o)) {
         const far = (k: number) =>
           Math.hypot(rs[k]!.target.x - ms[k]!.pos.x, rs[k]!.target.z - ms[k]!.pos.z)
         const [y, w] = far(i) >= far(j) ? [i, j] : [j, i]
-        stepAside(ms[y]!, ms[w]!.pos.x, ms[w]!.pos.z, clamp)
-        rs[y]!.waitT = YIELD_WAIT
-        rs[y]!.yieldTo = rs[w]!
+        const ry = rs[y]!
+        // Off to a spot clear of the furniture and of the other's way; with none, it stands still
+        // and the other squeezes past
+        if (!makeWay(ms[y]!, ms[w]!, rs[w]!.target, spots, clamp)) {
+          ms[y]!.goal = null
+          ry.passT = rs[w]!.passT = SQUEEZE
+        }
+        ry.waitT = YIELD_WAIT
+        ry.yieldTo = rs[w]!
+        // Made to wait again and again on its way round: the other way round, then
+        if (++ry.yields >= 2) {
+          ry.around.side = -ry.around.side
+          ry.yields = 0
+        }
         rs[w]!.stuckT = 0
         rs[w]!.nearest = Infinity
         break
@@ -959,6 +991,46 @@ export function giveWay(
     ms[k]!.goal = null
     r.passT = rs[k]!.passT = SQUEEZE
   }
+}
+
+/** How far the one making way walks off, at most, and how wide it keeps of furniture and paths. */
+const MAKE_WAY = [0.6, 0.45, 0.3],
+  WAY_CLEAR = 0.2,
+  PATH_CLEAR = 0.5
+
+/**
+ * Walks `m` a step off to where it is clear of every piece and of the way `other` is going to
+ * `to`: the shortest such step. False when there is none.
+ */
+function makeWay(
+  m: MotionState,
+  other: MotionState,
+  to: Vec3,
+  spots: Spots | undefined,
+  clamp: RoutineCtx['clamp'],
+): boolean {
+  const pieces = spots ? [...spots.beds, ...spots.bowls, spots.scale] : []
+  const ox = other.pos.x,
+    oz = other.pos.z,
+    lx = to.x - ox,
+    lz = to.z - oz,
+    l2 = lx * lx + lz * lz
+  // From the other's path, as from the segment it walks
+  const offPath = (x: number, z: number) => {
+    const u = l2 > 1e-12 ? Math.max(0, Math.min(1, ((x - ox) * lx + (z - oz) * lz) / l2)) : 0
+    return Math.hypot(x - ox - u * lx, z - oz - u * lz)
+  }
+  for (const reach of MAKE_WAY)
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2
+      const [x, z] = clamp(m.pos.x + Math.sin(a) * reach, m.pos.z + Math.cos(a) * reach)
+      if (Math.hypot(x - m.pos.x, z - m.pos.z) < reach - 0.05) continue
+      if (offPath(x, z) < PATH_CLEAR) continue
+      if (pieces.some((p) => inOval(p, x, z, WAY_CLEAR))) continue
+      goTo(m, x, z, { happy: 0, energy: 0, gait: 'walk', clamp })
+      return true
+    }
+  return false
 }
 
 /**
@@ -1004,6 +1076,12 @@ export function stepRoutine(
   r.t += dt
   r.idle += dt
   r.passT = Math.max(0, r.passT - dt)
+  // Pushed off its place while turning in there (the scale kept clear, a new layout): back first
+  if (r.there && Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z) > ARRIVED) {
+    r.there = false
+    r.turnLeft = null
+    m.face = null
+  }
   r.begAgo += dt
   r.mudAgo += dt
   r.fedAgo += dt

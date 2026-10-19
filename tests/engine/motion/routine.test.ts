@@ -49,10 +49,25 @@ import {
   type RoutineState,
 } from '@/engine/motion/routine'
 import { anatomy } from '@/engine/puppy/anatomy'
-import { clampPlay, createCamera, fitCamera, PLAY, playLocal } from '@/engine/room/camera'
+import {
+  clampPlay,
+  createCamera,
+  fitCamera,
+  PLAY,
+  playHalf,
+  playLocal,
+  playWorld,
+} from '@/engine/room/camera'
 import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
 import { keepOff, separate } from '@/engine/room/crowd'
-import { computeSpots, inMud, startPlaces, type Spot, type Spots } from '@/engine/room/furniture'
+import {
+  computeSpots,
+  inMud,
+  inOval,
+  startPlaces,
+  type Spot,
+  type Spots,
+} from '@/engine/room/furniture'
 import { seeded } from '../seeded'
 
 const DT = 1 / 60
@@ -164,6 +179,7 @@ function run(
       bodies,
       pups.map((p) => p.r.routine === 'none' && p.m.pose === 'stand' && !p.r.held),
       c,
+      spots,
     )
     each?.()
   }
@@ -825,6 +841,69 @@ describe('bath', () => {
     expect([p.r.routine, p.m.goal, p.m.face]).toEqual(['bathing', null, null])
     expect(touch(p.r)).toBe(false)
     expect(p.r.routine).toBe('bathing')
+  })
+})
+
+describe('pushed off its place', () => {
+  it('walks back before it eats when moved off its bowl while turning in there', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    let pushed = false,
+      off = Infinity
+    run([p], 20, at(12), SPOTS, () => {
+      if (!pushed && p.r.there) {
+        // As keeping the scale clear or a new layout would
+        p.m.pos.x += 0.2
+        p.m.goal = null
+        pushed = true
+      } else if (pushed && p.r.routine === 'eating' && off === Infinity) {
+        const s = mealSpot(SPOTS.bowls[0]!, MUZZLE)
+        off = Math.hypot(p.m.pos.x - s.x, p.m.pos.z - s.z)
+      }
+    })
+    expect(pushed).toBe(true)
+    expect(p.seen).toEqual(['toBowl', 'eating', 'none'])
+    expect(off).toBeLessThan(0.07)
+  })
+})
+
+describe('two hungry puppies from where the review saw them stall', () => {
+  /** Open floor 0.2 clear of every piece, two spots half a metre apart, as the review's probe drew them. */
+  const starts = (framed: ReturnType<typeof fitCamera>, spots: Spots, random: () => number) => {
+    const out: { x: number; z: number }[] = []
+    for (let n = 0; out.length < 2 && n < 10000; n++) {
+      const d = PLAY.near + 0.1 + random() * (PLAY.far - PLAY.near - 0.2)
+      const [x, z] = playWorld(framed, d, (random() * 2 - 1) * playHalf(framed, d) * 0.9)
+      if ([...spots.beds, ...spots.bowls, spots.scale].some((s) => inOval(s, x, z, 0.2))) continue
+      if (out.some((p) => Math.hypot(p.x - x, p.z - z) < 0.5)) continue
+      out.push({ x, z })
+    }
+    return out
+  }
+
+  it.each([
+    [0.65, 50],
+    [0.65, 52],
+  ])('both eat at aspect %f from seed %i', (aspect, seed) => {
+    const framed = fitCamera(createCamera(), aspect)
+    const spots = computeSpots(framed, 2)
+    const pups = starts(framed, spots, seeded(seed * 7919 + Math.round(aspect * 1000))).map((p) =>
+      pup(p.x, p.z, 0.8, 0.8, 1),
+    )
+    let done = -1,
+      t = 0
+    run(
+      pups,
+      30,
+      at(12),
+      spots,
+      () => {
+        t += DT
+        if (done < 0 && pups.every((p) => p.fed === 1)) done = t
+      },
+      undefined,
+      { clamp: (x, z) => clampPlay(framed, x, z) },
+    )
+    expect(done).toBeGreaterThan(0)
   })
 })
 
