@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { clamp, rng } from '@/engine/math'
-import type { FixedCamera } from './camera'
+import { playLocal, type FixedCamera } from './camera'
 import {
   BOWL,
   BOWL_STEP,
@@ -14,7 +14,9 @@ import {
   smoothstep,
   type Furniture,
   type Spot,
+  type Spots,
 } from './furniture'
+import { GRASS } from './layout'
 
 const INK = '#22302e'
 
@@ -178,6 +180,38 @@ export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.
 /** The mat's height over the floor, and how far it reaches past the bowls on it. */
 const MAT_Y = 0.002,
   MAT = { side: 0.18, depth: 0.15, corner: 0.08 }
+
+/** Where a mat lies: its middle, its half sizes across and along the view, and its turn. */
+export interface MatPlace {
+  x: number
+  z: number
+  across: number
+  along: number
+}
+
+/**
+ * The bowls' mats: one under both in a row, else one under each; none reaching the grass, so a
+ * mat by the strip is narrowed (from both sides) to end at the grass's edge.
+ */
+export function bowlMats(cam: FixedCamera, spots: Pick<Spots, 'bowls'>): MatPlace[] {
+  const [a, b] = spots.bowls
+  const inRow = !b || Math.abs(a!.center.distanceTo(b.center) - BOWL_STEP) < 1e-6
+  const lay = (x: number, z: number, across: number): MatPlace => {
+    const { side } = playLocal(cam, x, z)
+    return { x, z, across: Math.min(across, side - GRASS), along: MAT.depth }
+  }
+  if (inRow) {
+    const n = spots.bowls.length
+    let x = 0,
+      z = 0
+    for (const bw of spots.bowls) {
+      x += bw.center.x / n
+      z += bw.center.z / n
+    }
+    return [lay(x, z, ((n - 1) * BOWL_STEP) / 2 + MAT.side)]
+  }
+  return spots.bowls.map((bw) => lay(bw.center.x, bw.center.z, MAT.side))
+}
 
 /** A flat rounded mat under a row of `n` bowls `BOWL_STEP` apart. */
 function bowlMat(n: number): THREE.Mesh {
@@ -394,6 +428,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   const shade = contactTexture()
   const spots = computeSpots(cam, puppies)
   const beds = spots.beds.map((s) => bed(shade, s)),
+    built = spots.beds.map((s) => s.radius),
     bowls = spots.bowls.map(() => bowl(shade)),
     mat = bowlMat(spots.bowls.length),
     // Bowls set apart one in front of the other each stand on a mat of their own
@@ -429,17 +464,24 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
         o.position.copy(s.center)
         o.rotation.y = next.az
       }
-      mat.position.set(0, MAT_Y, 0)
-      for (const b of spots.bowls) mat.position.add(b.center)
-      mat.position.divideScalar(spots.bowls.length).setY(MAT_Y)
-      mat.rotation.y = next.az
-      const [a, b] = spots.bowls
-      const inRow = !b || Math.abs(a!.center.distanceTo(b.center) - BOWL_STEP) < 1e-6
-      mat.visible = inRow
+      // The mats as planned, each built at its full width and narrowed to the plan
+      const plan = bowlMats(next, spots),
+        inRow = plan.length === 1 && spots.bowls.length > 1
+      const lay = (m: THREE.Mesh, at: MatPlace, full: number) => {
+        m.position.set(at.x, MAT_Y, at.z)
+        m.rotation.y = next.az
+        m.scale.x = at.across / full
+      }
+      mat.visible = inRow || spots.bowls.length === 1
+      if (mat.visible) lay(mat, plan[0]!, ((spots.bowls.length - 1) * BOWL_STEP) / 2 + MAT.side)
       ownMats.forEach((m, i) => {
         m.visible = !inRow
-        m.position.copy(spots.bowls[i]!.center).setY(MAT_Y)
-        m.rotation.y = next.az
+        if (m.visible) lay(m, plan[i]!, MAT.side)
+      })
+      // The beds as planned: built on a circle of the radius they were laid out with first
+      beds.forEach((g, i) => {
+        const { radius, depth } = spots.beds[i]!
+        g.scale.set(radius / built[i]!, 1, depth / built[i]!)
       })
       gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
     },
