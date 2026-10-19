@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-/** How long after «Pulsa atrás otra vez para salir» a second back leaves, in milliseconds. */
+/** How long «Pulsa atrás otra vez para salir» waits for a second back that leaves, in ms. */
 export const EXIT_MS = 2000
 
 const GUARD = { patitas: 'guard' }
@@ -8,70 +8,46 @@ const GUARD = { patitas: 'guard' }
 const isGuard = (state: unknown) =>
   typeof state === 'object' && state !== null && (state as typeof GUARD).patitas === GUARD.patitas
 
-/**
- * Whether the app runs installed rather than in a browser tab. A tab in element fullscreen also
- * reads as the fullscreen display mode, so that alone does not count.
- */
-const runsInstalled = () =>
-  window.matchMedia('(display-mode: standalone)').matches ||
-  (window.matchMedia('(display-mode: fullscreen)').matches && !document.fullscreenElement)
+/** The history the guard stands in, and where its `popstate` arrives. */
+export interface BackGuardHistory {
+  history: Pick<History, 'state' | 'pushState'>
+  target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
+}
 
 /**
- * Keeps the system back gesture in the game: a back first closes what is open (`closeTop` says
- * whether it closed anything); with nothing open it asks for another, and a second one within
- * `EXIT_MS` leaves. Returns how many times it has asked, so each ask can show again.
+ * Keeps the system back gesture in the app: one guard entry stands in front of the page. A back
+ * first closes what is open (`closeTop` says whether it closed anything) and the guard goes back
+ * in front. With nothing open it asks for another and leaves the page on its own entry for
+ * `EXIT_MS`, so a second back leaves the way the browser or the system would; still here after
+ * that, the guard goes back in front. Returns how many times it has asked, so each ask shows again.
  */
 export function useBackGuard(
   closeTop: () => boolean,
-  {
-    history = window.history,
-    target = window,
-    now = Date.now,
-    installed = runsInstalled,
-    close = () => window.close(),
-  }: {
-    history?: Pick<History, 'state' | 'pushState' | 'back'>
-    target?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
-    now?: () => number
-    installed?: () => boolean
-    /** Closes an installed app, where the browser lets a page do it. */
-    close?: () => void
-  } = {},
+  { history = window.history, target = window }: Partial<BackGuardHistory> = {},
 ): number {
   const [asked, setAsked] = useState(0)
-  const latest = useRef({ closeTop, now, installed, close })
+  const latest = useRef(closeTop)
   useEffect(() => {
-    latest.current = { closeTop, now, installed, close }
+    latest.current = closeTop
   })
 
   useEffect(() => {
-    let askedAt: number | null = null
     let rearm: ReturnType<typeof setTimeout> | undefined
     // A reload keeps the guard entry it stood on, so there is never more than one
     const arm = () => {
       clearTimeout(rearm)
-      askedAt = null
       if (!isGuard(history.state)) history.pushState(GUARD, '')
     }
     arm()
-    const pop = () => {
-      const { closeTop, now, installed, close } = latest.current
-      if (closeTop()) {
+    const pop = (event: Event) => {
+      // A forward onto the guard is not a back
+      if (isGuard((event as PopStateEvent).state)) return
+      if (latest.current()) {
         arm()
         return
       }
-      const at = now()
-      if (askedAt !== null && at - askedAt < EXIT_MS) {
-        // Past the guard already: in a tab one more step back is the page before the game; an
-        // installed app sits on its first entry, where the next system back closes it
-        if (installed()) close()
-        else history.back()
-        // Still here once the time to leave is over, the guard goes back in front
-        rearm = setTimeout(arm, askedAt + EXIT_MS - at)
-        return
-      }
-      arm()
-      askedAt = at
+      clearTimeout(rearm)
+      rearm = setTimeout(arm, EXIT_MS)
       setAsked((n) => n + 1)
     }
     target.addEventListener('popstate', pop)

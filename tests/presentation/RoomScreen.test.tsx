@@ -7,6 +7,7 @@ import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
 import { createCare, health } from '@/domain/care'
 import type { GameStorage } from '@/infrastructure/storage'
+import { fakeHistory, type FakeHistory } from './fakeHistory'
 import { createFakePreview, createFakeStage, needs, savingStorage } from './fakeStage'
 
 async function adopted(names: string[]): Promise<GameStorage> {
@@ -26,7 +27,12 @@ const start = (
   {
     stage = createFakeStage(),
     now = Date.now,
-  }: { stage?: ReturnType<typeof createFakeStage>; now?: () => number } = {},
+    history,
+  }: {
+    stage?: ReturnType<typeof createFakeStage>
+    now?: () => number
+    history?: FakeHistory
+  } = {},
 ) => {
   render(
     <App
@@ -34,6 +40,7 @@ const start = (
       createStage={stage.create}
       createPreview={createFakePreview().create}
       now={now}
+      history={history}
     />,
   )
   return stage
@@ -588,10 +595,11 @@ describe('RoomScreen', () => {
     const user = userEvent.setup()
     const storage = await adopted(['Luna'])
     const luna = (await ids(storage)).get('Luna')!
-    const stage = start(storage)
+    const tab = fakeHistory()
+    const stage = start(storage, { history: tab })
     const toggle = await screen.findByRole('button', { name: 'Cachorros' }, { timeout: 3000 })
     act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
-    const back = () => act(() => void window.dispatchEvent(new PopStateEvent('popstate')))
+    const back = () => tab.history.back()
     const asked = () => screen.queryByText('Pulsa atrás otra vez para salir')
 
     await user.click(screen.getByRole('button', { name: 'Cuidar' }))
@@ -620,6 +628,6 @@ describe('RoomScreen', () => {
     act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
     back()
     expect(asked()).toHaveAttribute('role', 'status')
-    expect(window.history.state).toEqual({ patitas: 'guard' })
+    expect(tab.entries()).toEqual([null])
   })
 })

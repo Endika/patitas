@@ -1,9 +1,12 @@
-import { lazy, Suspense, useCallback, useState } from 'react'
+import { lazy, Suspense, useCallback, useRef, useState } from 'react'
 import { openGameStorage, type StorageHooks } from '@/infrastructure/idbStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 import type { RoomStage } from './roomStage'
 import type { CreatePreview } from './components/AdoptPreview'
+import type { Closable } from './components/useDismiss'
 import AdoptScreen from './screens/AdoptScreen'
+import { EXIT_MS, useBackGuard, type BackGuardHistory } from './useBackGuard'
+import { useFleeting } from './useFleeting'
 import { useGame } from './useGame'
 
 // The room brings three.js: it loads only once there is a puppy to show
@@ -24,6 +27,7 @@ export default function App({
   createPreview,
   now,
   reload = reloadPage,
+  history,
 }: {
   openStorage?: (hooks: StorageHooks) => Promise<GameStorage>
   /** Starts the page over, for when another tab needs to upgrade the storage. */
@@ -32,6 +36,8 @@ export default function App({
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   createPreview?: CreatePreview
+  /** Where the system back arrives; the page's own history unless a test brings its own. */
+  history?: BackGuardHistory
 }) {
   const [blocked, setBlocked] = useState(false)
   const open = useCallback(
@@ -42,6 +48,20 @@ export default function App({
   const [adopting, setAdopting] = useState(false)
   // A puppy adopted into a full room, until the player moves someone
   const [outside, setOutside] = useState<string | null>(null)
+
+  // One guard keeps the system back in the app: adopting goes back to the room, and the room
+  // closes what is open, before it asks to leave
+  const roomScreen = useRef<Closable>(null)
+  const returnable = adopting && !!game.state?.puppies.length
+  const closeTop = () => {
+    if (returnable) {
+      setAdopting(false)
+      return true
+    }
+    return roomScreen.current?.close() ?? false
+  }
+  const exitAsked = useFleeting(useBackGuard(closeTop, history) || null, EXIT_MS) !== null
+
   if (!game.state) return <Blank blocked={blocked} />
   const { puppies, room, persistent } = game.state
 
@@ -56,11 +76,14 @@ export default function App({
         }}
         onBack={puppies.length ? () => setAdopting(false) : undefined}
         createPreview={createPreview}
+        exitAsked={exitAsked}
       />
     )
   return (
     <Suspense fallback={<Blank />}>
       <RoomScreen
+        ref={roomScreen}
+        exitAsked={exitAsked}
         puppies={puppies}
         room={room}
         unsaved={!persistent}
