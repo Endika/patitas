@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDB } from 'idb'
 import { BREEDS } from '../../src/domain/breeds'
 import { addMess, cleanMess, createCare } from '../../src/domain/care'
@@ -110,5 +110,27 @@ describe('idbStorage', () => {
     expect(await storage.listPuppies()).toEqual([puppy])
     expect(await storage.loadRoom()).toEqual({ inRoom: [puppy.id] })
     expect(await storage.loadCare(puppy.id)).toBeUndefined()
+  })
+  it('says so when another tab keeps the old version open, and goes on once it closes', async () => {
+    const old = await openDB('patitas', 1, {
+      upgrade(db) {
+        db.createObjectStore('puppies', { keyPath: 'id' })
+        db.createObjectStore('meta')
+      },
+    })
+    let blocked = 0
+    const opening = openGameStorage({ blocked: () => void blocked++, reload: () => {} })
+    await vi.waitFor(() => expect(blocked).toBe(1))
+    old.close()
+    expect((await opening).persistent).toBe(true)
+  })
+
+  it('lets go and reloads when another tab wants to upgrade', async () => {
+    let reloads = 0
+    const storage = await openGameStorage({ blocked: () => {}, reload: () => void reloads++ })
+    const next = await openDB('patitas', 3, { upgrade() {} })
+    expect(reloads).toBe(1)
+    next.close()
+    await expect(storage.listPuppies()).rejects.toThrow()
   })
 })
