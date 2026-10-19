@@ -18,11 +18,13 @@ import {
   createRoutineState,
   followBed,
   forgetRoute,
+  holdForBath,
   keepsEating,
   MEAL_TIME,
   mealSpot,
   MUD_EVERY,
   RELIEF_TIME,
+  releaseFromBath,
   relieveNow,
   SPLASH_TIME,
   stepRoutine,
@@ -697,6 +699,68 @@ describe('pee and poop', () => {
     expect(p.care.happiness).toBeLessThan(0.8)
     run([p], 1200, at(12))
     expect(p.care.happiness).toBeCloseTo(0.8 - MESS_GLOOM_MAX)
+  })
+})
+
+describe('bath', () => {
+  const still = (p: Pup, secs: number, now: number, more: Partial<RoutineCtx> = {}) => {
+    const from = p.m.pos.clone()
+    let moved = 0
+    run(
+      [p],
+      secs,
+      now,
+      SPOTS,
+      () => (moved = Math.max(moved, p.m.pos.distanceTo(from))),
+      undefined,
+      more,
+    )
+    return moved
+  }
+
+  it('woken for a bath it stretches, then stands still for it, even at bedtime', () => {
+    const p = pup(0.12, -0.12)
+    tuckIn(p.r, p.m)
+    holdForBath(p.r, p.m)
+    expect(p.r.routine).toBe('stretch')
+    run([p], 2, at(22))
+    expect(p.seen).toEqual(['stretch', 'bathing'])
+    expect([p.m.pose, p.m.goal]).toEqual(['stand', null])
+    expect(still(p, 120, at(22))).toBeLessThan(0.02)
+    expect(p.r.routine).toBe('bathing')
+  })
+
+  it('called away from its meal, it leaves the bowl and what it ate counts', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([p], 20, at(12), SPOTS, () => {
+      if (p.r.routine === 'eating' && p.r.t > 1 && !p.r.bath) holdForBath(p.r, p.m)
+    })
+    expect(p.seen).toEqual(['toBowl', 'eating', 'bathing'])
+    expect(p.care.hunger).toBeLessThan(0.75)
+    expect(p.bowl).toBeGreaterThan(0.3)
+    expect(p.m.bowGoal).toBe(0)
+  })
+
+  it('in the bath it neither wanders, eats, nor squats; afterwards it does', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    p.care = { ...p.care, bladder: 1 }
+    holdForBath(p.r, p.m)
+    expect(still(p, 60, at(12), { curious: 1, random: () => 0 })).toBeLessThan(0.02)
+    expect(p.seen).toEqual(['bathing'])
+    expect([p.bowl, p.left.length]).toEqual([1, 0])
+    releaseFromBath(p.r)
+    run([p], 1, at(12), SPOTS, undefined, undefined, { random: () => 0.9 })
+    expect(p.seen.slice(0, 2)).toEqual(['bathing', 'relieving'])
+  })
+
+  it('stopping a walk for the bath leaves no stray turn or goal', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([p], 0.3, at(12))
+    expect(p.r.routine).toBe('toBowl')
+    holdForBath(p.r, p.m)
+    expect([p.r.routine, p.m.goal, p.m.face]).toEqual(['bathing', null, null])
+    expect(touch(p.r)).toBe(false)
+    expect(p.r.routine).toBe('bathing')
   })
 })
 

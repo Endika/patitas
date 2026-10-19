@@ -175,7 +175,8 @@ describe('actions', () => {
     expect(washed.cleanliness).toBeCloseTo(0.8)
     expect(washed.wet).toBe(1)
     expect(wash(care, 2).cleanliness).toBe(1)
-    expect(dry(washed, 30).wet).toBeCloseTo(0.5)
+    // Left alone it dries in about 10 min
+    expect(dry(washed, 300).wet).toBeCloseTo(0.5)
     expect(dry(washed, 600).wet).toBe(0)
   })
 

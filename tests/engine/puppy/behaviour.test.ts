@@ -18,6 +18,7 @@ import {
   type BehaviourState,
 } from '@/engine/puppy/behaviour'
 import { createBall } from '@/engine/room/ball'
+import { SHAKE_TIME } from '@/engine/room/bath'
 
 const DT = 1 / 60
 const EARS = anatomy(BREEDS.dorado).ears
@@ -178,6 +179,75 @@ describe('stepBehaviour', () => {
     }
     expect(pose.target.y).toBeLessThan(0.1)
     expect(pose.head[0] + pose.neck[0]).toBeGreaterThan(0.4)
+  })
+})
+
+describe('bath', () => {
+  /** Rolls of the spine each frame for `secs`, with `set` changing the input first. */
+  const rolls = (secs: number, set: (input: BehaviourInput, t: number) => void) => {
+    const { rig, s, input } = world()
+    const out: number[] = []
+    for (let f = 1; f * DT <= secs; f++) {
+      input.now = f * DT
+      set(input, input.now)
+      out.push(stepBehaviour(rig, s, input, DT, input.now).spine[2])
+    }
+    return out
+  }
+  const crossings = (xs: number[]) =>
+    xs.filter((x, i) => i > 0 && Math.sign(x) !== Math.sign(xs[i - 1]!)).length
+  const most = (xs: number[]) => Math.max(...xs.map(Math.abs))
+
+  it('shakes its body ±0.5 rad at 9 Hz for 1.2 s', () => {
+    const shake = rolls(SHAKE_TIME, (input, t) => {
+      input.routine = 'bathing'
+      input.bath = { phase: 'shake', t, touched: false }
+    })
+    expect(most(shake)).toBeGreaterThan(0.45)
+    expect(most(shake)).toBeLessThanOrEqual(0.5 + 1e-9)
+    expect(crossings(shake)).toBeGreaterThanOrEqual(19)
+    expect(crossings(shake)).toBeLessThanOrEqual(22)
+  })
+
+  it('trembles a little at 12 Hz while wet, and not at all once dry', () => {
+    const wet = rolls(1, (input) => (input.wet = 1))
+    expect(most(wet)).toBeGreaterThan(0.005)
+    expect(most(wet)).toBeLessThan(0.05)
+    expect(crossings(wet)).toBeGreaterThanOrEqual(22)
+    expect(crossings(wet)).toBeLessThanOrEqual(25)
+    expect(most(rolls(1, (input) => (input.wet = 0)))).toBe(0)
+  })
+
+  /** Rubbed in the bath for `secs` with `persona`: its mood, ears and gaze. */
+  const bathed = (persona: Persona, secs: number, touched = true) => {
+    const { rig, s, input } = world(persona)
+    input.routine = 'bathing'
+    const happy = s.happy
+    let pose = stepBehaviour(rig, s, input, DT, 0)
+    const yaws: number[] = []
+    for (let f = 1; f * DT <= secs; f++) {
+      input.now = f * DT
+      input.bath = { phase: 'scrub', t: input.now, touched }
+      pose = stepBehaviour(rig, s, input, DT, input.now)
+      yaws.push(s.yaw.x)
+    }
+    return { gain: s.happy - happy, pose, yaws }
+  }
+  const LIKES = { energy: 0.5, cuddly: 0.9, curious: 0.5 },
+    DISLIKES = { energy: 0.5, cuddly: 0.2, curious: 0.5 }
+
+  it('a puppy who likes the bath wags; one who does not puts its ears back and looks away', () => {
+    const likes = bathed(LIKES, 3),
+      dislikes = bathed(DISLIKES, 3),
+      untouched = bathed(LIKES, 3, false)
+    expect(likes.gain).toBeGreaterThan(untouched.gain + 0.1)
+    expect(dislikes.gain).toBeLessThanOrEqual(untouched.gain + 1e-9)
+    for (const ear of dislikes.pose.ears) expect(ear.base[0]).toBeLessThan(-0.2)
+    for (const ear of likes.pose.ears) expect(ear.base[0]).toBeGreaterThan(-0.1)
+    // A brief look away when the rubbing starts, then back
+    const away = (r: ReturnType<typeof bathed>) => Math.max(...r.yaws.slice(0, 50).map(Math.abs))
+    expect(away(dislikes)).toBeGreaterThan(away(likes) + 0.3)
+    expect(Math.abs(dislikes.yaws.at(-1)! - likes.yaws.at(-1)!)).toBeLessThan(0.05)
   })
 })
 

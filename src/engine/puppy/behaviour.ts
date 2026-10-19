@@ -6,6 +6,7 @@ import type { BodyPose, MotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import type { Routine } from '@/engine/motion/routine'
 import type { BallState } from '@/engine/room/ball'
+import { SHAKE_HZ, SHAKE_ROLL, SHAKE_TIME, TREMBLE_HZ, type BathPhase } from '@/engine/room/bath'
 import type { Anatomy, ZoneId } from './anatomy'
 import { sm } from './sdf'
 
@@ -28,6 +29,16 @@ const CHEW = 0.12,
 /** In the puddle: the head dips at the mud with a quick sniffing nod. */
 const MUD_PITCH = 0.75,
   MUD_NOD = { amp: 0.08, hz: 2.2 }
+/** From this cuddliness a puppy likes its bath: it wags while rubbed, getting happier. */
+const BATH_FONDNESS = 0.5,
+  BATH_JOY = 0.08
+/** One who does not puts its ears back and looks away for a moment when the rubbing starts. */
+const LOOK_AWAY = 0.9,
+  LOOK_AWAY_YAW = 1
+/** Seconds the shake takes to build up and to die down. */
+const SHAKE_EASE = 0.12
+/** Wet through, it trembles this much. */
+const TREMBLE = 0.02
 /** Asking for food: the head tips to one side, then the other. */
 const BEG_TILT = 0.24
 /** Asleep: the head turns onto the front paws and the tail wraps round the body. */
@@ -114,6 +125,10 @@ export interface BehaviourState {
   twitchSide: number
   saccT: number
   sacc: { x: number; y: number }
+  /** Rubbed in the bath last frame; seconds left looking away; ears back, 0 to 1. */
+  bathRubbed: boolean
+  lookAwayT: number
+  earsBack: number
 }
 
 export function createBehaviourState(): BehaviourState {
@@ -155,6 +170,9 @@ export function createBehaviourState(): BehaviourState {
     twitchSide: 0,
     saccT: 0,
     sacc: { x: 0, y: 0 },
+    bathRubbed: false,
+    lookAwayT: 0,
+    earsBack: 0,
   }
 }
 
@@ -217,6 +235,10 @@ export interface BehaviourInput {
   camera: Vec3
   /** What its own routine has it doing: eating and asking for food move the head and jaw. */
   routine?: Routine
+  /** Its bath, if any: the phase, seconds in it, and whether the finger is at work on it. */
+  bath?: { phase: BathPhase; t: number; touched: boolean }
+  /** How wet its coat is, 0 to 1: wet, it trembles. */
+  wet?: number
   random?: () => number
 }
 
@@ -270,6 +292,13 @@ export function stepBehaviour(
   const eating = input.routine === 'eating',
     begging = input.routine === 'begging',
     splashing = input.routine === 'splashing'
+  const bath = input.bath && input.bath.phase !== 'off' ? input.bath : null
+  const likesBath = P.cuddly >= BATH_FONDNESS
+  const rubbed = !!bath?.touched
+  if (rubbed && !s.bathRubbed && !likesBath) s.lookAwayT = LOOK_AWAY
+  s.bathRubbed = rubbed
+  s.lookAwayT = Math.max(0, s.lookAwayT - dt)
+  s.earsBack = damp(s.earsBack, bath && !likesBath ? 1 : 0, 6, dt)
 
   if ((zone === 'belly' || zone === 'back') && M.pose === 'lie' && s.happy > 0.4)
     setPose(M, 'belly')
@@ -279,7 +308,7 @@ export function stepBehaviour(
   const target = new THREE.Vector3()
   if (eating || splashing)
     target.set(M.pos.x + Math.sin(M.heading) * 0.45, 0.05, M.pos.z + Math.cos(M.heading) * 0.45)
-  else if (begging) target.copy(input.camera)
+  else if (begging || bath) target.copy(input.camera)
   else if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
   else if (task === 'present' || (petting && petHead)) target.copy(input.camera)
   else if (petting) target.copy(s.petPoint)
@@ -338,6 +367,7 @@ export function stepBehaviour(
     pitchT = MUD_PITCH + MUD_NOD.amp * Math.sin(t * 2 * Math.PI * MUD_NOD.hz)
     yawT *= 0.3
   }
+  if (s.lookAwayT > 0) yawT = -Math.sign(yawT || 1) * LOOK_AWAY_YAW
   spring(s.yaw, yawT, 55, 12, dt)
   spring(s.pitch, pitchT, 55, 12, dt)
   const yawAcc = (s.yaw.v - s.lastYawV) / Math.max(dt, 1e-3)
@@ -358,6 +388,7 @@ export function stepBehaviour(
 
   // Happiness, breathing and panting
   s.happy = Math.max(0.12, s.happy - dt * (petting || task !== 'free' ? 0 : 0.012))
+  if (rubbed && likesBath) s.happy = Math.min(1, s.happy + dt * BATH_JOY)
   s.pant = damp(s.pant, !asleep && (s.happy > 0.62 || body.k > 0.5) ? 1 : 0, 2, dt)
   s.breath += dt * (1.6 + s.pant * 6.5 + (SLEEP.breath - 1.6 - s.pant * 6.5) * sw)
   const br = Math.sin(s.breath)
@@ -397,10 +428,22 @@ export function stepBehaviour(
     (s.yaw.x * 0.6 * (1 - bw) + 0.55 * bw) * aw + SLEEP.head[1] * M.sleepSide * sw,
     s.roll.x * 0.7 * aw,
   ]
+  const shakeT = bath?.phase === 'shake' ? bath.t : -1
+  const shakeRoll =
+    shakeT >= 0
+      ? SHAKE_ROLL *
+        Math.sin(shakeT * 2 * Math.PI * SHAKE_HZ) *
+        sm(0, SHAKE_EASE, shakeT) *
+        (1 - sm(SHAKE_TIME - SHAKE_EASE, SHAKE_TIME, shakeT))
+      : 0
+  const tremble =
+    shakeT >= 0
+      ? 0
+      : TREMBLE * sm(0.15, 0.6, input.wet ?? 0) * aw * Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
   const spine: Rot = [
     body.pitch * (1 - fk),
     s.yaw.x * 0.08 * (1 - fk),
-    body.roll * (1 - fk) + bw * 2.7,
+    body.roll * (1 - fk) + bw * 2.7 + shakeRoll + tremble,
   ]
 
   // Rump wiggle with the tail, and the scratch reflex: the hind leg moves on its own
@@ -441,7 +484,8 @@ export function stepBehaviour(
     const st = s.ears[i]!
     const tw = s.twitch > 0 && s.twitchSide === i ? Math.sin((s.twitch / 0.25) * Math.PI) : 0
     if (rig.ear === 'floppy') {
-      const tgt = s.perk * 0.14 + (petHead ? 0.06 : 0) + tw * 0.08 + body.k * 0.08
+      const tgt =
+        s.perk * 0.14 + (petHead ? 0.06 : 0) + tw * 0.08 + body.k * 0.08 + Math.abs(shakeRoll) * 0.5
       // The base follows the head with some lag; the tip trails, folds and settles back
       st.v += ((tgt - st.a) * 70 - st.v * 9 - side * yawAcc * 0.004 - M.bobAcc * 0.003) * dt
       st.a += st.v * dt
@@ -450,11 +494,16 @@ export function stepBehaviour(
       st.ta += st.tv * dt
       st.ta = clamp(st.ta, -0.6, 0.6)
       return {
-        base: [-s.perk * 0.06 + br * 0.006 - body.k * 0.1, 0, side * st.a] as Rot,
+        base: [
+          -s.perk * 0.06 + br * 0.006 - body.k * 0.1 - 0.35 * s.earsBack,
+          0,
+          side * st.a,
+        ] as Rot,
         tip: [-body.k * 0.15 - Math.abs(st.ta) * 0.3, 0, side * st.ta] as Rot,
       }
     }
-    const tgt = petHead ? -0.6 : s.perk * 0.12 + tw * 0.2 - body.k * 0.35
+    const up = petHead ? -0.6 : s.perk * 0.12 + tw * 0.2 - body.k * 0.35
+    const tgt = up + (-0.6 - up) * s.earsBack
     st.v += ((tgt - st.a) * 120 - st.v * 11 - side * yawAcc * 0.004) * dt
     st.a += st.v * dt
     return { base: [st.a, 0, side * (petHead ? 0.18 : 0)] as Rot, tip: [0, 0, 0] as Rot }

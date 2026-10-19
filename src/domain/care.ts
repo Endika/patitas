@@ -37,7 +37,8 @@ export const CLEANLINESS_LOSS_PER_HOUR = 0.02
 export const ENERGY_REST_PER_HOUR = 0.25
 export const ENERGY_MOVE_LOSS_PER_HOUR = 0.3
 export const HAPPINESS_DRIFT_PER_HOUR = 0.05
-export const WET_LOSS_PER_SECOND = 1 / 60
+/** Left alone, a soaked coat dries in about 10 min. */
+export const WET_LOSS_PER_SECOND = 1 / 600
 export const MEAL_WEIGHT_KG = 0.02
 export const PLAY_WEIGHT_KG_PER_MINUTE = 0.004
 export const MEAL_HUNGER = 0.7
