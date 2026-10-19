@@ -173,7 +173,7 @@ describe('computeSpots', () => {
   )
 
   it.each(COUNTS)(
-    'places the garden on the left, the beds back-right and bowls and scale at the front for %i',
+    'places the garden on the left, the beds back-right and the bowls at the front for %i',
     (n) => {
       const { cam } = view(1)
       const spots = computeSpots(cam, n)
@@ -188,9 +188,20 @@ describe('computeSpots', () => {
       expect(local(spots.mud.center).d).toBeLessThan(local(spots.garden.center).d)
       for (const s of spots.beds) expect(local(s.center).d).toBeGreaterThan(1)
       for (const s of spots.bowls) expect(local(s.center).d).toBeLessThan(0)
-      expect(local(spots.scale.center).d).toBeLessThan(0)
+      // With two, the right-hand bowl is near the middle on a square screen: the scale goes back
+      // on the right, out of the way of the one eating there
+      if (n === 1) expect(local(spots.scale.center).d).toBeLessThan(0)
+      else expect(local(spots.scale.center).d).toBeGreaterThan(0.5)
     },
   )
+
+  it('keeps the scale in front beside two bowls on a wide screen', () => {
+    const { cam } = view(1.78)
+    const spots = computeSpots(cam, 2)
+    const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
+    expect(local(spots.scale.center).d).toBeLessThan(0)
+    expect(local(spots.scale.center).side).toBeGreaterThan(0)
+  })
 
   it('stretches the garden along the depth and grows it with the frame', () => {
     const narrow = computeSpots(view(0.46).cam, 1).garden,

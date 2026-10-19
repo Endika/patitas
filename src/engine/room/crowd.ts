@@ -50,8 +50,8 @@ function out(p: Vec3, x: number, z: number, r: number, clamp?: Clamp) {
     dz = p.z - z,
     d = Math.hypot(dx, dz)
   if (d >= r) return
-  const [nx, nz] = d > 1e-6 ? [dx / d, dz / d] : [1, 0]
-  move(p, nx * (r - d), nz * (r - d), clamp)
+  if (d > 1e-6) move(p, (dx / d) * (r - d), (dz / d) * (r - d), clamp)
+  else move(p, r, 0, clamp)
 }
 
 function move(p: Vec3, dx: number, dz: number, clamp?: Clamp): number {

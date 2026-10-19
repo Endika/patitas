@@ -62,6 +62,8 @@ const BED_STEP = 2 * BED.radius + 0.11
 const BOWL_STEP = 0.47
 /** The scale's depth when there is no room for it beside the bowls. */
 const SCALE_BACK_D = 0.8
+/** With two, the scale stays in front only with the right-hand bowl this far left of the middle. */
+const EATER_CLEAR = 0.3
 /** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
 const SLEEPER = { reach: 0.45, ahead: 0.3 }
 /** The share of the screen's half width a sleeper may reach. */
@@ -109,11 +111,14 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     half = playHalf(cam, bowlD)
   const bowlSides = row(puppies, BOWL_STEP, -0.8 * half, 0.95 * half)
   // The scale steps right when two bowls reach towards it; when they leave it no room in front,
-  // as on a narrow screen, it goes further back on the right, across from the garden
+  // as on a narrow screen, it goes further back on the right, across from the garden. So it does
+  // with a second bowl near the middle: a puppy going to be weighed would pass behind it and
+  // shove the one eating there
   const scaleOff = BOWL.radius + 0.125 + SCALE.radius
-  const nextTo = bowlSides.at(-1)! + scaleOff
+  const last = bowlSides.at(-1)!,
+    nextTo = last + scaleOff
   const scaleAt =
-    nextTo <= 0.95 * half
+    nextTo <= 0.95 * half && (puppies === 1 || last <= -EATER_CLEAR)
       ? { d: bowlD, side: Math.max(0.8 * half, nextTo) }
       : { d: SCALE_BACK_D, side: 0.8 * playHalf(cam, SCALE_BACK_D) }
   const gd = 0.8,

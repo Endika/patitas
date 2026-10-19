@@ -33,6 +33,13 @@ import { raySphere } from '@/engine/room/input'
 
 const DT = 1 / 60
 
+/** A repeatable stream of draws, so the spray and the lather land the same every run. */
+const seeded = (seed: number) => () => {
+  seed = (seed * 16807) % 2147483647
+  return seed / 2147483647
+}
+const lather = seeded(3)
+
 interface Pup {
   A: Anatomy
   rest: DirtRest
@@ -160,8 +167,9 @@ function stroker(pup: Pup, heading: number) {
 /** Strokes the puppy for `secs` from the side `heading` shows, or runs the bath untouched. */
 function run(b: Bath, coat: Coat, secs: number, heading?: number, pup = pups.shiba) {
   const next = heading == null ? () => null : stroker(pup, heading)
+  const random = seeded(11)
   for (let f = 0; f < Math.round(secs / DT); f++)
-    stepBath(b, { coat, touch: next(), reach: pup.reach }, DT)
+    stepBath(b, { coat, touch: next(), reach: pup.reach, random }, DT)
 }
 
 /** A finger on `p` that does not move. */
@@ -226,14 +234,16 @@ describe('bath', () => {
     const paw = new THREE.Vector3(...A.bones[A.bi.wrL!]!.pos)
     paw.y = 0.04
     const before = Float32Array.from(coat.dirt.field)
-    for (let f = 0; f < 120; f++) stepBath(b, { coat, touch: still(paw), reach }, DT)
+    for (let f = 0; f < 120; f++)
+      stepBath(b, { coat, touch: still(paw), reach, random: lather }, DT)
     expect(coat.dirt.field).toEqual(before)
     expect(b.foamN).toBe(0)
     expect(b.touched).toBe(false)
     rinse(b)
     run(b, coat, RINSE_TIME + SHAKE_TIME + 0.1)
     takeDryer(b)
-    for (let f = 0; f < 120; f++) stepBath(b, { coat, touch: still(paw), reach }, DT)
+    for (let f = 0; f < 120; f++)
+      stepBath(b, { coat, touch: still(paw), reach, random: lather }, DT)
     expect(meanWet(coat)).toBeGreaterThan(0.99)
   })
 
@@ -258,7 +268,7 @@ describe('bath', () => {
     for (let f = 0; f < 60; f++) {
       touch.rest.x = touch.local.x = paw.x + 0.02 * Math.sin(f / 3)
       touch.travel = 0.02
-      stepBath(b, { coat, touch, reach }, DT)
+      stepBath(b, { coat, touch, reach, random: lather }, DT)
     }
     const p = rest.position
     for (let i = 0; i < before.length; i++) {
@@ -286,7 +296,7 @@ describe('bath', () => {
     for (let f = 0; f < 60; f++) {
       touch.rest.z = touch.local.z = 0.03 * Math.sin(f / 3)
       touch.travel = 0.02
-      stepBath(b, { coat, touch, reach }, DT)
+      stepBath(b, { coat, touch, reach, random: lather }, DT)
     }
     expect(meanAt(coat.dirt.field, belly)).toBeLessThan(before * 0.5)
   })
@@ -380,7 +390,7 @@ describe('bath', () => {
     let uploads = 0
     const next = stroker(pups.shiba, QUARTER)
     for (let f = 0; f < 120; f++) {
-      stepBath(b, { coat, touch: next(), reach }, DT)
+      stepBath(b, { coat, touch: next(), reach, random: lather }, DT)
       if (flushCoat(coat, DT)) uploads++
     }
     expect(uploads).toBeGreaterThan(10)
@@ -399,7 +409,7 @@ describe('bath', () => {
 describe('createBathLayer', () => {
   const setup = () => {
     const scene = new THREE.Scene()
-    const layer = createBathLayer(scene)
+    const layer = createBathLayer(scene, seeded(7))
     const coat = createCoat(rest, dirty()),
       b = createBath()
     const group = new THREE.Group()

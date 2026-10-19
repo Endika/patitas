@@ -192,6 +192,20 @@ const GLINTS: [Tuple3, number, number][] = [
 
 const Z = new THREE.Vector3(0, 0, 1)
 
+/** The puppies' motions, gathered each frame without a new array. */
+const crowd: MotionState[] = []
+const clamps = new WeakMap<RoomScene, (x: number, z: number) => [number, number]>()
+
+/** One clamp to the play area per room, rather than a closure each frame. */
+function clampIn(room: RoomScene): (x: number, z: number) => [number, number] {
+  let c = clamps.get(room)
+  if (!c) {
+    c = (x, z) => clampPlay(room.cam, x, z)
+    clamps.set(room, c)
+  }
+  return c
+}
+
 const noWade = () => null
 const wades = new WeakMap<Spots, (x: number, z: number) => Vec3 | null>()
 
@@ -743,23 +757,20 @@ export function tickPuppies(
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
   if (room.furniture) showBowls(room.furniture, views)
-  // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
-  const owner = spots && views.length > 1 ? views.find((v) => weighing(v.routine)) : undefined
-  if (owner)
-    keepOff(
-      views.map((v) => v.motion),
-      owner.motion,
-      spots!.scale.center.x,
-      spots!.scale.center.z,
-      SCALE_CLEAR,
-      (x, z) => clampPlay(room.cam, x, z),
-    )
-  if (views.length > 1)
-    separate(
-      views.map((v) => v.motion),
-      PERSONAL_SPACE,
-      (x, z) => clampPlay(room.cam, x, z),
-    )
+  if (views.length > 1) {
+    const motions = crowd
+    motions.length = 0
+    let owner: MotionState | null = null
+    for (const v of views) {
+      motions.push(v.motion)
+      if (weighing(v.routine)) owner = v.motion
+    }
+    const inPlay = clampIn(room)
+    // The scale is the weighed puppy's: the other keeps clear of it, and so does not push it off
+    if (owner && spots)
+      keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
+    separate(motions, PERSONAL_SPACE, inPlay)
+  }
   cameraPosition(room.cam, camPos)
   views.forEach((view, i) => {
     const s = view.behaviour,
