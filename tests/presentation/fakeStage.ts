@@ -1,30 +1,69 @@
+import type { Care, PlaceAccident } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
-import type { RoomStage, StageStatus } from '@/presentation/roomStage'
+import type { PuppyNeeds, RoomStage, StageStatus } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
 import { createMemoryStorage } from '@/infrastructure/memoryStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 
-/** A room with no 3D: it records what the screen asks of it and lets a test push status. */
-export function createFakeStage() {
+/** A puppy's needs as a room would report them, `id` and `name` first. */
+export const needs = (id: string, name: string, more: Partial<PuppyNeeds> = {}): PuppyNeeds => ({
+  id,
+  name,
+  hunger: 0.3,
+  energy: 0.8,
+  cleanliness: 1,
+  happiness: 0.5,
+  weightKg: 5,
+  bowl: 0,
+  wet: 0,
+  shine: 0,
+  mode: null,
+  bath: null,
+  dryer: false,
+  health: 'Bien',
+  asleep: false,
+  reading: null,
+  weightStatus: null,
+  ...more,
+})
+
+/**
+ * A room with no 3D: it records what the screen asks of it, keeps the care each puppy came in
+ * with and lets a test push status. `place`, when given, is where every accident lands.
+ */
+export function createFakeStage(place?: PlaceAccident) {
   const calls: string[] = []
   const canvases: HTMLCanvasElement[] = []
   const shown: Puppy[][] = []
+  /** The care each puppy came in with, in order of arrival. */
+  const arrived: { id: string; care: Care }[] = []
+  const held = new Map<string, Care>()
   const listeners = new Set<(s: StageStatus) => void>()
   let status: StageStatus = {
     hint: 'Toca el suelo y irá hacia allí.',
-    happiness: 0.3,
     ball: { inHand: false, disabled: false },
     notice: null,
     needs: [],
+    touched: null,
+    cleaned: false,
   }
   const stage: RoomStage = {
-    setPuppies(puppies) {
+    setPuppies(puppies, cares) {
       shown.push(puppies)
+      for (const id of held.keys()) if (!puppies.some((p) => p.id === id)) held.delete(id)
+      for (const p of puppies) {
+        const care = cares?.get(p.id)
+        if (!care || held.has(p.id)) continue
+        held.set(p.id, care)
+        arrived.push({ id: p.id, care })
+      }
     },
+    cares: () => new Map(held),
+    placeAccidents: () => place,
     takeBall: () => void calls.push('takeBall'),
     stowBall: () => void calls.push('stowBall'),
     trick: (pose) => void calls.push(`trick:${pose}`),
-    feed: () => void calls.push('feed'),
+    feed: (index) => void calls.push(`feed:${index}`),
     bath: (index) => void calls.push(`bath:${index}`),
     rinse: () => void calls.push('rinse'),
     dryer: () => void calls.push('dryer'),
@@ -41,6 +80,9 @@ export function createFakeStage() {
   }
   return {
     calls,
+    arrived,
+    /** Changes the care the room keeps for a puppy, as time in it would. */
+    hold: (id: string, care: Care) => void held.set(id, care),
     /** Every canvas a stage was created on, in order. */
     canvases,
     /** Names of the puppies the room shows now. */

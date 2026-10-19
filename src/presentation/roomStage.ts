@@ -1,4 +1,4 @@
-import type { MessKind, WeightStatus } from '@/domain/care'
+import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 
 /** Shown instead of a stage when the browser has no WebGL. */
@@ -9,8 +9,12 @@ export type TrickPose = 'sit' | 'lie' | 'belly'
 /** What the player is doing for a puppy's care: bathing it, brushing it or weighing it. */
 export type CareMode = 'bath' | 'brush' | 'weigh'
 
+/** Where a bath stands: lathering, then rinsed (the rinse, the shake and drying). */
+export type BathStep = 'scrub' | 'rinsed'
+
 /** One puppy's care as the room keeps it, rounded to hundredths, and how full its bowl is. */
 export interface PuppyNeeds {
+  id: string
   name: string
   hunger: number
   energy: number
@@ -22,35 +26,49 @@ export interface PuppyNeeds {
   /** How glossy brushing has left its coat. */
   shine: number
   mode: CareMode | null
+  /** In its bath, how far it has got, and whether the dryer is in hand. */
+  bath: BathStep | null
+  dryer: boolean
+  health: Health
+  asleep: boolean
   /** The scale's reading the last time it was weighed, as «4,3 kg», and how that is for its breed. */
   reading: string | null
   weightStatus: WeightStatus | null
 }
 
-/** What the room tells the screen: the hint, the happiness bar and the ball button. */
+/** What the room tells the screen: the hint, the ball button and each puppy's needs. */
 export interface StageStatus {
   hint: string
-  /** 0 to 1, of the puppy playing or else the first one. */
-  happiness: number
   ball: { inHand: boolean; disabled: boolean }
   /** Shown over the room while it cannot be played: meshing, or no 3D at all. */
   notice: string | null
   /** Each puppy in the room, in its order. */
   needs: PuppyNeeds[]
+  /** The puppy last touched in the room, and how many touches there have been. */
+  touched: { id: string; count: number } | null
+  /** A mess was just cleaned up: true for a moment. */
+  cleaned: boolean
 }
 
 /** The 3D room as the screens see it. */
 export interface RoomStage {
-  /** Mounts and unmounts puppies to match; only the first two are shown. */
-  setPuppies(puppies: Puppy[]): void
+  /**
+   * Mounts and unmounts puppies to match; only the first two are shown. A puppy coming in starts
+   * from its care in `cares`, or else a new one.
+   */
+  setPuppies(puppies: Puppy[], cares?: ReadonlyMap<string, Care>): void
+  /** The care of each puppy in the room as it is now, by id, those still loading included. */
+  cares(): Map<string, Care>
+  /** One placer for the accidents of `count` puppies coming in together, kept apart. */
+  placeAccidents(count: number): PlaceAccident | undefined
   takeBall(): void
   stowBall(): void
   trick(pose: TrickPose): void
-  /** Fills the bowl of every puppy in the room. */
-  feed(): void
+  /** Fills the bowl of the puppy at `index`, or every bowl in the room. */
+  feed(index?: number): void
   /**
    * Starts the bath of the puppy at `index` where it stands: rubbing it lathers and scrubs it.
-   * One bath at a time, and not while it plays ball.
+   * One bath at a time, and not while it plays ball. A ball in hand is put away.
    */
   bath(index: number): void
   /** «Aclarar»: washes the foam off and soaks it; it shakes itself and is ready for the dryer. */

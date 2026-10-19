@@ -4,7 +4,10 @@ import {
   addMess,
   BLADDER_PER_HOUR,
   catchUp,
+  cheer,
   cleanMess,
+  comeBack,
+  getHungry,
   createCare,
   fillBladder,
   messKind,
@@ -322,5 +325,43 @@ describe('shine', () => {
   it('a dull coat stays the same care', () => {
     const care = createCare(breed, start)
     expect(dull(care, 3600)).toBe(care)
+  })
+})
+
+describe('in the room', () => {
+  it('gets hungry by the hour, up to 1', () => {
+    const care = { ...createCare(breed, 0), hunger: 0.3 }
+    expect(getHungry(care, 3600).hunger).toBeCloseTo(0.42)
+    expect(getHungry({ ...care, hunger: 0.99 }, 3600).hunger).toBe(1)
+  })
+
+  it('cheers up with play, never past 1', () => {
+    const care = { ...createCare(breed, 0), happiness: 0.5 }
+    expect(cheer(care, 0.1).happiness).toBeCloseTo(0.6)
+    expect(cheer(care, 2).happiness).toBe(1)
+  })
+})
+
+describe('comeBack', () => {
+  const place = () => ({ x: 0, z: 0.5 })
+
+  it('after 3 days shows half the lost cleanliness as dirt, and health stays Bien or better', () => {
+    const left = { ...createCare(breed, at(15, 12)), hunger: 0.2 }
+    const back = comeBack(left, breed, at(18, 12), place, () => 0.9)
+    const away = catchUp(left, breed, at(18, 12), place, () => 0.9)
+    expect(back.hunger).toBeCloseTo(away.hunger)
+    expect(back.messes).toEqual(away.messes)
+    expect(back.messes).toHaveLength(2)
+    const drift = 1 - (away.cleanliness + 0.06)
+    expect(drift).toBeCloseTo(0.55)
+    expect(back.cleanliness).toBeCloseTo(1 - drift / 2 - 0.06)
+    expect(health(back, breed)).toBe('Bien')
+  })
+
+  it('a short absence takes off half the hourly cleanliness, and a cleaner coat stays as it was', () => {
+    const left = { ...createCare(breed, at(15, 22)), cleanliness: 0.9 }
+    expect(comeBack(left, breed, at(15, 23)).cleanliness).toBeCloseTo(0.89)
+    const muddy = { ...left, cleanliness: 0.4 }
+    expect(comeBack(muddy, breed, at(15, 23)).cleanliness).toBe(0.4)
   })
 })

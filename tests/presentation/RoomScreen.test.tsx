@@ -1,10 +1,12 @@
 import { StrictMode } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
 import { adoptPuppy } from '@/application/adoption'
+import { BREEDS } from '@/domain/breeds'
+import { createCare } from '@/domain/care'
 import type { GameStorage } from '@/infrastructure/storage'
-import { createFakePreview, createFakeStage, savingStorage } from './fakeStage'
+import { createFakePreview, createFakeStage, needs, savingStorage } from './fakeStage'
 
 async function adopted(names: string[]): Promise<GameStorage> {
   const storage = savingStorage()
@@ -18,17 +20,28 @@ async function adopted(names: string[]): Promise<GameStorage> {
   return storage
 }
 
-const start = (storage: GameStorage) => {
-  const stage = createFakeStage()
+const start = (
+  storage: GameStorage,
+  {
+    stage = createFakeStage(),
+    now = Date.now,
+  }: { stage?: ReturnType<typeof createFakeStage>; now?: () => number } = {},
+) => {
   render(
     <App
       openStorage={async () => storage}
       createStage={stage.create}
       createPreview={createFakePreview().create}
+      now={now}
     />,
   )
   return stage
 }
+
+const ids = async (storage: GameStorage) =>
+  new Map((await storage.listPuppies()).map((p) => [p.name, p.id]))
+
+const at = (d: number, h: number) => new Date(2026, 9, d, h).getTime()
 
 const roster = async () =>
   // React 19 holds a Suspense fallback at least 300 ms before showing the lazy screen
@@ -72,9 +85,8 @@ describe('RoomScreen', () => {
     await user.click(await screen.findByRole('button', { name: 'Sacar la pelota' }))
     expect(stage.calls).toEqual(['takeBall'])
 
-    stage.emit({ ball: { inHand: true, disabled: false }, hint: '¡Allá va!', happiness: 0.8 })
+    stage.emit({ ball: { inHand: true, disabled: false }, hint: '¡Allá va!' })
     expect(await screen.findByText('¡Allá va!')).toBeInTheDocument()
-    expect(screen.getByRole('meter', { name: 'Felicidad' })).toHaveAttribute('aria-valuenow', '80')
     await user.click(screen.getByRole('button', { name: 'Guardar la pelota' }))
 
     for (const label of ['Sentado', 'Tumbado', 'Panza arriba'])
@@ -141,5 +153,149 @@ describe('RoomScreen', () => {
     unmount()
     expect(canvases.some((c) => c.isConnected)).toBe(false)
     expect(stage.calls.filter((c) => c === 'dispose')).toHaveLength(canvases.length)
+  })
+
+  it('fills the bowl, bathes, brushes and weighs the puppy through the care bar', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna'])
+    const luna = (await ids(storage)).get('Luna')!
+    const stage = start(storage)
+    stage.emit({ needs: [needs(luna, 'Luna')] })
+
+    await user.click(await screen.findByRole('button', { name: 'Comida' }))
+    await user.click(screen.getByRole('button', { name: 'Baño' }))
+    expect(stage.calls).toEqual(['feed:0', 'bath:0'])
+
+    act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'bath', bath: 'scrub' })] }))
+    expect(screen.queryByRole('button', { name: 'Comida' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Aclarar' }))
+    act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'bath', bath: 'rinsed' })] }))
+    expect(screen.queryByRole('button', { name: 'Aclarar' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Secador' }))
+    await user.click(screen.getByRole('button', { name: 'Terminar' }))
+    expect(stage.calls.slice(2)).toEqual(['rinse', 'dryer', 'finishBath'])
+
+    act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
+    await user.click(screen.getByRole('button', { name: 'Cepillo' }))
+    act(() => stage.emit({ needs: [needs(luna, 'Luna', { mode: 'brush' })] }))
+    await user.click(screen.getByRole('button', { name: 'Terminar' }))
+    act(() => stage.emit({ needs: [needs(luna, 'Luna')] }))
+    await user.click(screen.getByRole('button', { name: 'Pesar' }))
+    expect(stage.calls.slice(5)).toEqual(['brush:0', 'endBrush', 'weigh:0'])
+
+    act(() =>
+      stage.emit({
+        needs: [needs(luna, 'Luna', { reading: '4,3 kg', weightStatus: 'En su peso' })],
+      }),
+    )
+    expect(screen.getByText('4,3 kg · En su peso')).toBeInTheDocument()
+  })
+
+  it('shows each puppy its own needs and health, by name, and no single happiness bar', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const byName = await ids(storage)
+    const stage = start(storage)
+    await roster()
+    act(() =>
+      stage.emit({
+        needs: [
+          needs(byName.get('Luna')!, 'Luna', { happiness: 0.9, hunger: 0.2, health: 'Muy bien' }),
+          needs(byName.get('Kira')!, 'Kira', {
+            happiness: 0.3,
+            hunger: 0.95,
+            cleanliness: 0.4,
+            energy: 0.1,
+            health: 'Necesita cuidados',
+          }),
+        ],
+      }),
+    )
+
+    const luna = within(screen.getByRole('region', { name: 'Luna' }))
+    const kira = within(screen.getByRole('region', { name: 'Kira' }))
+    const value = (card: typeof luna, name: string) =>
+      card.getByRole('meter', { name }).getAttribute('aria-valuenow')
+    expect(['Felicidad', 'Hambre', 'Limpieza', 'Energía'].map((n) => value(luna, n))).toEqual([
+      '90',
+      '20',
+      '100',
+      '80',
+    ])
+    expect(['Felicidad', 'Hambre', 'Limpieza', 'Energía'].map((n) => value(kira, n))).toEqual([
+      '30',
+      '95',
+      '40',
+      '10',
+    ])
+    expect(luna.getByText('Muy bien')).toBeInTheDocument()
+    expect(kira.getByText('Necesita cuidados')).toBeInTheDocument()
+    expect(screen.getAllByRole('meter', { name: 'Felicidad' })).toHaveLength(2)
+
+    // The first is looked after until another is picked, on its card or in the room
+    await user.click(screen.getByRole('button', { name: 'Comida' }))
+    await user.click(kira.getByRole('button', { name: 'Kira' }))
+    expect(kira.getByRole('button', { name: 'Kira' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Comida' }))
+    act(() => stage.emit({ touched: { id: byName.get('Luna')!, count: 1 } }))
+    await user.click(screen.getByRole('button', { name: 'Pesar' }))
+    expect(stage.calls).toEqual(['feed:0', 'feed:1', 'weigh:0'])
+  })
+
+  it('says «¡Limpio!» while a mess is being cleaned up', async () => {
+    const storage = await adopted(['Kuma'])
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ cleaned: true }))
+    expect(screen.getByText('¡Limpio!')).toBeInTheDocument()
+    act(() => stage.emit({ cleaned: false }))
+    expect(screen.queryByText('¡Limpio!')).not.toBeInTheDocument()
+  })
+
+  it('brings each puppy in with the time it was away, and keeps its care when it leaves', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const byName = await ids(storage)
+    const luna = byName.get('Luna')!,
+      kira = byName.get('Kira')!
+    for (const id of [luna, kira])
+      await storage.saveCare(id, { ...createCare(BREEDS.beagle, at(15, 12)), hunger: 0.2 })
+    let now = at(18, 12)
+    const stage = start(storage, {
+      stage: createFakeStage(() => ({ x: 0, z: 0.5 })),
+      now: () => now,
+    })
+
+    await waitFor(() => expect(stage.arrived.map((a) => a.id)).toEqual([luna, kira]))
+    for (const { care } of stage.arrived) {
+      expect(care.lastSeen).toBe(at(18, 12))
+      expect(care.hunger).toBeCloseTo(0.85)
+      // Half of the 0.55 lost to three days away, and two accidents of 0.03 each
+      expect(care.messes).toHaveLength(2)
+      expect(care.cleanliness).toBeCloseTo(1 - 0.275 - 0.06)
+    }
+
+    // Fed and both messes cleaned up in the room
+    stage.hold(luna, { ...stage.arrived[0]!.care, hunger: 0.1, messes: [] })
+    now = at(18, 13)
+    await user.click((await roster()).getByRole('button', { name: 'Sacar a Luna' }))
+    await waitFor(async () => expect((await storage.loadCare(luna))?.hunger).toBe(0.1))
+    expect(await storage.loadCare(luna)).toMatchObject({ lastSeen: at(18, 13), messes: [] })
+    expect(stage.names()).toEqual(['Kira'])
+  })
+
+  it('keeps the care of every puppy when the app is hidden', async () => {
+    const storage = await adopted(['Luna'])
+    const luna = (await ids(storage)).get('Luna')!
+    const stage = start(storage, { now: () => at(18, 9) })
+    await waitFor(() => expect(stage.arrived).toHaveLength(1))
+    stage.hold(luna, { ...stage.arrived[0]!.care, happiness: 0.77 })
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    act(() => void document.dispatchEvent(new Event('visibilitychange')))
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+
+    await waitFor(async () => expect((await storage.loadCare(luna))?.happiness).toBe(0.77))
+    expect((await storage.loadCare(luna))?.lastSeen).toBe(at(18, 9))
   })
 })

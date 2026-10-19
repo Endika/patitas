@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import type { Breed } from '@/domain/breeds'
 import {
+  exercise,
   feed,
   fillBladder,
+  getHungry,
   isNight,
   MESS_CAP,
   messKind,
@@ -83,9 +85,11 @@ export interface RoutineState {
   relieved: boolean
   /** Seconds since it last ate. */
   fedAgo: number
-  /** Seconds awake, and with a mess waiting, not yet counted into the care. */
+  /** Seconds awake, with a mess waiting, in all and on the move, not yet counted into the care. */
   awake: number
   sulking: number
+  fasting: number
+  moving: number
   /** In the bath or being brushed: it holds still for it, and wakes from a nap into it. */
   held: HeldRoutine | null
   /** Asked to go on the scale: it goes once it has stretched, if it was asleep. */
@@ -190,7 +194,7 @@ export const WEIGH_TIME = 3
 const ON_SCALE_TURN = -1.2
 /** How far it walks on, off the scale, once weighed. */
 const STEP_OFF = 0.55
-/** Seconds of bladder and sulking gathered before they are written to the care. */
+/** Seconds of bladder, sulking, hunger and exercise gathered before they are written to the care. */
 const CARE_FLUSH = 10
 
 export function createRoutineState(): RoutineState {
@@ -215,6 +219,8 @@ export function createRoutineState(): RoutineState {
     fedAgo: FED_RECENTLY,
     awake: 0,
     sulking: 0,
+    fasting: 0,
+    moving: 0,
     held: null,
     weigh: false,
     around: { x: NaN, z: NaN, lean: 0, side: 0 },
@@ -788,6 +794,8 @@ export function stepRoutine(
   r.fedAgo += dt
   if (r.routine !== 'sleeping') r.awake += dt
   r.sulking = ctx.care.messes.length ? r.sulking + dt : 0
+  r.fasting += dt
+  if (m.speed > MOVING) r.moving += dt
   const ev: RoutineEvents = {
     care:
       r.routine === 'sleeping'
@@ -804,6 +812,14 @@ export function stepRoutine(
   if (r.sulking >= CARE_FLUSH) {
     ev.care = sulk(ev.care, r.sulking)
     r.sulking = 0
+  }
+  if (r.fasting >= CARE_FLUSH) {
+    ev.care = getHungry(ev.care, r.fasting)
+    r.fasting = 0
+  }
+  if (r.moving >= CARE_FLUSH) {
+    ev.care = exercise(ev.care, r.moving, ctx.breed)
+    r.moving = 0
   }
   if (ctx.busy && !keepsEating(r, ctx.care) && !r.held) {
     r.idle = 0

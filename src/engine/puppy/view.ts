@@ -1,6 +1,13 @@
 import * as THREE from 'three'
 import { BREEDS, type Breed } from '@/domain/breeds'
-import { addMess, createCare, weightStatus, type Care, type WeightStatus } from '@/domain/care'
+import {
+  addMess,
+  cheer,
+  createCare,
+  weightStatus,
+  type Care,
+  type WeightStatus,
+} from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, type Vec3 } from '@/engine/math'
 import {
@@ -137,6 +144,9 @@ export interface PuppyView extends BehaviourRig, SceneView {
   routine: RoutineState
   /** Kept in memory while the room is open. */
   care: Care
+  /** Its mood as last seen, and how much of its rises since is still to cheer up its care. */
+  moodWas: number
+  joy: number
   /**
    * How full its own bowl is, 0 to 1: kept with the puppy rather than in the furniture, so a
    * bowl laid out anew shows it again.
@@ -399,6 +409,7 @@ export function mountPuppyView(
   group.position.set(motion.pos.x, 0, motion.pos.z)
   group.rotation.y = motion.heading
 
+  const behaviour = createBehaviourState()
   const view: PuppyView = {
     ...behaviourRig(breed, puppy.persona, A),
     puppy,
@@ -414,9 +425,11 @@ export function mountPuppyView(
     legs,
     motion,
     fetch: createFetchState(),
-    behaviour: createBehaviourState(),
+    behaviour,
     routine: createRoutineState(),
     care,
+    moodWas: behaviour.happy,
+    joy: 0,
     bowl: 0,
     snoreT: 0,
     place: 0,
@@ -801,6 +814,7 @@ export function tickPuppies(
       t,
     )
     applyPose(view, pose, body, dt, t)
+    cheerUp(view)
     view.group.updateMatrixWorld(true)
     if (view.fetch.holding) mouthWorld(view, ball.pos)
     if (M.pose === 'sleep' && M.sleepW > 0.8) {
@@ -813,6 +827,25 @@ export function tickPuppies(
     } else view.snoreT = 0
   })
   return moved.map((m) => m.ev)
+}
+
+/** The share of a rise in mood that lasts as happiness, and the least written to the care at once. */
+const CHEER_SHARE = 0.25,
+  CHEER_STEP = 0.01
+
+/**
+ * Play, petting, a meal or a bath it likes lift its mood for a moment; a share of each rise lasts
+ * as happiness in its care. The brush cheers the care up by itself.
+ */
+export function cheerUp(
+  view: Pick<PuppyView, 'behaviour' | 'brush' | 'care' | 'moodWas' | 'joy'>,
+): void {
+  const lift = view.behaviour.happy - view.moodWas
+  view.moodWas = view.behaviour.happy
+  if (lift > 0 && !view.brush.on) view.joy += lift * CHEER_SHARE
+  if (view.joy < CHEER_STEP) return
+  view.care = cheer(view.care, view.joy)
+  view.joy = 0
 }
 
 /** How deep in mud or a mess its paws are; in its bath, none, or it would soil as it is scrubbed. */
