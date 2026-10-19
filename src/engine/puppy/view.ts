@@ -33,6 +33,7 @@ import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import {
   bedSlots,
   createRoutineState,
+  giveWay,
   goWeigh,
   holdStill,
   keepsEating,
@@ -227,6 +228,7 @@ const Z = new THREE.Vector3(0, 0, 1)
 /** The puppies' motions and bodies, gathered each frame without a new array. */
 const crowd: MotionState[] = []
 const bodies: Body[] = []
+const routines: RoutineState[] = []
 const clamps = new WeakMap<RoomScene, (x: number, z: number) => [number, number]>()
 const clampsTo = new WeakMap<RoomScene, ClampTo>()
 /** Who may step aside for a chase this frame, and who stays put, in the order of the views. */
@@ -912,7 +914,17 @@ export function tickPuppies(
   if (views.length > 1 && owner && spots)
     keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
   for (const v of views) bodies.push(placeBody(v))
-  if (views.length > 1) separate(motions, bodies, inPlay, fixed, Math.min(dt, MAX_DT))
+  if (views.length > 1) {
+    separate(motions, bodies, inPlay, fixed, Math.min(dt, MAX_DT))
+    // Two on their way to their own places that block each other: one makes way
+    routines.length = 0
+    free.length = 0
+    for (const v of views) {
+      routines.push(v.routine)
+      free.push(mayStepAside(v, ctx))
+    }
+    giveWay(routines, motions, bodies, free, clampIn(room))
+  }
   bounceOff(ball, bodies, catcher)
   rollOut(ball, bodies, catcher, room.cam, dt)
   // A chase that gets no nearer: one standing about in the way walks off. One the player is

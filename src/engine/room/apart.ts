@@ -203,6 +203,8 @@ function nudgeAside(w: number, idle: number): boolean {
     tz = mw.goal.z - mw.pos.z,
     tl = Math.hypot(tx, tz)
   if (tl < 1e-6) return false
+  // Walking off away from it: nothing to make way for
+  if (tx * (mi.pos.x - mw.pos.x) + tz * (mi.pos.z - mw.pos.z) <= 0) return true
   const px = -tz / tl,
     pz = tx / tl,
     on = (mi.pos.x - mw.pos.x) * px + (mi.pos.z - mw.pos.z) * pz >= 0 ? 1 : -1,

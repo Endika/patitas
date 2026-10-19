@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
-import { SPLIT, STRIP_HALF } from './backdrop'
-import { PLAY, playAxes, playHalf, playLocal, playWorld, type FixedCamera } from './camera'
+import { playHalf, playLocal, playWorld, type FixedCamera } from './camera'
+import { findStarts, layOut, START_WANT, wantedStarts, type Oval } from './layout'
 
 /** An oval footprint on the floor, turned to face the camera. */
 export interface Spot {
@@ -24,6 +24,13 @@ export interface Spots {
   scale: Spot
   mud: Spot
   garden: Spot
+  /** No layout met every rule (see `layOut`): never so in the tests' sweep. */
+  fallback?: boolean
+  /**
+   * What a puppy walks round on its way to each piece (`pieces` order) and, last, to anywhere
+   * else: worked out once per layout.
+   */
+  walk?: Circle[][][]
 }
 
 export interface Circle {
@@ -39,95 +46,42 @@ export interface StartPlace {
 }
 
 /**
- * Where one or two puppies would rather start, as depth and side in the play area: near the
- * middle and right of it, so in portrait the puddle on the left is not hidden behind them.
- */
-const START_WANT = [
-  [{ d: 0.16, side: 0.2 }],
-  [
-    { d: 0.21, side: 0.07, heading: 0.25 },
-    { d: 0.04, side: 0.47, heading: -0.25 },
-  ],
-] as const
-/** How far a start keeps from every piece's oval and the puddle's, and two starts from each other. */
-const START_CLEAR = 0.3,
-  START_APART = 0.46
-
-/**
- * Where each puppy starts with the furniture in `spots`: the open floor nearest `START_WANT`,
- * clear of every piece and the puddle, on the house side if it can. With no furniture, just there.
+ * Where each puppy starts with the furniture in `spots` (see `findStarts`). With no furniture,
+ * just where they would rather start.
  */
 export function startPlaces(cam: FixedCamera, spots: Spots | null, puppies: 1 | 2): StartPlace[] {
-  const want = START_WANT[puppies - 1]!
-  const pieces = spots ? [...spots.beds, ...spots.bowls, spots.scale] : []
-  const open: { d: number; side: number }[] = []
-  if (spots)
-    for (let d = -0.3; d <= 0.6 + 1e-9; d += 0.05)
-      for (let side = -0.45; side <= 0.6 + 1e-9; side += 0.05) {
-        if (Math.abs(side) > 0.85 * playHalf(cam, d)) continue
-        const [x, z] = playWorld(cam, d, side)
-        if (pieces.some((p) => inOval(p, x, z, START_CLEAR)) || inOval(spots.mud, x, z, 0.1))
-          continue
-        open.push({ d, side })
-      }
-  const cost = (p: { d: number; side: number }, i: number) =>
-    Math.hypot(p.d - want[i]!.d, p.side - want[i]!.side) + (p.side < SPLIT ? 0.5 : 0)
-  let best: { d: number; side: number }[] | null = null,
-    bestCost = Infinity
-  if (puppies === 1)
-    for (const p of open) {
-      if (cost(p, 0) < bestCost) [best, bestCost] = [[p], cost(p, 0)]
-    }
-  else
-    for (const p of open)
-      for (const q of open) {
-        if (q.side <= p.side || Math.hypot(p.d - q.d, p.side - q.side) < START_APART) continue
-        const c = cost(p, 0) + cost(q, 1)
-        if (c < bestCost) [best, bestCost] = [[p, q], c]
-      }
-  return (best ?? want).map((p, i) => {
-    const [x, z] = playWorld(cam, p.d, p.side)
-    const heading = want[i] && 'heading' in want[i] ? want[i].heading : undefined
-    return heading == null ? { x, z } : { x, z, heading }
-  })
+  return startPlacesOf(cam, spots, puppies).places
 }
 
-/**
- * One bed holds one puppy; side by side, two beds are a little smaller, and a lone one fits a
- * curled dorado. Its long side faces the screen.
- */
-export const BEDS = { alone: { radius: 0.48, depth: 0.39 }, two: { radius: 0.42, depth: 0.34 } },
-  BOWL = { radius: 0.13, depth: 0.13 },
-  SCALE = { radius: 0.2, depth: 0.16 }
+/** `startPlaces`, and whether no open floor kept every rule and the wanted places were taken anyway. */
+export function startPlacesOf(
+  cam: FixedCamera,
+  spots: Spots | null,
+  puppies: 1 | 2,
+): { places: StartPlace[]; fallback: boolean } {
+  const local = (s: Spot): Oval => ({
+    ...playLocal(cam, s.center.x, s.center.z),
+    radius: s.radius,
+    depth: s.depth,
+  })
+  const found = spots
+    ? findStarts(
+        { beds: spots.beds.map(local), bowls: spots.bowls.map(local), scale: local(spots.scale) },
+        local(spots.mud),
+        cam,
+        puppies,
+      )
+    : null
+  const places = (found ?? wantedStarts(puppies)).map((p, i) => {
+    const [x, z] = playWorld(cam, p.d, p.side)
+    const want = START_WANT[puppies - 1]![i]
+    const heading = want && 'heading' in want ? want.heading : undefined
+    return heading == null ? { x, z } : { x, z, heading }
+  })
+  return { places, fallback: !!spots && !found }
+}
 
-/** The beds' depth in the play area: against the house wall. */
-const BED_D = 1.7
-/** Centre to centre for beds side by side: a little over 0.1 between their rims. */
-const BED_STEP = 2 * BEDS.two.radius + 0.11
-/** Between two beds one behind the other, measured on their ovals grown by half of it each. */
-const BED_GAP = 0.12
-/** How much of a bed's radius may lie over the doorway strip; none of it on the grass. */
-const BED_OVER_STRIP = 0.15
-/**
- * Bowls sit wider apart than their rims need: two puppies eating side by side stay outside each
- * other's personal space (0.45), so neither is pushed off its bowl.
- */
-export const BOWL_STEP = 0.47
-/** The bowls' depth, when no bed is in the way of the puppies eating there. */
-const BOWL_D = 0.62
-/**
- * A puppy eating stands behind its bowl, as the camera sees it: its muzzle (0.36 at most) and its
- * rump (0.32) reach this far back, and this far to each side.
- */
-const EATER = { back: 0.69, half: 0.17 }
-/** The scale's depth, at the front of the house, when the bowls leave room for it. */
-const SCALE_D = -0.4
-/** From the doorway strip to the rim of a piece set just inside the house. */
-const BY_STRIP = 0.02
-/** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
-const SLEEPER = { reach: 0.45, ahead: 0.3 }
-/** The share of the screen's half width a sleeper may reach. */
-const SLEEPER_EDGE = 0.93
+export { BEDS, BOWL, BOWL_STEP, SCALE, SLOT_APART } from './layout'
 
 /** The garden as drawn, before `layout` stretches it to the frame. */
 export const GARDEN = { radius: 0.315, depth: 0.45 }
@@ -136,36 +90,10 @@ const GARDEN_WIDTH = 0.7
 /** The puddle within the garden, in fractions of its half sizes: towards the front, a little to the left. */
 export const MUD = { u: -0.12, v: 0.35, size: 0.55 }
 
-/** The house side of the doorway strip, as a side in the play area. */
-const HOUSE = SPLIT + STRIP_HALF
-
-/** Centre to centre from the scale to a bowl, outside a puppy's personal space. */
-const SCALE_FROM_BOWL = 0.47
-
 /**
- * The scale at the front of the house just inside it, or as far right as the bowls need. With
- * the bowls right across the front of a narrow house, it stands just outside on the grass instead,
- * where a puppy can walk round to it: between two bowls there is no way through.
- */
-function scalePlace(cam: FixedCamera, bowlD: number, bowlSides: number[]) {
-  const d = Math.max(PLAY.near, Math.min(SCALE_D, bowlD - BOWL.depth - 0.1 - SCALE.depth))
-  const half = playHalf(cam, d)
-  const clear = (side: number) =>
-    bowlSides.every((s) => Math.hypot(d - bowlD, side - s) >= SCALE_FROM_BOWL)
-  const inside = HOUSE + BY_STRIP + SCALE.radius
-  for (let side = inside; side <= half; side += 0.01) if (clear(side)) return { d, side }
-  for (let side = SPLIT - STRIP_HALF - BY_STRIP - SCALE.radius; side >= -half; side -= 0.01)
-    if (clear(side)) return { d, side }
-  return { d, side: inside }
-}
-
-/**
- * Places each piece in the house, right of the doorway strip, so it stays in frame for every
- * aspect: the beds against the wall, the bowls on their mat in front of them, the scale at the
- * front. Two beds stand side by side where the wall has room for them; otherwise the second
- * stands in front of the first and further right, the bowls come forward to stay clear of it and
- * the scale steps out onto the grass by the strip (see `scalePlace`). The garden runs along the
- * left edge with its puddle.
+ * Places each piece for `cam` (see `layOut`): the beds against the house wall, the bowls on their
+ * mat in front of them, the scale at the front, every place a puppy stands still at SLOT_APART from
+ * the other's. The garden runs along the left edge with its puddle.
  */
 export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const facing = cam.az
@@ -175,51 +103,6 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   }
   const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot =>
     at(d, side * playHalf(cam, d), size)
-  const { camD } = playAxes(cam)
-  const bed = puppies === 1 ? BEDS.alone : BEDS.two
-  const leftmost = HOUSE - BED_OVER_STRIP * bed.radius + bed.radius
-  // On a narrow screen the beds come in from the edge so the sleepers in them stay in frame
-  const rightmost = (d: number) =>
-    Math.min(
-      playHalf(cam, d),
-      SLEEPER_EDGE * (camD + d - SLEEPER.ahead) * cam.tanH - Math.max(SLEEPER.reach, bed.radius),
-    )
-  const want = 0.55 * playHalf(cam, BED_D) - ((puppies - 1) * BED_STEP) / 2
-  const first = clamp(
-    want,
-    leftmost,
-    Math.max(leftmost, rightmost(BED_D) - (puppies - 1) * BED_STEP),
-  )
-  const beds = [at(BED_D, first, bed)]
-  if (puppies === 2) {
-    if (first + BED_STEP <= rightmost(BED_D)) beds.push(at(BED_D, first + BED_STEP, bed))
-    else {
-      // As deep as it goes clear of the first, as far right as its sleeper stays in frame
-      const across = 2 * bed.radius + BED_GAP,
-        along = 2 * bed.depth + BED_GAP
-      let d = BED_D - along
-      for (let i = 0; i < 8; i++) {
-        const off = Math.min(1, Math.max(0, rightmost(d) - first) / across)
-        d = BED_D - along * Math.sqrt(1 - off * off)
-      }
-      beds.push(at(d, Math.max(first, rightmost(d)), bed))
-    }
-  }
-  // The bowls start just inside the house; one eating must not stand in a bed
-  const bowlSides = (d: number) => {
-    const left = HOUSE + BY_STRIP + BOWL.radius,
-      over = Math.max(0, left + (puppies - 1) * BOWL_STEP - playHalf(cam, d))
-    return Array.from({ length: puppies }, (_, i) => left - over + i * BOWL_STEP)
-  }
-  let bowlD = BOWL_D
-  for (let pass = 0; pass < 2; pass++)
-    for (const b of beds) {
-      const { d, side } = playLocal(cam, b.center.x, b.center.z)
-      if (bowlSides(bowlD).some((s) => Math.abs(s - side) < b.radius + EATER.half))
-        bowlD = Math.min(bowlD, d - b.depth - EATER.back)
-    }
-  const bowls = bowlSides(bowlD).map((side) => at(bowlD, side, BOWL))
-  const scaleAt = scalePlace(cam, bowlD, bowlSides(bowlD))
   const gd = 0.8,
     depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
   const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
@@ -238,13 +121,19 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     depth: MUD.size * garden.depth,
     facing,
   }
-  return {
-    beds,
-    bowls,
-    scale: at(scaleAt.d, scaleAt.side, SCALE),
+  const m = playLocal(cam, mud.center.x, mud.center.z)
+  const plan = layOut(cam, puppies, { d: m.d, side: m.side, radius: mud.radius, depth: mud.depth })
+  const placed = (o: Oval) => at(o.d, o.side, o)
+  const spots: Spots = {
+    beds: plan.beds.map(placed),
+    bowls: plan.bowls.map(placed),
+    scale: placed(plan.scale),
     mud,
     garden,
+    fallback: plan.fallback,
   }
+  spots.walk = walkLists(spots)
+  return spots
 }
 
 export const smoothstep = (a: number, b: number, v: number) => {
@@ -281,6 +170,57 @@ export function furnitureObstacles(spots: Spots): Circle[] {
     z: s.center.z,
     r: Math.max(s.radius, s.depth),
   }))
+}
+
+/** The beds, bowls and scale, in the order `Spots.walk` follows. */
+export const pieces = (spots: Spots): Spot[] => [...spots.beds, ...spots.bowls, spots.scale]
+
+/**
+ * How close two pieces may stand before a puppy no longer walks between them: it aims 0.3 clear
+ * of each rim (`DETOUR`) and is 0.17 wide to each side.
+ */
+export const WALK_CLEARANCE = 0.3 + 0.17
+
+/**
+ * The pieces as one walks round them, in groups: pieces with less than WALK_CLEARANCE between
+ * them, as the bowls on their mat, are one group with no way through, however many join up that
+ * way. A puppy walks round a group's whole width.
+ */
+export function walkRound(circles: readonly Circle[]): Circle[][] {
+  const group = circles.map((_, i) => i)
+  const root = (i: number): number => (group[i] === i ? i : (group[i] = root(group[i]!)))
+  for (let i = 0; i < circles.length; i++)
+    for (let j = i + 1; j < circles.length; j++) {
+      const a = circles[i]!,
+        b = circles[j]!
+      if (Math.hypot(b.x - a.x, b.z - a.z) - a.r - b.r < WALK_CLEARANCE) group[root(j)] = root(i)
+    }
+  const out = new Map<number, Circle[]>()
+  circles.forEach((c, i) => {
+    const k = root(i)
+    out.set(k, [...(out.get(k) ?? []), c])
+  })
+  return [...out.values()]
+}
+
+/** Every piece's walk groups, and last the ones for walking anywhere else. */
+function walkLists(spots: Spots): Circle[][][] {
+  const all = furnitureObstacles(spots)
+  return [...all.map((_, k) => walkRound(all.filter((_, i) => i !== k))), walkRound(all)]
+}
+
+/** What a puppy walks round on its way to `to`: every piece but `to`, in groups. */
+export function walkingRound(spots: Spots, to: Spot): readonly (readonly Circle[])[] {
+  const { beds, bowls } = spots,
+    n = beds.length + bowls.length
+  const bed = beds.indexOf(to),
+    bowl = bowls.indexOf(to)
+  const k = bed >= 0 ? bed : bowl >= 0 ? beds.length + bowl : to === spots.scale ? n : n + 1
+  const listed = spots.walk?.[k]
+  if (listed) return listed
+  return walkRound(
+    furnitureObstacles(spots).filter((c) => c.x !== to.center.x || c.z !== to.center.z),
+  )
 }
 
 /** The scale's readout: two decimals with a comma, and blank when nobody is on it. */

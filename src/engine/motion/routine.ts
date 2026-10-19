@@ -17,7 +17,10 @@ import {
   type MessKind,
 } from '@/domain/care'
 import type { Vec3 } from '@/engine/math'
-import { furnitureObstacles, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
+import { sphereAt, SPHERES, type Body } from '@/engine/room/bodies'
+import { inTheWay } from '@/engine/room/crowd'
+import { walkingRound, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
+import { SLEEP_TURN } from '@/engine/room/layout'
 import { goTo, type MotionState } from './locomotion'
 import { POSES, setPose } from './poses'
 
@@ -43,10 +46,10 @@ export type Routine =
  * The piece last walked round and the side taken, kept so the play area's edge is checked once
  * per piece rather than every frame.
  */
+/** The group of pieces it is walking round, by its first piece, and on which side. */
 interface Around {
   x: number
   z: number
-  lean: number
   side: number
 }
 
@@ -96,6 +99,18 @@ export interface RoutineState {
   /** Asked to go on the scale: it goes once it has stretched, if it was asleep. */
   weigh: boolean
   around: Around
+  /** On its way somewhere: the nearest it has got, and the seconds since it last got nearer. */
+  nearest: number
+  stuckT: number
+  /** Making way for `yieldTo`: it waits up to this many seconds more before setting off again. */
+  waitT: number
+  yieldTo: RoutineState | null
+  /** Times it asked one standing in its way to step aside and got no nearer for it. */
+  asked: number
+  /** Seconds two penned in nose to nose may still squeeze past each other: neither shoves. */
+  passT: number
+  /** At the place it was walking to, turning in there: it holds its ground like one eating. */
+  there: boolean
 }
 
 export interface RoutineCtx {
@@ -142,13 +157,18 @@ const WAKE_ENERGY = 0.9
 const STRETCH = 1.5
 const STRETCH_BOW = 0.9
 const STRETCH_YAWN = 0.5
-/** Two sleepers turn this far from facing the camera, each to its own side. */
-const BED_TURN = 0.25
 const ARRIVED = 0.06
 /** Fastest a turn in place is asked for: the yaw rate it gives tops out at about 4 rad/s. */
 const TURN_STEP = 0.8
 const BODY_CLEARANCE = 0.12
 const DETOUR = 0.3
+/** Getting no nearer than this counts as no progress on the way somewhere. */
+const PROGRESS = 0.05
+/** Seconds two walkers get no nearer, touching, before one makes way, and the most it waits. */
+export const STUCK = 1.5
+const YIELD_WAIT = 4
+/** Seconds two penned in nose to nose, neither able to make way, may squeeze past each other. */
+const SQUEEZE = 2
 const MOVING = 0.05
 /** Seconds a full bowl lasts. */
 export const MEAL_TIME = 4
@@ -226,7 +246,14 @@ export function createRoutineState(): RoutineState {
     moving: 0,
     held: null,
     weigh: false,
-    around: { x: NaN, z: NaN, lean: 0, side: 0 },
+    around: { x: NaN, z: NaN, side: 0 },
+    nearest: Infinity,
+    stuckT: 0,
+    waitT: 0,
+    yieldTo: null,
+    asked: 0,
+    passT: 0,
+    there: false,
   }
 }
 
@@ -236,6 +263,12 @@ function enter(r: RoutineState, next: Routine) {
   r.routine = next
   r.t = 0
   r.turnLeft = null
+  r.nearest = Infinity
+  r.stuckT = 0
+  r.waitT = 0
+  r.yieldTo = null
+  r.asked = 0
+  r.there = false
 }
 
 /**
@@ -268,15 +301,19 @@ export interface BedSlot {
 
 /** Where each puppy lies, in the middle of its own bed, left first. */
 export function bedSlots(spots: Spots): BedSlot[] {
-  const two = spots.beds.length > 1
+  const [a, b] = spots.beds
+  // Along the view, away from the camera: one behind the other, the back one turns further
+  const behind =
+    !!a &&
+    !!b &&
+    Math.abs(
+      (b.center.x - a.center.x) * Math.sin(a.facing) +
+        (b.center.z - a.center.z) * Math.cos(a.facing),
+    ) > 0.01
   return spots.beds.map(({ center, facing }, i) => {
-    const side = two ? (i === 0 ? -1 : 1) : 1
-    return {
-      x: center.x,
-      z: center.z,
-      heading: facing + (two ? side * BED_TURN : 0),
-      side,
-    }
+    const side = b ? (i === 0 ? -1 : 1) : 1
+    const turn = !b ? 0 : behind && i === 0 ? SLEEP_TURN.behind : SLEEP_TURN.beside
+    return { x: center.x, z: center.z, heading: facing + side * turn, side }
   })
 }
 
@@ -351,48 +388,15 @@ export function forgetRoute(r: RoutineState, m: MotionState): void {
 }
 
 /**
- * The pieces as one walks round them: two with no room for a puppy between them, as the bowls on
- * their mat, count as one circle round both. Each piece pairs up once, the closest pairs first, so
- * a whole room never becomes one circle.
- */
-export function walkRound(circles: readonly Circle[]): Circle[] {
-  const pairs: [number, number, number][] = []
-  for (let i = 0; i < circles.length; i++)
-    for (let j = i + 1; j < circles.length; j++) {
-      const a = circles[i]!,
-        b = circles[j]!
-      const gap = Math.hypot(b.x - a.x, b.z - a.z) - a.r - b.r
-      if (gap < 2 * BODY_CLEARANCE) pairs.push([gap, i, j])
-    }
-  pairs.sort((p, q) => p[0] - q[0])
-  const used = new Set<number>(),
-    out: Circle[] = []
-  for (const [, i, j] of pairs) {
-    if (used.has(i) || used.has(j)) continue
-    used.add(i).add(j)
-    const a = circles[i]!,
-      b = circles[j]!
-    const d = Math.hypot(b.x - a.x, b.z - a.z),
-      r = Math.max(a.r, b.r, (d + a.r + b.r) / 2)
-    if (r === a.r) out.push(a)
-    else if (r === b.r) out.push(b)
-    else {
-      const k = (r - a.r) / d
-      out.push({ x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, r })
-    }
-  }
-  circles.forEach((c, i) => used.has(i) || out.push(c))
-  return out
-}
-
-/**
- * The next point to walk to: straight to `to`, or round the side of the first circle in the way,
- * the side the path leans to unless the edge of the play area leaves no way round there.
+ * The next point to walk to: straight to `to`, or round the first group of pieces in the way
+ * (pieces with no way between them, see `walkRound`), past its whole width on the side that
+ * needs the shorter step aside, and kept to while the same group is in the way, unless the edge
+ * of the play area leaves no way round there.
  */
 function detour(
   from: Vec3,
   to: Vec3,
-  circles: readonly Circle[],
+  groups: readonly (readonly Circle[])[],
   clamp: RoutineCtx['clamp'],
   around: Around,
 ): { x: number; z: number } {
@@ -404,43 +408,93 @@ function detour(
     fz = dz / len
   let best: { x: number; z: number } | null = null,
     bestT = Infinity
-  for (const c of circles) {
-    const t = (c.x - from.x) * fx + (c.z - from.z) * fz
-    const lateral = (c.x - from.x) * -fz + (c.z - from.z) * fx
-    if (t <= 0 || t >= len || Math.abs(lateral) >= c.r + BODY_CLEARANCE || t >= bestT) continue
-    // Pass on the side the path already leans to
-    const lean = lateral > 0 ? 1 : -1,
-      R = c.r + DETOUR
-    if (around.x !== c.x || around.z !== c.z || around.lean !== lean) {
-      const [x, z] = clamp(c.x + fz * lean * R, c.z - fx * lean * R)
-      around.x = c.x
-      around.z = c.z
-      around.lean = lean
-      around.side = Math.hypot(x - c.x, z - c.z) < c.r + BODY_CLEARANCE ? -lean : lean
+  for (const group of groups) {
+    let near = Infinity,
+      plus = -Infinity,
+      minus = -Infinity,
+      plusT = 0,
+      minusT = 0
+    for (const c of group) {
+      // Pieces gathered round the place it is going to: it walks in among them
+      if (Math.hypot(c.x - to.x, c.z - to.z) < c.r) continue
+      const t = (c.x - from.x) * fx + (c.z - from.z) * fz,
+        lateral = (c.x - from.x) * -fz + (c.z - from.z) * fx
+      if (t + c.r <= 0) continue
+      if (t > 0 && t < len && Math.abs(lateral) < c.r + BODY_CLEARANCE) near = Math.min(near, t)
+      if (lateral + c.r > plus) [plus, plusT] = [lateral + c.r, t]
+      if (c.r - lateral > minus) [minus, minusT] = [c.r - lateral, t]
     }
-    const s = around.side
-    best = { x: c.x + fz * s * R, z: c.z - fx * s * R }
-    bestT = t
+    if (near >= bestT || near === Infinity) continue
+    const key = group[0]!
+    if (around.x !== key.x || around.z !== key.z) {
+      around.x = key.x
+      around.z = key.z
+      around.side = plus <= minus ? 1 : -1
+    }
+    // No way round past the edge of the play area: the other side, if there is more room there
+    const cut = (side: number) => {
+      const [px, pz] = pass(from, fx, fz, side, plus, minus, plusT, minusT),
+        [cx, cz] = clamp(px, pz)
+      return Math.hypot(cx - px, cz - pz)
+    }
+    const here = cut(around.side)
+    if (here > BODY_CLEARANCE) {
+      const there = cut(-around.side)
+      // Hemmed in against the edge both ways: straight on is the only way out
+      if (there > BODY_CLEARANCE) continue
+      around.side = -around.side
+    }
+    const [x, z] = pass(from, fx, fz, around.side, plus, minus, plusT, minusT)
+    best = { x, z }
+    bestT = near
   }
+  if (!best) around.x = around.z = NaN
   return best ?? to
+}
+
+/** The point just past a group's `side` (+1 the way `lateral` grows), level with its piece there. */
+function pass(
+  from: Vec3,
+  fx: number,
+  fz: number,
+  side: number,
+  plus: number,
+  minus: number,
+  plusT: number,
+  minusT: number,
+): [number, number] {
+  const off = side > 0 ? plus + DETOUR : -(minus + DETOUR),
+    t = side > 0 ? plusT : minusT
+  return [from.x + fx * t - fz * off, from.z + fz * t + fx * off]
 }
 
 /**
  * Walks to `r.target`, round any furniture in the way except `spot`, the piece it is going to.
  * Returns true once there and standing still: the routine's "do something" can start.
  */
-export function approach(r: RoutineState, m: MotionState, ctx: RoutineCtx, spot: Spot): boolean {
+export function approach(
+  r: RoutineState,
+  m: MotionState,
+  ctx: RoutineCtx,
+  spot: Spot,
+  dt = 0,
+): boolean {
+  // Making way: it steps aside and waits, and sets off again once the other is there
+  if (r.waitT > 0) {
+    r.waitT = !r.yieldTo || walking(r.yieldTo) ? r.waitT - dt : 0
+    if (r.waitT > 0) return false
+    r.nearest = Infinity
+    r.stuckT = 0
+    r.yieldTo = null
+  }
   const dist = Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z)
-  if (dist <= ARRIVED && !m.goal) return true
-  const way = detour(
-    m.pos,
-    r.target,
-    walkRound(
-      furnitureObstacles(ctx.spots).filter((c) => c.x !== spot.center.x || c.z !== spot.center.z),
-    ),
-    ctx.clamp,
-    r.around,
-  )
+  if (r.there || (dist <= ARRIVED && !m.goal)) return (r.there = true)
+  if (dist < r.nearest - PROGRESS) {
+    r.nearest = dist
+    r.stuckT = 0
+    r.asked = 0
+  } else r.stuckT += dt
+  const way = detour(m.pos, r.target, walkingRound(ctx.spots, spot), ctx.clamp, r.around)
   if (!m.goal || Math.hypot(m.goal.x - way.x, m.goal.z - way.z) > 0.02)
     goTo(m, way.x, way.z, { happy: 0, energy: 0, gait: 'walk', clamp: ctx.clamp })
   return false
@@ -459,7 +513,7 @@ const sleepy = (r: RoutineState, ctx: RoutineCtx) =>
 
 const hungryFor = (ctx: RoutineCtx) => ctx.bowl > 0 && ctx.care.hunger >= MEAL_HUNGER
 
-const toBed: Step = (r, m, ctx) => {
+const toBed: Step = (r, m, ctx, _ev, dt) => {
   if (!sleepy(r, ctx) || hungryFor(ctx)) {
     m.goal = null
     return enter(r, 'none')
@@ -470,7 +524,7 @@ const toBed: Step = (r, m, ctx) => {
     return enter(r, 'none')
   }
   if (r.turnLeft == null) {
-    if (!approach(r, m, ctx, bed)) return
+    if (!approach(r, m, ctx, bed, dt)) return
     // There: one full turn round, ending at the slot's heading
     r.turnLeft = Math.PI * 2 + angle(r.heading - m.heading)
     r.lastHeading = m.heading
@@ -517,7 +571,7 @@ function faceTarget(r: RoutineState, m: MotionState): boolean {
   return false
 }
 
-const toBowl: Step = (r, m, ctx) => {
+const toBowl: Step = (r, m, ctx, _ev, dt) => {
   const bowl = ctx.spots.bowls[ctx.place]
   if (r.beg && hungryFor(ctx)) r.beg = false
   if (!bowl || (!r.beg && ctx.bowl <= 0)) {
@@ -526,7 +580,7 @@ const toBowl: Step = (r, m, ctx) => {
     return enter(r, 'none')
   }
   if (m.pose !== 'stand') setPose(m, 'stand')
-  if (!approach(r, m, ctx, bowl) || !faceTarget(r, m)) return
+  if (!approach(r, m, ctx, bowl, dt) || !faceTarget(r, m)) return
   // Come round from behind it, it eats once settled, not still swinging past the bowl
   if (!r.beg && Math.abs(m.yawRate) > SETTLED) return
   if (!r.beg) return enter(r, 'eating')
@@ -561,13 +615,13 @@ const begging: Step = (r, m, ctx) => {
   enter(r, 'none')
 }
 
-const toMud: Step = (r, m, ctx) => {
+const toMud: Step = (r, m, ctx, _ev, dt) => {
   if (hungryFor(ctx) || sleepy(r, ctx)) {
     m.goal = null
     return enter(r, 'none')
   }
   if (m.pose !== 'stand') setPose(m, 'stand')
-  if (!approach(r, m, ctx, ctx.spots.mud)) return
+  if (!approach(r, m, ctx, ctx.spots.mud, dt)) return
   r.heading = m.heading
   enter(r, 'splashing')
 }
@@ -588,9 +642,9 @@ const splashing: Step = (r, m, ctx) => {
   goTo(m, r.from.x, r.from.z, { happy: 0.5, energy: 0, gait: 'trot', clamp: ctx.clamp })
 }
 
-const toGarden: Step = (r, m, ctx) => {
+const toGarden: Step = (r, m, ctx, _ev, dt) => {
   if (m.pose !== 'stand') setPose(m, 'stand')
-  if (!approach(r, m, ctx, ctx.spots.garden)) return
+  if (!approach(r, m, ctx, ctx.spots.garden, dt)) return
   enter(r, 'relieving')
 }
 
@@ -627,12 +681,12 @@ const relieving: Step = (r, m, ctx, ev) => {
   goTo(m, x, z, { happy: 0.5, energy: 0, gait: 'walk', clamp: ctx.clamp })
 }
 
-const toScale: Step = (r, m, ctx, ev) => {
+const toScale: Step = (r, m, ctx, ev, dt) => {
   const { scale } = ctx.spots
   r.target.set(scale.center.x, 0, scale.center.z)
   r.heading = scale.facing + ON_SCALE_TURN
   if (m.pose !== 'stand') setPose(m, 'stand')
-  if (!approach(r, m, ctx, scale) || !faceTarget(r, m)) return
+  if (!approach(r, m, ctx, scale, dt) || !faceTarget(r, m)) return
   r.weigh = false
   enter(r, 'onScale')
   ev.weighed = true
@@ -791,7 +845,7 @@ export function letGo(r: RoutineState): void {
 
 /** Busy in its place (a meal, the scale, the bath or the brush): nobody shoves it off it. */
 export const staysPut = (r: RoutineState): boolean =>
-  !!r.held || r.routine === 'eating' || r.routine === 'onScale'
+  !!r.held || r.routine === 'eating' || r.routine === 'onScale' || r.there || r.passT > 0
 
 /** How far a puppy in the way of a chase walks off, and the least that counts as making way. */
 const STEP_ASIDE = 0.6,
@@ -801,14 +855,14 @@ const ASIDE_TURNS = [0, Math.PI / 3, -Math.PI / 3, (2 * Math.PI) / 3, (-2 * Math
 
 /**
  * Standing in the way of a chase: it walks a short way off from the ball at (x, z), straight
- * away when there is room, else turning off along the edge of the play area.
+ * away when there is room, else turning off along the edge of the play area. Returns how far.
  */
 export function stepAside(
   m: MotionState,
   x: number,
   z: number,
   clamp: (x: number, z: number) => [number, number],
-): void {
+): number {
   const ax = m.pos.x - x,
     az = m.pos.z - z,
     l = Math.hypot(ax, az),
@@ -833,6 +887,78 @@ export function stepAside(
     if (moved >= STEP_ASIDE_MIN) break
   }
   goTo(m, bx, bz, { happy: 0, energy: 0, gait: 'walk', clamp })
+  return most
+}
+
+/** The routines that walk to a place with `approach`. */
+const WALKS: ReadonlySet<Routine> = new Set(['toBed', 'toBowl', 'toMud', 'toGarden', 'toScale'])
+
+/** On its way to a place and not there yet: turning round in its bed counts as there. */
+export const walking = (r: RoutineState): boolean => WALKS.has(r.routine) && !r.there
+
+/** Whether two bodies touch, or all but: within REACHED of each other, where one stops short. */
+function touching(a: Body, b: Body): boolean {
+  for (let i = 0; i < SPHERES; i++)
+    for (let k = 0; k < SPHERES; k++) {
+      const p = sphereAt(a, i),
+        q = sphereAt(b, k)
+      if (Math.hypot(p.x - q.x, p.z - q.z) < p.r + q.r + REACHED) return true
+    }
+  return false
+}
+const REACHED = 0.1
+
+/**
+ * Two puppies on their way to their own places that have got no nearer for STUCK seconds, their
+ * bodies touching, would push at each other for ever: the one further from its place steps aside
+ * and waits until the other is there (YIELD_WAIT at most). One standing about in a walker's way,
+ * `free` to move, steps aside out of it. Those eating, asleep or on the scale are not walking and
+ * stay put. Call it once a frame, after the bodies are kept apart.
+ */
+export function giveWay(
+  rs: readonly RoutineState[],
+  ms: readonly MotionState[],
+  bodies: readonly Body[],
+  free: readonly boolean[],
+  clamp: RoutineCtx['clamp'],
+): void {
+  for (let i = 0; i < rs.length; i++) {
+    const r = rs[i]!
+    if (!walking(r) || r.waitT > 0 || r.stuckT < STUCK) continue
+    for (let j = 0; j < rs.length; j++) {
+      const o = rs[j]!
+      if (j === i || !touching(bodies[i]!, bodies[j]!)) continue
+      if (walking(o) && o.waitT <= 0) {
+        const far = (k: number) =>
+          Math.hypot(rs[k]!.target.x - ms[k]!.pos.x, rs[k]!.target.z - ms[k]!.pos.z)
+        const [y, w] = far(i) >= far(j) ? [i, j] : [j, i]
+        stepAside(ms[y]!, ms[w]!.pos.x, ms[w]!.pos.z, clamp)
+        rs[y]!.waitT = YIELD_WAIT
+        rs[y]!.yieldTo = rs[w]!
+        rs[w]!.stuckT = 0
+        rs[w]!.nearest = Infinity
+        break
+      }
+    }
+    // One standing about in the way, as for a chase after the ball
+    if (r.waitT > 0 || r.stuckT < STUCK) continue
+    let k = inTheWay(ms, bodies, free, i, r.target),
+      moved = k >= 0 ? stepAside(ms[k]!, r.target.x, r.target.z, clamp) : 0
+    if (k < 0) {
+      // Or one it is pressed up against, where the edge leaves no way past: away from the walker
+      k = 0
+      while (k < rs.length && (k === i || !free[k] || !touching(bodies[i]!, bodies[k]!))) k++
+      if (k === rs.length) continue
+      moved = stepAside(ms[k]!, ms[i]!.pos.x, ms[i]!.pos.z, clamp)
+    }
+    r.stuckT = 0
+    if (moved >= STEP_ASIDE_MIN && r.asked++ === 0) continue
+    // Penned in, or asked already for nothing: it stands still and the walker squeezes past
+    r.asked = 0
+    r.nearest = Infinity
+    ms[k]!.goal = null
+    r.passT = rs[k]!.passT = SQUEEZE
+  }
 }
 
 /**
@@ -877,6 +1003,7 @@ export function stepRoutine(
 ): RoutineEvents {
   r.t += dt
   r.idle += dt
+  r.passT = Math.max(0, r.passT - dt)
   r.begAgo += dt
   r.mudAgo += dt
   r.fedAgo += dt

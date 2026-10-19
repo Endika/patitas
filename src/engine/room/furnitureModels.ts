@@ -420,6 +420,8 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       fresh.beds.forEach((s, i) => update(spots.beds[i]!, s))
       fresh.bowls.forEach((s, i) => update(spots.bowls[i]!, s))
       for (const k of ['scale', 'mud', 'garden'] as const) update(spots[k], fresh[k])
+      spots.walk = fresh.walk
+      spots.fallback = fresh.fallback
       // Everything faces the camera, so the bed's long side and the scale's display face the screen
       for (const [o, s] of placed) {
         o.position.copy(s.center)
