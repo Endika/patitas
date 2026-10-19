@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { cameraPosition, clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
 import { bedSlots } from '@/engine/motion/routine'
 import {
+  bowl,
   computeSpots,
+  KIBBLE,
   createScaleDisplay,
   formatKg,
   READING_HOLD,
@@ -381,5 +383,19 @@ describe('showBowls', () => {
     ).toEqual([0.25, 1])
     // The left one leaves: the other moves to the one bowl and keeps what was in its own
     expect(shown(1, [{ place: 0, bowl: 1 }])).toEqual([1])
+  })
+})
+
+describe('the kibble', () => {
+  it('has its bounding sphere around the whole mound before the bowl is emptied', () => {
+    const { kibble } = bowl(new THREE.Texture())
+    // What addFurniture does before the first render
+    kibble.count = 0
+    const sphere = kibble.boundingSphere
+    expect(sphere).not.toBeNull()
+    expect(sphere!.radius).toBeGreaterThan(0.05)
+    kibble.count = KIBBLE
+    expect(kibble.count).toBe(110)
+    expect(kibble.boundingSphere!.radius).toBe(sphere!.radius)
   })
 })

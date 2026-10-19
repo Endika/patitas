@@ -327,9 +327,9 @@ function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
   return g
 }
 
-const KIBBLE = 110
+export const KIBBLE = 110
 
-function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.InstancedMesh } {
+export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.InstancedMesh } {
   const g = new THREE.Group()
   const profile = [
     [0, 0],
@@ -351,7 +351,7 @@ function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.Instanc
   )
   dish.receiveShadow = true
   const kibble = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(0.011, 5, 3),
+    new THREE.SphereGeometry(0.016, 5, 3),
     new THREE.MeshStandardMaterial({ roughness: 0.75 }),
     KIBBLE,
   )
@@ -359,9 +359,9 @@ function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.Instanc
   const rand = rng(7)
   const pellets: { x: number; y: number; z: number }[] = []
   while (pellets.length < KIBBLE) {
-    const r = Math.sqrt(rand()) * 0.078,
+    const r = Math.sqrt(rand()) * 0.07,
       a = rand() * Math.PI * 2
-    const top = 0.05 * (1 - (r / 0.085) ** 2)
+    const top = 0.054 * (1 - (r / 0.078) ** 2)
     pellets.push({ x: r * Math.cos(a), y: 0.02 + rand() * top, z: r * Math.sin(a) })
   }
   pellets.sort((p, q) => p.y - q.y)
@@ -376,6 +376,8 @@ function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.Instanc
     kibble.setMatrixAt(i, m.compose(new THREE.Vector3(p.x, p.y, p.z), q.setFromEuler(e), sc))
     kibble.setColorAt(i, c.set('#8b5a32').offsetHSL(0, 0, (rand() - 0.5) * 0.12))
   })
+  // Three caches the sphere on the first draw; bowlFill(…, 0) would leave it empty and cull the kibble for good
+  kibble.computeBoundingSphere()
   g.add(dish, kibble, contact(shade, BOWL.radius, BOWL.depth, 0.45))
   return { group: g, kibble }
 }
