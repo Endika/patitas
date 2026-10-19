@@ -53,6 +53,7 @@ import {
   START_PLACES,
 } from '@/engine/room/furniture'
 import { createMessLayer, placeAccident } from '@/engine/room/messes'
+import { createSelectRing, ringRadius } from '@/engine/room/selectRing'
 import { createRoomScene, keepInPlay, syncBallMesh, type RoomScene } from '@/engine/room/scene'
 import { HINTS, hintText, NIGHT_HINT } from './hints'
 import { needsBeat } from './needsBeat'
@@ -172,6 +173,7 @@ export function createThreeStage(
       takeBall() {},
       stowBall() {},
       trick() {},
+      select() {},
       feed() {},
       bath() {},
       rinse() {},
@@ -189,6 +191,9 @@ export function createThreeStage(
   const messes = createMessLayer(room.scene)
   const baths = createBathLayer(room.scene)
   const brushes = createBrushLayer(room.scene)
+  const ring = createSelectRing(room.scene)
+  /** The index the buttons are for, as the screen last said. */
+  let chosen: number | null = null
   const scaleDisplay = createScaleDisplay()
   const mounted = new Map<string, PuppyView>()
   /** Puppies whose mesh failed to build, until the next setPuppies tries again. */
@@ -209,6 +214,14 @@ export function createThreeStage(
   const inBath = () => views.find((v) => v.bath.phase !== 'off')
   /** The puppy being brushed, if any: one at a time, and not while another is bathed. */
   const brushed = () => views.find((v) => v.brush.on)
+  /** The ring under the chosen puppy, or nowhere: bathing and brushing already single one out. */
+  const syncRing = () => {
+    const v = chosen === null || views.length < 2 ? undefined : views[chosen]
+    let busy = false
+    for (const w of views) busy ||= w.bath.phase !== 'off' || w.brush.on
+    if (v && !busy) ring.follow(v.group.position, ringRadius(v.shape))
+    else ring.follow(null, 0)
+  }
   const mood = (v: PuppyView) => ({
     happy: v.behaviour.happy,
     energy: v.persona.energy,
@@ -368,6 +381,7 @@ export function createThreeStage(
     })
     baths.sync(views, dt, room.camera.position)
     brushes.sync(views, dt, room.camera)
+    syncRing()
     const onScale = views.find((w) => w.routine.routine === 'onScale')
     showScale(scaleDisplay, room.furniture, onScale ? onScale.care.weightKg : null, dt)
     messes.begin()
@@ -470,8 +484,12 @@ export function createThreeStage(
     stowBall() {
       if (ball.state === 'hand') putBallAway(views, ball)
     },
-    trick(pose) {
-      for (const v of views) askTrick(v, pose)
+    trick(index, pose) {
+      const v = views[index]
+      if (v) askTrick(v, pose)
+    },
+    select(index) {
+      chosen = index
     },
     feed(index) {
       for (const [i, v] of views.entries()) if (index === undefined || i === index) v.bowl = 1
@@ -527,6 +545,7 @@ export function createThreeStage(
       messes.dispose()
       baths.dispose()
       brushes.dispose()
+      ring.dispose()
       for (const v of mounted.values()) v.dispose()
       mounted.clear()
       room.dispose()

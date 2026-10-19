@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import type { Puppy } from '@/domain/puppy'
 import Hud from './components/Hud'
@@ -25,8 +25,9 @@ const debugPuppies = (ids: BreedId[]): Puppy[] => {
 
 /**
  * One or two puppies in the room with the prototype's controls, for checking the render by eye,
- * plus buttons that fill the bowls, send the first puppy into the puddle, have it squat, bathe,
- * brush or weigh a puppy, and each puppy's care as the room keeps it.
+ * tricks and the ring for the puppy last touched, plus buttons that fill the bowls, send the first
+ * puppy into the puddle, have it squat, bathe, brush or weigh a puppy, and each puppy's care as
+ * the room keeps it.
  */
 export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: string | null }) {
   const key = breedIds.join(',')
@@ -40,6 +41,12 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
     [key, at],
   )
   const { hostRef, stageRef, status } = useRoomStage(createStage)
+  // The puppy last touched gets the tricks, as in the room
+  const selected = Math.max(0, status?.needs.findIndex((n) => n.id === status.touched?.id) ?? 0)
+  const ringed = (status?.needs.length ?? 0) > 1 ? selected : null
+  useEffect(() => {
+    stageRef.current?.select(ringed)
+  }, [createStage, ringed, stageRef])
 
   return (
     <div className="room">
@@ -128,7 +135,7 @@ export default function DebugPuppy({ breedIds, at }: { breedIds: BreedId[]; at: 
           onBall={(inHand) =>
             inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall()
           }
-          onTrick={(pose) => stageRef.current?.trick(pose)}
+          onTrick={(pose) => stageRef.current?.trick(selected, pose)}
         />
       )}
       {status?.notice && <div className="room-loading">{status.notice}</div>}

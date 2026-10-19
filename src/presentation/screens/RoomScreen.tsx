@@ -186,6 +186,11 @@ export default function RoomScreen({
     status.needs.findIndex((n) => n.id === picked),
   )
 
+  const ringed = status.needs.length > 1 ? selected : null
+  useEffect(() => {
+    stageRef.current?.select(ringed)
+  }, [createStage, ringed, stageRef])
+
   const toggle = async (puppy: Puppy, isIn: boolean) => {
     if (isIn) {
       await onLeave(puppy.id)
@@ -267,7 +272,7 @@ export default function RoomScreen({
         status={status}
         idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
-        onTrick={(pose) => stageRef.current?.trick(pose)}
+        onTrick={(pose) => stageRef.current?.trick(selected, pose)}
         care={<CareActions selected={selected} idle={!status.needs.length} stage={stage} />}
         mode={busy ? <CareMode needs={status.needs} stage={stage} /> : undefined}
       />

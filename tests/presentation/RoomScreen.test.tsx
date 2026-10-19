@@ -120,7 +120,43 @@ describe('RoomScreen', () => {
       await user.click(screen.getByRole('button', { name: 'Trucos' }))
       await user.click(screen.getByRole('button', { name: label }))
     }
-    expect(stage.calls).toEqual(['takeBall', 'stowBall', 'trick:sit', 'trick:lie', 'trick:belly'])
+    expect(stage.calls).toEqual([
+      'takeBall',
+      'stowBall',
+      'trick:0:sit',
+      'trick:0:lie',
+      'trick:0:belly',
+    ])
+  })
+
+  it('gives a trick only to the puppy picked, and rings it while there are two', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const byName = await ids(storage)
+    const stage = start(storage)
+    await roster()
+    const sit = async () => {
+      await user.click(screen.getByRole('button', { name: 'Trucos' }))
+      await user.click(screen.getByRole('button', { name: 'Sentado' }))
+    }
+    act(() => stage.emit({ needs: [needs(byName.get('Luna')!, 'Luna')] }))
+    expect(stage.selected.at(-1)).toBeNull()
+
+    act(() =>
+      stage.emit({
+        needs: [needs(byName.get('Luna')!, 'Luna'), needs(byName.get('Kira')!, 'Kira')],
+      }),
+    )
+    expect(stage.selected.at(-1)).toBe(0)
+    await sit()
+    // Tapping the other puppy in the room makes it the one the orders are for
+    act(() => stage.emit({ touched: { id: byName.get('Kira')!, count: 1 } }))
+    expect(stage.selected.at(-1)).toBe(1)
+    await sit()
+    await user.click(screen.getByRole('button', { name: /^Luna,/ }))
+    expect(stage.selected.at(-1)).toBe(0)
+    await sit()
+    expect(stage.calls).toEqual(['trick:0:sit', 'trick:1:sit', 'trick:0:sit'])
   })
 
   it('goes back to adopting another puppy', async () => {
