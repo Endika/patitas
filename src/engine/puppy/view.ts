@@ -73,9 +73,9 @@ import {
   type Brush,
 } from '@/engine/room/brush'
 import { bodyOf, bodyShape, createBody, type Body, type BodyShape } from '@/engine/room/bodies'
-import type { ClampTo } from '@/engine/room/apart'
+import type { ClampTo, ScaleClear } from '@/engine/room/apart'
 import { cameraPosition, clampPlay, clampPlayTo, playAxes } from '@/engine/room/camera'
-import { claimBall, inTheWay, keepOff, separate } from '@/engine/room/crowd'
+import { claimBall, inTheWay, separate } from '@/engine/room/crowd'
 import { inMud, showBowls, type Spots } from '@/engine/room/furniture'
 import { messLocal } from '@/engine/room/messes'
 import { raySphere, type PuppyHit } from '@/engine/room/input'
@@ -785,6 +785,8 @@ export const mouthWorld = (view: PuppyView, out: Vec3): Vec3 =>
 
 /** How far from the scale's middle the others keep while one is weighed: a body's room and a step. */
 const SCALE_CLEAR = 0.5
+/** The scale's circle while one is weighed, filled in each frame rather than built. */
+const scaleClear: ScaleClear = { owner: createMotionState(), x: 0, z: 0, r: SCALE_CLEAR }
 const SNORE = 1.2
 /** Just woken, a puppy walks this far in front of the room's middle to say hello. */
 const HELLO = 0.35
@@ -836,7 +838,8 @@ export function tickPuppies(
           breed: view.breed,
           bowl: view.bowl,
           muzzle: view.reach * EAT_REACH,
-          clamp: (x, z) => clampPlay(room.cam, x, z),
+          clamp: clampIn(room),
+          clampTo: clampToIn(room),
           busy: view.fetch.task !== 'free',
           curious: view.persona.curious,
           ...(ctx.random && { random: ctx.random }),
@@ -912,12 +915,17 @@ export function tickPuppies(
     if (v.fetch.holding || v.fetch.task === 'grab' || v.fetch.task === 'present') catcher = i
   }
   const inPlay = clampToIn(room)
-  // The scale is the weighed puppy's: the other keeps clear of it, and cannot push it off
-  if (views.length > 1 && owner && spots)
-    keepOff(motions, owner, spots.scale.center.x, spots.scale.center.z, SCALE_CLEAR, inPlay)
   for (const v of views) bodies.push(placeBody(v))
   if (views.length > 1) {
-    separate(motions, bodies, inPlay, fixed, Math.min(dt, MAX_DT))
+    // The scale is the weighed puppy's: the other keeps clear of it, and cannot push it off
+    let clear: ScaleClear | null = null
+    if (owner && spots) {
+      clear = scaleClear
+      clear.owner = owner
+      clear.x = spots.scale.center.x
+      clear.z = spots.scale.center.z
+    }
+    separate(motions, bodies, inPlay, fixed, Math.min(dt, MAX_DT), clear)
     // Two on their way to their own places that block each other: one makes way
     routines.length = 0
     free.length = 0

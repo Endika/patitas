@@ -5,6 +5,14 @@ import { shiftBody, sphereAt, SPHERES, type Body } from './bodies'
 /** Moves a floor point back into the play area, in place. */
 export type ClampTo = (p: Vec3) => void
 
+/** The scale while one puppy is weighed: everyone else keeps out of the circle `r` round it. */
+export interface ScaleClear {
+  owner: MotionState
+  x: number
+  z: number
+  r: number
+}
+
 /**
  * The most `keepApart` moves a puppy in one frame. A pair it cannot part within that keeps
  * overlapping a little for the next frames, which is never a jump.
@@ -60,6 +68,7 @@ export function keepApart(
   clamp?: ClampTo,
   pinned: readonly boolean[] | null = null,
   dt = 0,
+  scale: ScaleClear | null = null,
 ): void {
   frameDt = dt
   states = s
@@ -71,6 +80,8 @@ export function keepApart(
     starts[2 * i] = s[i]!.pos.x
     starts[2 * i + 1] = s[i]!.pos.z
   }
+  // Off the scale first: the step out counts against the same APART_STEP as the parting
+  if (scale) for (let i = 0; i < s.length; i++) if (s[i] !== scale.owner) keepOff(i, scale)
   // Parting one pair can push one of them into a third, so the pairs go round until all are clear
   for (let sweep = 0; sweep < SWEEPS; sweep++) {
     let moved = false
@@ -82,6 +93,27 @@ export function keepApart(
   bodies = NO_BODIES
   clampTo = undefined
   fixed = null
+}
+
+/** Moves puppy `i`, and its goal, out of the scale's circle: its goal in full, itself a step. */
+function keepOff(i: number, { x, z, r }: ScaleClear) {
+  const m = states[i]!
+  if (m.goal) {
+    const gx = m.goal.x - x,
+      gz = m.goal.z - z,
+      g = Math.hypot(gx, gz)
+    if (g < r) {
+      if (g > 1e-6) m.goal.set(x + (gx / g) * r, m.goal.y, z + (gz / g) * r)
+      else m.goal.set(x + r, m.goal.y, z)
+      clampTo?.(m.goal)
+    }
+  }
+  const dx = m.pos.x - x,
+    dz = m.pos.z - z,
+    d = Math.hypot(dx, dz)
+  if (d >= r) return
+  if (d > 1e-6) moveBy(i, (dx / d) * (r - d), (dz / d) * (r - d))
+  else moveBy(i, r, 0)
 }
 
 /** Moves puppy `i` by (dx, dz), kept in the play area and within APART_STEP of its start. */
@@ -153,7 +185,7 @@ function apartFar(a: Body, b: Body): boolean {
 }
 
 /** How far along the floor a body reaches from its chest's middle. */
-function reachOf(b: Body): number {
+export function reachOf(b: Body): number {
   const c = b.chest
   return Math.max(
     c.r,
@@ -304,12 +336,20 @@ function part(i: number, j: number): boolean {
     }
     if (choice.short >= PARTED) break
   }
+  // One that will not be pushed but walks off on its own swings its head as far as one that will
   if (pushed && frameDt > 0 && touching(bodies[i]!, bodies[j]!)) {
-    if (!sa) unturn(i, j)
-    if (!sb && touching(bodies[i]!, bodies[j]!)) unturn(j, i)
+    if (!sa || a.goal) unturn(i, j)
+    if ((!sb || b.goal) && touching(bodies[i]!, bodies[j]!)) unturn(j, i)
   }
-  // Walking into a sleeper or the one on the scale, which will not move: it stops short
-  if (pushed && sa !== sb) stopIfInto(sa ? b : a, sa ? a : b, AHEAD)
+  if (pushed && sa !== sb) {
+    const held = sa ? a : b,
+      other = sa ? b : a
+    // Walking into a sleeper or the one on the scale, which will not move: it stops short. One
+    // that will not be pushed but walks off on its own is followed, not stopped at
+    if (!held.goal) stopIfInto(other, held, AHEAD)
+    // …and it stops short itself of one it cannot push out of its way
+    else if (choice.short >= PARTED) stopIfInto(held, other, AHEAD)
+  }
   return pa.x !== ax0 || pa.z !== az0 || pb.x !== bx0 || pb.z !== bz0
 }
 

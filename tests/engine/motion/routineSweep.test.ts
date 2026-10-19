@@ -27,7 +27,7 @@ import {
 import { anatomy } from '@/engine/puppy/anatomy'
 import { bodyOf, bodyShape, createBody, type BodyShape } from '@/engine/room/bodies'
 import { clampPlay, createCamera, fitCamera, PLAY, playHalf, playWorld } from '@/engine/room/camera'
-import { keepOff, separate } from '@/engine/room/crowd'
+import { separate } from '@/engine/room/crowd'
 import { computeSpots, inMud, inOval, type Spots } from '@/engine/room/furniture'
 import { seeded } from '../seeded'
 
@@ -130,7 +130,6 @@ function run(
     })
     const ms = pups.map((p) => p.m)
     const owner = pups.find((p) => weighing(p.r))
-    if (owner) keepOff(ms, owner.m, spots.scale.center.x, spots.scale.center.z, 0.5, clampTo)
     const bodies = pups.map((p) => bodyOf(p.m.pos, p.m.heading, p.m.pose, p.shape, createBody()))
     separate(
       ms,
@@ -138,6 +137,7 @@ function run(
       clampTo,
       pups.map((p) => staysPut(p.r)),
       DT,
+      owner ? { owner: owner.m, x: spots.scale.center.x, z: spots.scale.center.z, r: 0.5 } : null,
     )
     giveWay(
       pups.map((p) => p.r),
@@ -147,9 +147,17 @@ function run(
       clamp,
       spots,
     )
+    closest = Math.min(
+      closest,
+      Math.hypot(ms[0]!.pos.x - ms[1]!.pos.x, ms[0]!.pos.z - ms[1]!.pos.z),
+    )
     each?.(n * DT)
-    if (done()) return n * DT
+    if (done()) {
+      lastResorts += pups.reduce((k, p) => k + p.r.backedOff, 0)
+      return n * DT
+    }
   }
+  lastResorts += pups.reduce((k, p) => k + p.r.backedOff, 0)
   return null
 }
 
@@ -162,6 +170,14 @@ const cases = rooms.flatMap((room) =>
 )
 /** The failures of a sweep, kept for the summary at the end. */
 const failed: string[] = []
+/**
+ * The closest two centres came, and the times one backed off for the other (the last resort).
+ * Two standing bodies that only touch, a dorado's and a shiba's turned head to tail and offset,
+ * stand 0.334 apart centre to centre: nearer than TOUCHING, one is in the other.
+ */
+let closest = Infinity,
+  lastResorts = 0
+const TOUCHING = 0.33
 
 describe('two puppies from random starts', () => {
   it.each(cases)('both eat at aspect $aspect, seed $seed', ({ aspect, cam, spots, seed }) => {
@@ -183,12 +199,14 @@ describe('two puppies from random starts', () => {
         other = pups[1 - who]!
       goWeigh(chosen.r, chosen.m)
       let next = 0
+      // The other is sent somewhere new every 2.5 s, now and then into the way again: with no
+      // squeezing past, the weigher may have to back off and walk round it more than once
       const t = run(
         pups,
         cam,
         spots,
         noon,
-        30,
+        40,
         () => chosen.r.routine === 'onScale',
         (at) => {
           if (at < next || other.r.routine !== 'none') return
@@ -263,7 +281,11 @@ describe('two puppies from random starts', () => {
 
   it('summary', () => {
     if (process.env.SWEEP_SEEDS)
-      console.warn(`SWEEP ${SEEDS} seeds: ${failed.length} failed`, failed)
+      console.warn(
+        `SWEEP ${SEEDS} seeds: ${failed.length} failed, closest ${closest.toFixed(3)}, ${lastResorts} last resorts`,
+        failed,
+      )
     expect(failed).toEqual([])
+    expect(closest).toBeGreaterThanOrEqual(TOUCHING)
   })
 })

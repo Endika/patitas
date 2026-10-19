@@ -61,7 +61,7 @@ import {
   playWorld,
 } from '@/engine/room/camera'
 import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
-import { keepOff, separate } from '@/engine/room/crowd'
+import { separate } from '@/engine/room/crowd'
 import {
   computeSpots,
   inMud,
@@ -167,7 +167,6 @@ function run(
       ;[p.x, p.z] = c(p.x, p.z)
     }
     const ms = pups.map((p) => p.m)
-    if (owner) keepOff(ms, owner.m, spots.scale.center.x, spots.scale.center.z, 0.5, clampTo)
     const bodies = ms.map((m) => bodyOf(m.pos, m.heading, m.pose, SHAPE, createBody()))
     separate(
       ms,
@@ -175,6 +174,7 @@ function run(
       clampTo,
       pups.map((p) => staysPut(p.r)),
       DT,
+      owner ? { owner: owner.m, x: spots.scale.center.x, z: spots.scale.center.z, r: 0.5 } : null,
     )
     giveWay(
       pups.map((p) => p.r),
@@ -1135,6 +1135,38 @@ describe('the scale', () => {
     expect(b.r.routine).toBe('sleeping')
     expect(inBed(b.m, SPOTS2.beds[1]!)).toBeLessThan(0.25)
     expect(closest).toBeGreaterThan(SPOTS2.scale.radius + 0.1)
+  })
+})
+
+describe('giveWay', () => {
+  const framed = fitCamera(createCamera(), 0.65),
+    spots = computeSpots(framed, 2),
+    framedClamp = (x: number, z: number) => clampPlay(framed, x, z)
+  const apart = (a: Pup, b: Pup) => Math.hypot(a.m.pos.x - b.m.pos.x, a.m.pos.z - b.m.pos.z)
+
+  it('one standing on the other’s bowl in a corner gets out of its way: neither squeezes through', () => {
+    const bowl = spots.bowls[1]!
+    const [cx, cz] = framedClamp(bowl.center.x + 0.3, bowl.center.z + 0.3)
+    // Nose to nose across the room: the one in the corner faces the hungry one coming for its bowl
+    const idle = pup(cx, cz),
+      hungry = pup(-0.5, 0.19, 0.8, 0.8, 1)
+    idle.m.heading = Math.atan2(hungry.m.pos.x - cx, hungry.m.pos.z - cz)
+    let closest = Infinity
+    run(
+      [idle, hungry],
+      40,
+      at(12),
+      spots,
+      () => (closest = Math.min(closest, apart(idle, hungry))),
+      undefined,
+      {
+        clamp: framedClamp,
+      },
+    )
+    expect(hungry.fed).toBe(1)
+    expect(idle.r.backedOff + hungry.r.backedOff).toBeGreaterThan(0)
+    // Two shibas that only touch, head to tail and offset, stand 0.324 apart
+    expect(closest).toBeGreaterThan(0.32)
   })
 })
 

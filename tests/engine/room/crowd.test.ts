@@ -35,7 +35,7 @@ import {
   PLAY,
 } from '@/engine/room/camera'
 import { APART_STEP, type ClampTo } from '@/engine/room/apart'
-import { claimBall, inTheWay, keepOff, separate } from '@/engine/room/crowd'
+import { claimBall, inTheWay, separate } from '@/engine/room/crowd'
 import { seeded } from '../seeded'
 
 const DT = 1 / 60
@@ -76,7 +76,12 @@ function apart(ms: MotionState[], clamp?: ClampTo, fixed: readonly boolean[] | n
   )
 }
 
-describe('keepOff', () => {
+describe('keeping off the scale', () => {
+  const scale = (owner: MotionState) => ({ owner, x: 0.5, z: 0.5, r: 0.5 })
+
+  /** A body well away from everyone, so only the scale moves them. */
+  const aside = () => placed(puppy(-5, -5).m)
+
   it('keeps everyone but the one on the scale out of its circle, goals too', () => {
     const on = createMotionState(),
       other = createMotionState(),
@@ -85,7 +90,7 @@ describe('keepOff', () => {
     other.pos.set(0.6, 0, 0.5)
     other.goal = new THREE.Vector3(0.5, 0, 0.45)
     far.pos.set(-1, 0, 0)
-    keepOff([on, other, far], on, 0.5, 0.5, 0.5)
+    separate([on, other, far], [aside(), placed(other), placed(far)], undefined, null, 0, scale(on))
     expect(on.pos.toArray()).toEqual([0.5, 0, 0.5])
     expect(other.pos.x).toBeCloseTo(0.6 + APART_STEP)
     expect(other.pos.z).toBeCloseTo(0.5)
@@ -101,12 +106,30 @@ describe('keepOff', () => {
     let frames = 0
     for (; frames < 40; frames++) {
       const before = other.pos.clone()
-      keepOff([on, other], on, 0.5, 0.5, 0.5)
+      separate([on, other], [aside(), placed(other)], undefined, null, 0, scale(on))
       expect(other.pos.distanceTo(before)).toBeLessThanOrEqual(APART_STEP + 1e-9)
       if (other.pos.distanceTo(before) === 0) break
     }
     expect(Math.hypot(other.pos.x - 0.5, other.pos.z - 0.5)).toBeCloseTo(0.5)
     expect(frames).toBeGreaterThan(1)
+  })
+
+  it('moves one inside the circle and pressed against the weighed one at most a step in all', () => {
+    // The weighed one is held in place: the other takes both the step off the scale and the push
+    const on = puppy(0, 0, 0),
+      other = puppy(0.2, 0.05, Math.PI / 2)
+    const before = other.m.pos.clone()
+    const bodies = [placed(on.m), placed(other.m)]
+    expect(clearance(bodies[0]!, bodies[1]!)).toBeLessThan(0)
+    separate([on.m, other.m], bodies, undefined, [true, false], DT, {
+      owner: on.m,
+      x: 0,
+      z: 0,
+      r: 0.5,
+    })
+    expect(on.m.pos.toArray()).toEqual([0, 0, 0])
+    expect(other.m.pos.distanceTo(before)).toBeLessThanOrEqual(APART_STEP + 1e-9)
+    expect(other.m.pos.distanceTo(before)).toBeGreaterThan(APART_STEP * 0.9)
   })
 })
 
