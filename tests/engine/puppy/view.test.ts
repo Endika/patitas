@@ -2,12 +2,20 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { BREEDS } from '@/domain/breeds'
-import { createCare } from '@/domain/care'
+import { createCare, settle } from '@/domain/care'
 import { createMotionState } from '@/engine/motion/locomotion'
 import { setPose } from '@/engine/motion/poses'
 import { createFetchState } from '@/engine/motion/fetch'
 import { bedSlots, createRoutineState, holdStill, tuckIn, weighing } from '@/engine/motion/routine'
-import { createBehaviourState } from '@/engine/puppy/behaviour'
+import {
+  behaviourRig,
+  createBehaviourState,
+  endPet,
+  movePet,
+  startPet,
+  stepBehaviour,
+  type BehaviourInput,
+} from '@/engine/puppy/behaviour'
 import { beginBath, createBath, createCoat } from '@/engine/room/bath'
 import { createBrush } from '@/engine/room/brush'
 import { createCamera, fitCamera } from '@/engine/room/camera'
@@ -289,6 +297,57 @@ describe('cheerUp', () => {
     v.behaviour.happy = 0.9
     cheerUp(v)
     expect(v.care.happiness).toBeCloseTo(0.515)
+  })
+
+  it('lets two puppies differ: minutes of petting one leave it happier, and not pinned at 1', () => {
+    const DT = 1 / 30
+    const puppy = () => {
+      const v = cheery()
+      v.moodWas = v.behaviour.happy
+      const rig = behaviourRig(BREEDS.shiba, BREEDS.shiba.defaultPersona, anatomy(BREEDS.shiba))
+      const input: BehaviourInput = {
+        now: 0,
+        petting: false,
+        petHeadX: 0,
+        motion: createMotionState(),
+        body: { y: 0, pitch: 0, roll: 0, k: 0 },
+        fetch: createFetchState(),
+        ball: createBall(),
+        camera: new THREE.Vector3(0.9, 0.9, 2.2),
+        random: () => 0.5,
+      }
+      return { v, rig, input }
+    }
+    const petted = puppy(),
+      other = puppy(),
+      point = new THREE.Vector3()
+    const happiness = new Map<number, [number, number]>()
+    let passing = 0
+    // Strokes of 1.5 s with a pause of 2 s between them, and the room's drift every 10 s
+    for (let f = 1; f * DT <= 300; f++) {
+      const t = f * DT,
+        stroking = t % 3.5 < 1.5
+      if (stroking && !petted.input.petting) startPet(petted.v.behaviour, 'back', point, t)
+      if (!stroking && petted.input.petting) endPet(petted.v.behaviour)
+      petted.input.petting = stroking
+      if (stroking) movePet(petted.v.behaviour, 'back', point, t, 6)
+      for (const { v, rig, input } of [petted, other]) {
+        input.now = t
+        stepBehaviour(rig, v.behaviour, input, DT, t)
+        cheerUp(v)
+      }
+      passing += DT
+      if (passing >= 10) {
+        for (const { v } of [petted, other]) v.care = settle(v.care, passing)
+        passing = 0
+      }
+      if (f % (60 / DT) === 0)
+        happiness.set(t / 60, [petted.v.care.happiness, other.v.care.happiness])
+    }
+    const [mine, theirs] = happiness.get(5)!
+    expect(mine - theirs).toBeGreaterThanOrEqual(0.15)
+    for (const [mine] of happiness.values()) expect(mine).toBeLessThan(0.95)
+    expect(happiness.get(3)![0]).toBeLessThan(happiness.get(5)![0])
   })
 })
 

@@ -67,6 +67,10 @@ const NIGHT_END_HOUR = 8
 
 const unit = (value: number): number => Math.min(1, Math.max(0, value))
 
+/** Happiness `amount` up, each gain above one half shrinking with the room left. */
+const delight = (happiness: number, amount: number): number =>
+  unit(happiness + amount * Math.min(1, 2 * (1 - happiness)))
+
 export function createCare(breed: Breed, now: number): Care {
   const { min, max } = breed.weightKg
   return {
@@ -256,7 +260,7 @@ export const dry = (care: Care, seconds: number): Care => ({
 export const groom = (care: Care, shine: number, joy: number): Care => ({
   ...care,
   shine: unit(care.shine + shine),
-  happiness: unit(care.happiness + joy),
+  happiness: delight(care.happiness, joy),
 })
 
 /** `seconds` of the shine wearing off; a dull coat is the same care. */
@@ -280,10 +284,13 @@ export function settle(care: Care, seconds: number): Care {
   return { ...care, happiness: unit(happiness) }
 }
 
-/** Play, petting, a meal or a bath it likes: `amount` more happiness. */
+/**
+ * Play, petting, a meal or a bath it likes: up to `amount` more happiness, shrinking above one
+ * half, so a very happy puppy takes sustained care and does not pin at 1 in minutes.
+ */
 export const cheer = (care: Care, amount: number): Care => ({
   ...care,
-  happiness: unit(care.happiness + amount),
+  happiness: delight(care.happiness, amount),
 })
 
 export const rest = (care: Care, seconds: number): Care => ({
