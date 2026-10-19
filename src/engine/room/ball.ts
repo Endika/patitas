@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { clamp, MAX_DT, type Vec3 } from '@/engine/math'
 import { sphereAt, SPHERES, type Body, type Sphere } from './bodies'
-import { PLAY, playAxes, playLocal, type FixedCamera } from './camera'
+import { PLAY, playAxes, playLocal, playWorld, type FixedCamera } from './camera'
 
 export const BALL_R = 0.075
 
@@ -11,6 +11,8 @@ export interface BallState {
   /** Rolling rotation; only x and z are used. */
   rot: Vec3
   state: 'none' | 'hand' | 'air' | 'mouth'
+  /** Seconds it has lain still against or under a puppy. */
+  hemmedT: number
 }
 
 export function createBall(): BallState {
@@ -19,6 +21,7 @@ export function createBall(): BallState {
     vel: new THREE.Vector3(),
     rot: new THREE.Vector3(),
     state: 'none',
+    hemmedT: 0,
   }
 }
 
@@ -28,6 +31,8 @@ export function createBall(): BallState {
  */
 const RETURN_ACC = 3,
   RETURN_V = 0.6
+/** How fast the floor slows a rolling ball, per second. */
+const FRICTION = 2.6
 
 /** Gravity, bounces, floor friction and invisible walls at the frame edges. Only moves a loose ball. */
 export function stepBall(ball: BallState, cam: FixedCamera, dt: number): void {
@@ -63,7 +68,7 @@ export function stepBall(ball: BallState, cam: FixedCamera, dt: number): void {
     p.y = BALL_R
     if (v.y < 0) v.y = -v.y * 0.55
     if (v.y < 0.25) v.y = 0
-    const f = Math.exp(-2.6 * dt)
+    const f = Math.exp(-FRICTION * dt)
     v.x *= f
     v.z *= f
   }
@@ -120,6 +125,89 @@ export function bounceOff(ball: BallState, bodies: readonly Body[], skip: number
     }
   }
   return hit
+}
+
+/** A ball still for HEMMED s against or under a puppy rolls out at ROLL_OUT m/s. */
+const HEMMED = 0.5,
+  ROLL_OUT = 1
+/** Slower than this, the ball counts as lying still; nearer than HEM to a body, as against it. */
+const STILL = 0.05,
+  HEM = 0.02
+/** Under a sphere whose underside is lower than this, no mouth gets at the ball. */
+const LOW = 0.35
+/** How far a roll-out goes before floor friction stops it: it looks that far for open floor. */
+const ROLL_LOOK = ROLL_OUT / FRICTION
+
+/**
+ * A ball left lying against a puppy, or in under its chin or belly where no mouth can reach it,
+ * rolls gently out after a moment: away from that puppy's chest (its rump, right under the chest),
+ * far enough to be clear of it, or towards the middle of the play area
+ * when the edge is that way. Skips the puppy at `skip`. Returns whether it rolled it out.
+ */
+export function rollOut(
+  ball: BallState,
+  bodies: readonly Body[],
+  skip: number | -1,
+  cam: FixedCamera,
+  dt: number,
+): boolean {
+  const p = ball.pos,
+    v = ball.vel
+  if (ball.state !== 'air' || v.length() >= STILL || p.y > BALL_R + 0.01) {
+    ball.hemmedT = 0
+    return false
+  }
+  let hem: Body | null = null,
+    flat = Infinity
+  for (let i = 0; i < bodies.length; i++) {
+    if (i === skip) continue
+    for (let k = 0; k < SPHERES; k++) {
+      const s = sphereAt(bodies[i]!, k),
+        h = Math.hypot(p.x - s.x, p.z - s.z),
+        gap = Math.hypot(h, p.y - s.y) - s.r - BALL_R,
+        under = h < s.r + BALL_R && p.y < s.y && s.y - s.r < LOW
+      if ((gap < HEM || under) && h < flat) {
+        flat = h
+        hem = bodies[i]!
+      }
+    }
+  }
+  if (!hem) {
+    ball.hemmedT = 0
+    return false
+  }
+  ball.hemmedT += dt
+  if (ball.hemmedT < HEMMED) return false
+  ball.hemmedT = 0
+  let from = hem.chest,
+    l0 = Math.hypot(p.x - from.x, p.z - from.z)
+  if (l0 < 1e-3) {
+    from = hem.rump
+    l0 = Math.hypot(p.x - from.x, p.z - from.z)
+  }
+  const ax = l0 > 1e-6 ? (p.x - from.x) / l0 : 1,
+    az = l0 > 1e-6 ? (p.z - from.z) / l0 : 0
+  const [mx, mz] = playWorld(cam, (PLAY.near + PLAY.far) / 2, 0)
+  const cl = Math.hypot(mx - p.x, mz - p.z) || 1,
+    cx = (mx - p.x) / cl,
+    cz = (mz - p.z) / cl
+  // Away from the puppy, else slanting towards the middle, else straight there
+  let ux = cx,
+    uz = cz
+  for (let k = 0; k < 2; k++) {
+    const tx = k === 0 ? ax : ax + cx,
+      tz = k === 0 ? az : az + cz,
+      l = Math.hypot(tx, tz)
+    if (l < 1e-6) continue
+    const q = playLocal(cam, p.x + (tx / l) * ROLL_LOOK, p.z + (tz / l) * ROLL_LOOK)
+    if (q.d <= PLAY.far && q.d >= PLAY.near && Math.abs(q.side) <= q.half) {
+      ux = tx / l
+      uz = tz / l
+      break
+    }
+  }
+  v.set(ux * ROLL_OUT, 0, uz * ROLL_OUT)
+  return true
 }
 
 /** Moves the ball's centre `p` onto the surface of `s` grown by the ball, staying on the floor. */

@@ -4,6 +4,7 @@ import { BALL_R, type BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes, type FixedCamera } from '@/engine/room/camera'
 import type { GaitId } from './gaits'
 import { goTo, type MotionState } from './locomotion'
+import { setPose } from './poses'
 
 export type FetchTask = 'free' | 'wait' | 'chase' | 'grab' | 'return' | 'present'
 
@@ -17,11 +18,16 @@ export interface FetchState {
   watch: boolean
   /** Picked the ball up in the mud: walks out through the puddle before bringing it. */
   wading: boolean
+  /** Chasing: the nearest it has got to the ball, and the seconds since it last got 0.05 nearer. */
+  nearest: number
+  stuckT: number
 }
 
 export interface FetchEvents {
   grabbed?: true
   dropped?: true
+  /** The chase has got no nearer for a while: whoever stands in the way should step aside. */
+  blocked?: true
 }
 
 export interface FetchCtx {
@@ -46,10 +52,17 @@ export function createFetchState(): FetchState {
     holding: false,
     watch: false,
     wading: false,
+    nearest: Infinity,
+    stuckT: 0,
   }
 }
 
 const camPos = new THREE.Vector3()
+
+/** A chase that gets no nearer asks for the way after BLOCKED s and gives up after GIVE_UP s. */
+const PROGRESS = 0.05,
+  BLOCKED = 3,
+  GIVE_UP = 8
 
 const resting = (ball: BallState) =>
   ball.state === 'air' && ball.vel.length() < 0.05 && ball.pos.y < BALL_R + 0.01
@@ -76,6 +89,7 @@ export function stepFetch(
       clamp: (cx, cz) => clampPlay(cam, cx, cz),
       ...(ctx.random && { random: ctx.random }),
     })
+  const fresh = f.taskT === 0
   f.taskT += dt
   if (f.holding && ball.state !== 'mouth') f.holding = false
   if (
@@ -97,6 +111,23 @@ export function stepFetch(
     const dx = p.x - m.pos.x,
       dz = p.z - m.pos.z,
       dist = Math.hypot(dx, dz) || 1
+    if (fresh || dist < f.nearest - PROGRESS) {
+      f.nearest = dist
+      f.stuckT = 0
+    } else {
+      const was = f.stuckT
+      f.stuckT += dt
+      if (was < BLOCKED && f.stuckT >= BLOCKED) ev.blocked = true
+      if (f.stuckT >= GIVE_UP) {
+        // It cannot get there: it sits and looks to the player, who can throw again
+        f.task = 'free'
+        f.taskT = 0
+        cameraPosition(cam, camPos)
+        setPose(m, 'sit')
+        m.face = Math.atan2(camPos.x - m.pos.x, camPos.z - m.pos.z)
+        return ev
+      }
+    }
     go(p.x - (dx / dist) * ctx.reach, p.z - (dz / dist) * ctx.reach, dist > 0.8 ? 'hop' : 'trot')
     if (dist < ctx.reach + 0.08 && ball.vel.length() < 0.9 && p.y < BALL_R + 0.03) {
       f.task = 'grab'

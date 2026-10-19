@@ -748,6 +748,48 @@ export function letGo(r: RoutineState): void {
   if (r.routine === 'bathing' || r.routine === 'brushing') enter(r, 'none')
 }
 
+/** How far a puppy in the way of a chase walks off, and the least that counts as making way. */
+const STEP_ASIDE = 0.6,
+  STEP_ASIDE_MIN = 0.4
+/** Turns off the way straight from the ball tried in turn, when the edge is behind the puppy. */
+const ASIDE_TURNS = [0, Math.PI / 3, -Math.PI / 3, (2 * Math.PI) / 3, (-2 * Math.PI) / 3] as const
+
+/**
+ * Standing in the way of a chase: it walks a short way off from the ball at (x, z), straight
+ * away when there is room, else turning off along the edge of the play area.
+ */
+export function stepAside(
+  m: MotionState,
+  x: number,
+  z: number,
+  clamp: (x: number, z: number) => [number, number],
+): void {
+  const ax = m.pos.x - x,
+    az = m.pos.z - z,
+    l = Math.hypot(ax, az),
+    ux = l > 1e-6 ? ax / l : 1,
+    uz = l > 1e-6 ? az / l : 0
+  let bx = m.pos.x,
+    bz = m.pos.z,
+    most = -1
+  for (const turn of ASIDE_TURNS) {
+    const c = Math.cos(turn),
+      s = Math.sin(turn)
+    const [tx, tz] = clamp(
+      m.pos.x + (ux * c - uz * s) * STEP_ASIDE,
+      m.pos.z + (ux * s + uz * c) * STEP_ASIDE,
+    )
+    const moved = Math.hypot(tx - m.pos.x, tz - m.pos.z)
+    if (moved > most) {
+      most = moved
+      bx = tx
+      bz = tz
+    }
+    if (moved >= STEP_ASIDE_MIN) break
+  }
+  goTo(m, bx, bz, { happy: 0, energy: 0, gait: 'walk', clamp })
+}
+
 /**
  * «Pesar»: it walks to the scale and stands on it for WEIGH_TIME, then steps off. A sleeper
  * stretches first. A call, a trick or the ball calls it off.

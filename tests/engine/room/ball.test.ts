@@ -7,6 +7,7 @@ import {
   BALL_R,
   bounceOff,
   createBall,
+  rollOut,
   stepBall,
   throwVelocity,
   type BallState,
@@ -192,7 +193,7 @@ describe('bounceOff', () => {
     expect(hits).toBe(40)
   })
 
-  it('lets a ball rolled at a lying puppy come to rest within 2 s, never shaking', () => {
+  it('lets a ball rolled at a lying puppy come to rest within 2 s, rolled out at most once', () => {
     const [x, z] = playWorld(cam, 0.6, 0)
     const body = puppyAt(x, z, 0.4, 'lie')
     const ball: BallState = { ...createBall(), state: 'air' }
@@ -202,29 +203,33 @@ describe('bounceOff', () => {
     ball.vel.set(-Math.cos(0.4), 0, Math.sin(0.4)).multiplyScalar(0.9)
     let touched = false,
       rest = Infinity,
-      last = Infinity
+      last = Infinity,
+      rolls = 0
     const before = ball.pos.clone()
     for (let f = 0; f < 60 * 4; f++) {
       before.copy(ball.pos)
       stepBall(ball, cam, DT)
       const hit = bounceOff(ball, [body], -1)
       touched ||= hit
+      const rolled = rollOut(ball, [body], -1, cam, DT)
+      if (rolled) rolls++
       expect(clearance(ball, [body])).toBeGreaterThan(-1e-6)
       const moved = ball.pos.distanceTo(before)
       if (rest === Infinity && ball.vel.length() < 0.05) rest = f * DT
-      if (rest !== Infinity) {
+      if (rest !== Infinity && !rolled) {
         // At rest it only slows down: no knock from the puppy, no step back
         expect(hit).toBe(false)
         expect(moved).toBeLessThanOrEqual(last + 1e-12)
       }
-      last = moved
+      last = rolled ? Infinity : moved
     }
     expect(touched).toBe(true)
     expect(rest).toBeLessThan(2)
+    expect(rolls).toBeLessThanOrEqual(1)
     expect(ball.pos.y).toBeCloseTo(BALL_R)
   })
 
-  it('keeps a ball lying against a puppy exactly where it is', () => {
+  it('on its own, keeps a ball lying against a puppy exactly where it is', () => {
     const [x, z] = playWorld(cam, 0.6, 0)
     const body = puppyAt(x, z, 0, 'lie')
     const ball: BallState = { ...createBall(), state: 'air' }
@@ -237,6 +242,64 @@ describe('bounceOff', () => {
       bounceOff(ball, [body], -1)
       expect(ball.pos.distanceTo(at)).toBeLessThan(1e-9)
     }
+  })
+
+  it.each([
+    ['against a lying puppy', 'lie' as const, (b: Body) => [b.chest.x + 0.2, b.chest.z]],
+    ['under a sleeper’s chin', 'sleep' as const, (b: Body) => [b.head.x, b.head.z]],
+    ['under a standing puppy', 'stand' as const, (b: Body) => [b.chest.x, b.chest.z]],
+  ])('rolls a ball left %s out once, after half a second', (_, pose, spot) => {
+    const [x, z] = playWorld(cam, 0.6, 0)
+    const body = puppyAt(x, z, 0, pose)
+    const ball: BallState = { ...createBall(), state: 'air' }
+    const [bx, bz] = spot(body)
+    ball.pos.set(bx!, BALL_R, bz!)
+    bounceOff(ball, [body], -1)
+    ball.vel.set(0, 0, 0)
+    const rolls: number[] = []
+    for (let f = 0; f < 60 * 4; f++) {
+      stepBall(ball, cam, DT)
+      bounceOff(ball, [body], -1)
+      if (rollOut(ball, [body], -1, cam, DT)) rolls.push(f * DT)
+    }
+    expect(rolls).toHaveLength(1)
+    expect(rolls[0]).toBeGreaterThan(0.45)
+    expect(rolls[0]).toBeLessThan(0.6)
+    expect(clearance(ball, [body])).toBeGreaterThan(0.02)
+    expect(ball.vel.length()).toBeLessThan(0.05)
+  })
+
+  it('rolls a ball hemmed in against the edge towards the middle of the play area', () => {
+    // Lying across the far edge's middle, the ball between it and the edge
+    const [x, z] = playWorld(cam, PLAY.far - 0.3, 0)
+    const { fx, fz } = playLocal(cam, x, z)
+    const body = puppyAt(x, z, Math.atan2(-fz, fx), 'lie')
+    const ball: BallState = { ...createBall(), state: 'air' }
+    ball.pos.set(body.chest.x + fx * 0.18, BALL_R, body.chest.z + fz * 0.18)
+    bounceOff(ball, [body], -1)
+    let rolled = false
+    for (let f = 0; f < 60 && !rolled; f++) {
+      ball.vel.set(0, 0, 0)
+      rolled = rollOut(ball, [body], -1, cam, DT)
+    }
+    expect(rolled).toBe(true)
+    // It rolls clear without running into the edge
+    for (let f = 0; f < 60 * 3; f++) {
+      stepBall(ball, cam, DT)
+      bounceOff(ball, [body], -1)
+      expect(outside(cam, ball)).toBe(0)
+    }
+    expect(clearance(ball, [body])).toBeGreaterThan(0.02)
+  })
+
+  it('leaves alone a ball the catcher is over, or one lying in the open', () => {
+    const [x, z] = playWorld(cam, 0.6, 0)
+    const body = puppyAt(x, z, 0, 'stand')
+    const ball: BallState = { ...createBall(), state: 'air' }
+    ball.pos.set(body.chest.x, BALL_R, body.chest.z)
+    for (let f = 0; f < 60; f++) expect(rollOut(ball, [body], 0, cam, DT)).toBe(false)
+    ball.pos.set(body.chest.x + 1, BALL_R, body.chest.z)
+    for (let f = 0; f < 60; f++) expect(rollOut(ball, [body], -1, cam, DT)).toBe(false)
   })
 
   it('pushes out a ball a puppy lies down on, along the floor', () => {
