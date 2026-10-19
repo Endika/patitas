@@ -51,7 +51,7 @@ import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, PLAY, playLocal } from '@/engine/room/camera'
 import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
 import { keepOff, separate } from '@/engine/room/crowd'
-import { computeSpots, inMud, START_PLACES, type Spot, type Spots } from '@/engine/room/furniture'
+import { computeSpots, inMud, startPlaces, type Spot, type Spots } from '@/engine/room/furniture'
 import { seeded } from '../seeded'
 
 const DT = 1 / 60
@@ -59,7 +59,8 @@ const A = anatomy(BREEDS.shiba)
 const SHAPE = bodyShape(A)
 const cam = fitCamera(createCamera(), 0.46)
 const SPOTS = computeSpots(cam, 1),
-  SPOTS2 = computeSpots(cam, 2)
+  SPOTS2 = computeSpots(cam, 2),
+  STARTS2 = startPlaces(cam, SPOTS2, 2)
 const clamp = (x: number, z: number) => clampPlay(cam, x, z)
 const at = (h: number, min = 0) => new Date(2026, 9, 18, h, min).getTime()
 /** How far ahead of its body a shiba's mouth meets the bowl. */
@@ -388,7 +389,7 @@ describe('meals', () => {
   })
 
   it('with two, each eats from its own bowl', () => {
-    const [l, r] = START_PLACES[1]!
+    const [l, r] = STARTS2
     const a = pup(l!.x, l!.z, 0.8, 0.8, 1),
       b = pup(r!.x, r!.z, 0.8, 0.5, 1)
     const worst = [0, 0]
@@ -672,7 +673,8 @@ describe('pee and poop', () => {
     run([eating], 6, at(12))
     expect(eating.r.routine).toBe('eating')
     full(eating)
-    run([eating], 6, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
+    // The bowl is at the back of the room: the walk there and the turn take longer
+    run([eating], 8, at(12), SPOTS, undefined, undefined, { random: draws(0.9, 0.9) })
     expect(eating.seen.slice(eating.seen.indexOf('eating'))).toEqual([
       'eating',
       'none',
@@ -906,7 +908,7 @@ describe('the scale', () => {
   })
 
   it('in portrait with two, the chosen one gets there from its start, and the other stays off', () => {
-    const [l, r] = START_PLACES[1]!
+    const [l, r] = STARTS2
     const a = pup(l!.x, l!.z),
       b = pup(r!.x, r!.z)
     goWeigh(b.r, b.m)
@@ -922,13 +924,40 @@ describe('the scale', () => {
     expect(closest).toBeGreaterThan(0.45)
   })
 
+  it.each([0.46, 1, 1.23, 2.1].flatMap((aspect) => [0, 1].map((i) => [aspect, i] as const)))(
+    '«Pesar» at aspect %f with two: the puppy at place %i gets from its start onto the scale',
+    (aspect, i) => {
+      const framed = fitCamera(createCamera(), aspect)
+      const spots = computeSpots(framed, 2),
+        framedClamp = (x: number, z: number) => clampPlay(framed, x, z)
+      const pups = startPlaces(framed, spots, 2).map((p) => pup(p.x, p.z))
+      const chosen = pups[i]!
+      goWeigh(chosen.r, chosen.m)
+      let drift = 0
+      run(
+        pups,
+        25,
+        at(12),
+        spots,
+        () => {
+          if (chosen.r.routine === 'onScale') drift = Math.max(drift, offScale(chosen, spots))
+        },
+        undefined,
+        { clamp: framedClamp },
+      )
+      expect(chosen.seen.slice(0, 3)).toEqual(['toScale', 'onScale', 'none'])
+      expect(chosen.weighed).toBe(1)
+      expect(drift).toBeLessThan(0.08)
+    },
+  )
+
   it.each([0.46, 1, 1.78])(
     'at aspect %f with two, weighing one never shoves the other off its meal',
     (aspect) => {
       const framed = fitCamera(createCamera(), aspect)
       const spots = computeSpots(framed, 2),
         framedClamp = (x: number, z: number) => clampPlay(framed, x, z)
-      const [l, r] = START_PLACES[1]!
+      const [l, r] = startPlaces(framed, spots, 2)
       const a = pup(l!.x, l!.z),
         b = pup(r!.x, r!.z, 0.8, 0.8, 1)
       const meal = mealSpot(spots.bowls[1]!, MUZZLE)
@@ -958,7 +987,7 @@ describe('the scale', () => {
   )
 
   it('in portrait with two, a walk from the start to the right-hand bed goes round the scale', () => {
-    const [l, r] = START_PLACES[1]!
+    const [l, r] = STARTS2
     const a = pup(l!.x, l!.z),
       b = pup(r!.x, r!.z)
     let closest = Infinity

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
-import { PLAY, type FixedCamera } from './camera'
-import { rng, type Spot } from './furniture'
+import { clamp, rng } from '@/engine/math'
+import { PLAY, playLocal, type FixedCamera } from './camera'
+import type { Spot } from './furniture'
 
 export type Zone = 'garden' | 'house'
 
@@ -12,10 +13,10 @@ export const SPLIT = -0.1
 /** The fence and the house wall, as depth from the camera's target. */
 export const BACK_D = PLAY.far + 0.5
 
-const STRIP_HALF = 0.032
+export const STRIP_HALF = 0.032
 const WALL_H = 1.25
 const FENCE = { step: 0.16, width: 0.08, height: 0.55, board: 0.45 }
-const WINDOW = { x: 0.75, bottom: 0.3, top: 0.84, width: 0.62, frame: 0.045 }
+const WINDOW = { x: 0.75, bottom: 0.4, top: 0.92, width: 0.62, frame: 0.045 }
 /** The fence and its bushes are built this far left of the split, for the widest screens. */
 const REACH = 12
 const BLADES = 1800
@@ -24,8 +25,11 @@ const BLADE_LIGHT = new THREE.Color('#729a4b'),
 
 export interface Backdrop {
   group: THREE.Group
-  /** Fits the ground, wall and sky to `cam`'s frame; no grass grows inside `clear`. */
-  layout(cam: FixedCamera, clear?: Spot): void
+  /**
+   * Fits the ground, wall and sky to `cam`'s frame; no grass grows inside `clear`, and the window
+   * moves along the wall to stay clear of `beds` and the puppies asleep in them.
+   */
+  layout(cam: FixedCamera, clear?: Spot, beds?: readonly Spot[]): void
   zoneAt(x: number, z: number): Zone
   dispose(): void
 }
@@ -282,9 +286,9 @@ function setBox(mesh: THREE.InstancedMesh, i: number, b: Box) {
   mesh.setColorAt(i, tint.set(b.color))
 }
 
-/** The window's frame, mullion and sill: fixed on the wall. */
-function windowTrim(): Box[] {
-  const { x, bottom, top, width, frame } = WINDOW
+/** The window's frame, mullion and sill, the window's middle at `x` across the wall. */
+function windowTrim(x: number): Box[] {
+  const { bottom, top, width, frame } = WINDOW
   const l = x - width / 2,
     r = x + width / 2,
     white = '#fbf8f2'
@@ -304,6 +308,42 @@ function windowTrim(): Box[] {
       color: '#f1e9dc',
     },
   ]
+}
+
+/** How far a curled sleeper reaches across its bed, as `computeSpots` keeps in frame. */
+const SLEEPER_REACH = 0.45
+
+/**
+ * Where the window's middle goes across the wall: nearest its usual place where nothing in front
+ * of it, a bed or a puppy asleep in one, is seen over it, or else where the least is; always
+ * whole in view.
+ */
+function windowAt(cam: FixedCamera, beds: readonly Spot[]): number {
+  const w = WINDOW.width / 2 + 0.1,
+    camD = cam.dist * Math.cos(cam.el)
+  // The wall's half width in view where the window's sill meets it, a little under the floor's
+  const lo = SPLIT + w,
+    hi = (camD + BACK_D) * cam.tanH - w
+  if (hi <= lo) return WINDOW.x
+  const spans = beds.map((b) => {
+    const q = playLocal(cam, b.center.x, b.center.z),
+      k = (camD + BACK_D) / (camD + q.d),
+      r = Math.max(b.radius, SLEEPER_REACH)
+    return [(q.side - r) * k, (q.side + r) * k] as const
+  })
+  const covered = (x: number) =>
+    spans.reduce((t, [a, b]) => t + Math.max(0, Math.min(b, x + w) - Math.max(a, x - w)), 0)
+  let best = clamp(WINDOW.x, lo, hi),
+    least = covered(best)
+  for (let x = lo; x <= hi; x += 0.02) {
+    const c = covered(x)
+    if (
+      c < least - 1e-9 ||
+      (c <= least + 1e-9 && Math.abs(x - WINDOW.x) < Math.abs(best - WINDOW.x))
+    )
+      [best, least] = [x, c]
+  }
+  return best
 }
 
 /** The trim that runs to the frame's edge: skirting, the wall's top and the fence's boards. */
@@ -418,16 +458,14 @@ export function createBackdrop(cam: FixedCamera): Backdrop {
     new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
   )
   pane.name = 'pane'
-  pane.position.set(WINDOW.x - WINDOW.width / 2, WINDOW.bottom, -BACK_D + 0.004)
   pane.scale.set(WINDOW.width, WINDOW.top - WINDOW.bottom, 1)
-  const fixedTrim = windowTrim()
+  const fixedTrim = windowTrim(WINDOW.x)
   const trim = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ roughness: 0.7 }),
     fixedTrim.length + edgeTrim(0).length,
   )
   trim.name = 'trim'
-  fixedTrim.forEach((b, i) => setBox(trim, i, b))
   const pickets = new THREE.InstancedMesh(
     picketGeometry(),
     new THREE.MeshStandardMaterial({ roughness: 0.75 }),
@@ -516,7 +554,7 @@ export function createBackdrop(cam: FixedCamera): Backdrop {
 
   const backdrop: Backdrop = {
     group,
-    layout(next, clear) {
+    layout(next, clear, beds = []) {
       group.position.set(next.target.x, 0, next.target.z)
       group.rotation.y = next.az
       origin.set(next.target.x, next.target.z)
@@ -540,6 +578,9 @@ export function createBackdrop(cam: FixedCamera): Backdrop {
       ;(skyMat.uniforms.uSpan!.value as THREE.Vector2).set(FENCE.height * 0.8, view.top)
       wall.position.set(SPLIT, 0, -BACK_D)
       wall.scale.set(half - SPLIT, WALL_H, 1)
+      const wx = windowAt(next, beds)
+      pane.position.set(wx - WINDOW.width / 2, WINDOW.bottom, -BACK_D + 0.004)
+      windowTrim(wx).forEach((b, i) => setBox(trim, i, b))
       edgeTrim(half).forEach((b, i) => setBox(trim, fixedTrim.length + i, b))
       trim.instanceMatrix.needsUpdate = true
       if (trim.instanceColor) trim.instanceColor.needsUpdate = true

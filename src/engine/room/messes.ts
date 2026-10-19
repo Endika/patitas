@@ -3,7 +3,7 @@ import type { Mess, MessKind, PlaceAccident } from '@/domain/care'
 import { clamp, type Vec3 } from '@/engine/math'
 import type { Underfoot } from '@/engine/puppy/dirt'
 import { PLAY, playHalf, playLocal, playWorld, type FixedCamera } from './camera'
-import { furnitureObstacles, inMud, type Spots } from './furniture'
+import { furnitureObstacles, inMud, inOval, type Spots } from './furniture'
 
 /** How far each kind reaches on the floor, for the paws that step in it. */
 export const MESS_R: Record<MessKind, number> = { pee: 0.1, poop: 0.06 }
@@ -33,14 +33,6 @@ export function messLocal(cam: FixedCamera, x: number, z: number): { x: number; 
 export function messWorld(cam: FixedCamera, mess: Pick<Mess, 'x' | 'z'>, out: Vec3): Vec3 {
   const [x, z] = playWorld(cam, mess.z, mess.x * playHalf(cam, mess.z))
   return out.set(x, 0, z)
-}
-
-const inOval = (s: Spots['garden'], x: number, z: number, grow: number) => {
-  const rx = x - s.center.x,
-    rz = z - s.center.z
-  const u = (rx * Math.cos(s.facing) - rz * Math.sin(s.facing)) / (s.radius + grow),
-    v = (rx * Math.sin(s.facing) + rz * Math.cos(s.facing)) / (s.depth + grow)
-  return Math.hypot(u, v) < 1
 }
 
 /**

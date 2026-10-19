@@ -1,24 +1,24 @@
 // @vitest-environment node
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { createBackdrop, SPLIT, STRIP_HALF } from '@/engine/room/backdrop'
 import { cameraPosition, clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
-import { bedSlots } from '@/engine/motion/routine'
+import { bedSlots, mealSpot } from '@/engine/motion/routine'
 import {
-  bowl,
   computeSpots,
-  KIBBLE,
   createScaleDisplay,
   formatKg,
   READING_HOLD,
-  scaleReadout,
   showScale,
   showBowls,
   furnitureObstacles,
   inMud,
-  START_PLACES,
+  startPlaces,
+  inOval,
   type Spot,
   type Spots,
 } from '@/engine/room/furniture'
+import { bowl, KIBBLE, scaleReadout } from '@/engine/room/furnitureModels'
 
 const ASPECTS = [0.46, 1, 2.1]
 const COUNTS = [1, 2] as const
@@ -78,7 +78,9 @@ describe('computeSpots', () => {
           const l = playLocal(cam, row[i - 1]!.center.x, row[i - 1]!.center.z),
             r = playLocal(cam, row[i]!.center.x, row[i]!.center.z)
           expect(r.side).toBeGreaterThan(l.side)
-          expect(r.d).toBeCloseTo(l.d)
+          // The bowls stand in a row; a second bed may stand in front of the first
+          if (row === bowls) expect(r.d).toBeCloseTo(l.d)
+          else expect(r.d).toBeLessThanOrEqual(l.d + 1e-9)
         }
     },
   )
@@ -148,7 +150,7 @@ describe('computeSpots', () => {
       const { cam, camera } = view(aspect)
       const { mud } = computeSpots(cam, 2)
       // The two start places: a body 0.26 wide, 0.6 long and 0.55 tall, turned to `heading`
-      const screens = START_PLACES[1]!.map(({ x, z: z0, heading = 0 }) => {
+      const screens = startPlaces(cam, computeSpots(cam, 2), 2).map(({ x, z: z0, heading = 0 }) => {
         const box = new THREE.Box2()
         for (const w of [-0.13, 0.13])
           for (const l of [-0.3, 0.3])
@@ -175,36 +177,66 @@ describe('computeSpots', () => {
     },
   )
 
-  it.each(COUNTS)(
-    'places the garden on the left, the beds back-right and the bowls at the front for %i',
-    (n) => {
-      const { cam } = view(1)
+  it.each(CASES)(
+    'keeps the beds, bowls and scale in the house at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
       const spots = computeSpots(cam, n)
+      const backdrop = createBackdrop(cam)
       const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
-      const mean = (row: Spot[], f: (p: ReturnType<typeof local>) => number) =>
-        row.reduce((t, s) => t + f(local(s.center)), 0) / row.length
-      expect(local(spots.garden.center).side).toBeLessThan(0)
-      expect(local(spots.mud.center).side).toBeLessThan(0)
-      expect(mean(spots.beds, (p) => p.side)).toBeGreaterThan(0)
-      expect(mean(spots.bowls, (p) => p.side)).toBeLessThan(0)
-      expect(local(spots.scale.center).side).toBeGreaterThan(0)
-      expect(local(spots.mud.center).d).toBeLessThan(local(spots.garden.center).d)
-      for (const s of spots.beds) expect(local(s.center).d).toBeGreaterThan(1)
-      for (const s of spots.bowls) expect(local(s.center).d).toBeLessThan(0)
-      // With two, the right-hand bowl is near the middle on a square screen: the scale goes back
-      // on the right, out of the way of the one eating there
-      if (n === 1) expect(local(spots.scale.center).d).toBeLessThan(0)
-      else expect(local(spots.scale.center).d).toBeGreaterThan(0.5)
+      // Two beds one in front of the other bring the bowls right across the front of the house;
+      // the scale then stands just outside it on the grass, where a puppy can walk round to it
+      const stacked = n === 2 && local(spots.beds[1]!.center).d < 1.6
+      for (const [name, s] of named(spots).filter(([k]) => k !== 'mud')) {
+        if (name === 'scale' && stacked) {
+          expect(local(s.center).side + s.radius).toBeGreaterThan(SPLIT - STRIP_HALF - 0.05)
+          expect(local(s.center).side + s.radius).toBeLessThan(SPLIT - STRIP_HALF)
+          continue
+        }
+        expect(backdrop.zoneAt(s.center.x, s.center.z), name).toBe('house')
+        // Nothing reaches the grass; a bed lies over the doorway strip by 15 % of its radius at most
+        const edge =
+          kind(name) === 'bed' ? SPLIT + STRIP_HALF - 0.15 * s.radius : SPLIT - STRIP_HALF
+        for (const p of rim(s)) expect(local(p).side, name).toBeGreaterThanOrEqual(edge - 1e-6)
+      }
+      backdrop.dispose()
+      expect(local(spots.garden.center).side).toBeLessThan(SPLIT)
+      expect(local(spots.mud.center).side).toBeLessThan(SPLIT)
+      // The first bed against the wall, the scale nearest the camera
+      expect(local(spots.beds[0]!.center).d).toBeCloseTo(1.7)
+      const scaleD = local(spots.scale.center).d
+      for (const s of [...spots.beds, ...spots.bowls])
+        expect(local(s.center).d).toBeGreaterThan(scaleD)
+      // Side by side wherever the wall has room for both
+      if (n === 2 && aspect >= 1.5) expect(local(spots.beds[1]!.center).d).toBeCloseTo(1.7)
     },
   )
 
-  it('keeps the scale in front beside two bowls on a wide screen', () => {
-    const { cam } = view(1.78)
-    const spots = computeSpots(cam, 2)
-    const local = (v: THREE.Vector3) => playLocal(cam, v.x, v.z)
-    expect(local(spots.scale.center).d).toBeLessThan(0)
-    expect(local(spots.scale.center).side).toBeGreaterThan(0)
-  })
+  it.each(CASES)(
+    'puts the bowls in front of the beds, where one eating stands clear of them, at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const spots = computeSpots(cam, n)
+      // The longest muzzle of the breeds, and the rump behind it
+      for (const bowl of spots.bowls) {
+        const eat = mealSpot(bowl, 0.36)
+        const rump = new THREE.Vector3(
+          eat.x - Math.sin(eat.heading) * 0.15,
+          0,
+          eat.z - Math.cos(eat.heading) * 0.15,
+        )
+        for (const bed of spots.beds)
+          for (const p of [eat, rump]) expect(inOval(bed, p.x, p.z, 0.17)).toBe(false)
+      }
+      // Bowls on their mat in the middle depth of the room unless a bed in front needs the room
+      if (n === 1 || aspect >= 1.5)
+        for (const bowl of spots.bowls) {
+          const d = playLocal(cam, bowl.center.x, bowl.center.z).d
+          expect(d).toBeGreaterThanOrEqual(0.58)
+          expect(d).toBeLessThanOrEqual(0.65)
+        }
+    },
+  )
 
   it('stretches the garden along the depth and grows it with the frame', () => {
     const narrow = computeSpots(view(0.46).cam, 1).garden,
@@ -288,24 +320,40 @@ describe('the beds in frame', () => {
   })
 })
 
-describe('START_PLACES', () => {
-  it.each(ASPECTS)(
-    'starts one or two puppies in the play area, clear of the furniture and the puddle, at aspect %f',
-    (aspect) => {
+describe('startPlaces', () => {
+  it.each(CASES)(
+    'starts the puppies near the middle in open floor, clear of the furniture and the puddle, at aspect %f for %i',
+    (aspect, n) => {
       const { cam } = view(aspect)
-      for (const n of COUNTS) {
-        const spots = computeSpots(cam, n)
-        for (const places of START_PLACES)
-          for (const p of places) {
-            const [x, z] = clampPlay(cam, p.x, p.z)
-            expect(Math.hypot(x - p.x, z - p.z)).toBeLessThan(1e-9)
-            for (const c of furnitureObstacles(spots))
-              expect(Math.hypot(p.x - c.x, p.z - c.z)).toBeGreaterThan(c.r + 0.3)
-            expect(inMud(spots, p.x, p.z)).toBe(0)
-          }
+      const spots = computeSpots(cam, n)
+      const places = startPlaces(cam, spots, n)
+      expect(places).toHaveLength(n)
+      for (const p of places) {
+        const [x, z] = clampPlay(cam, p.x, p.z)
+        expect(Math.hypot(x - p.x, z - p.z)).toBeLessThan(1e-9)
+        const q = playLocal(cam, p.x, p.z)
+        expect(Math.abs(q.side)).toBeLessThanOrEqual(0.85 * q.half)
+        expect(q.d).toBeGreaterThanOrEqual(-0.3)
+        expect(q.d).toBeLessThanOrEqual(0.6)
+        for (const s of [...spots.beds, ...spots.bowls, spots.scale])
+          expect(inOval(s, p.x, p.z, 0.3)).toBe(false)
+        expect(inOval(spots.mud, p.x, p.z, 0.1)).toBe(false)
+        expect(inMud(spots, p.x, p.z)).toBe(0)
+      }
+      if (n === 2) {
+        const [a, b] = places
+        expect(Math.hypot(a!.x - b!.x, a!.z - b!.z)).toBeGreaterThanOrEqual(0.45)
+        expect(playLocal(cam, a!.x, a!.z).side).toBeLessThan(playLocal(cam, b!.x, b!.z).side)
       }
     },
   )
+
+  it('without furniture, starts them where they would rather be', () => {
+    const { cam } = view(1)
+    const [one] = startPlaces(cam, null, 1)
+    expect(playLocal(cam, one!.x, one!.z).d).toBeCloseTo(0.16)
+    expect(playLocal(cam, one!.x, one!.z).side).toBeCloseTo(0.2)
+  })
 })
 
 describe('furnitureObstacles', () => {

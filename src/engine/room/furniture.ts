@@ -1,7 +1,7 @@
 import * as THREE from 'three'
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { clamp, type Vec3 } from '@/engine/math'
-import { playAxes, playHalf, playWorld, type FixedCamera } from './camera'
+import { SPLIT, STRIP_HALF } from './backdrop'
+import { PLAY, playAxes, playHalf, playLocal, playWorld, type FixedCamera } from './camera'
 
 /** An oval footprint on the floor, turned to face the camera. */
 export interface Spot {
@@ -32,65 +32,140 @@ export interface Circle {
   r: number
 }
 
+export interface StartPlace {
+  x: number
+  z: number
+  heading?: number
+}
+
 /**
- * Where each puppy starts, for one or two: right of the middle, so in portrait the puddle on the
- * left is not hidden behind the left one.
+ * Where one or two puppies would rather start, as depth and side in the play area: near the
+ * middle and right of it, so in portrait the puddle on the left is not hidden behind them.
  */
-export const START_PLACES: readonly (readonly { x: number; z: number; heading?: number }[])[] = [
-  [{ x: 0.12, z: -0.12 }],
+const START_WANT = [
+  [{ d: 0.16, side: 0.2 }],
   [
-    { x: -0.02, z: -0.12, heading: 0.25 },
-    { x: 0.42, z: -0.12, heading: -0.25 },
+    { d: 0.21, side: 0.07, heading: 0.25 },
+    { d: 0.04, side: 0.47, heading: -0.25 },
   ],
-]
+] as const
+/** How far a start keeps from every piece's oval and the puddle's, and two starts from each other. */
+const START_CLEAR = 0.3,
+  START_APART = 0.46
+
+/**
+ * Where each puppy starts with the furniture in `spots`: the open floor nearest `START_WANT`,
+ * clear of every piece and the puddle, on the house side if it can. With no furniture, just there.
+ */
+export function startPlaces(cam: FixedCamera, spots: Spots | null, puppies: 1 | 2): StartPlace[] {
+  const want = START_WANT[puppies - 1]!
+  const pieces = spots ? [...spots.beds, ...spots.bowls, spots.scale] : []
+  const open: { d: number; side: number }[] = []
+  if (spots)
+    for (let d = -0.3; d <= 0.6 + 1e-9; d += 0.05)
+      for (let side = -0.45; side <= 0.6 + 1e-9; side += 0.05) {
+        if (Math.abs(side) > 0.85 * playHalf(cam, d)) continue
+        const [x, z] = playWorld(cam, d, side)
+        if (pieces.some((p) => inOval(p, x, z, START_CLEAR)) || inOval(spots.mud, x, z, 0.1))
+          continue
+        open.push({ d, side })
+      }
+  const cost = (p: { d: number; side: number }, i: number) =>
+    Math.hypot(p.d - want[i]!.d, p.side - want[i]!.side) + (p.side < SPLIT ? 0.5 : 0)
+  let best: { d: number; side: number }[] | null = null,
+    bestCost = Infinity
+  if (puppies === 1)
+    for (const p of open) {
+      if (cost(p, 0) < bestCost) [best, bestCost] = [[p], cost(p, 0)]
+    }
+  else
+    for (const p of open)
+      for (const q of open) {
+        if (q.side <= p.side || Math.hypot(p.d - q.d, p.side - q.side) < START_APART) continue
+        const c = cost(p, 0) + cost(q, 1)
+        if (c < bestCost) [best, bestCost] = [[p, q], c]
+      }
+  return (best ?? want).map((p, i) => {
+    const [x, z] = playWorld(cam, p.d, p.side)
+    const heading = want[i] && 'heading' in want[i] ? want[i].heading : undefined
+    return heading == null ? { x, z } : { x, z, heading }
+  })
+}
 
 /**
  * One bed holds one puppy; side by side, two beds are a little smaller, and a lone one fits a
  * curled dorado. Its long side faces the screen.
  */
-const BEDS = { alone: { radius: 0.48, depth: 0.39 }, two: { radius: 0.42, depth: 0.34 } },
+export const BEDS = { alone: { radius: 0.48, depth: 0.39 }, two: { radius: 0.42, depth: 0.34 } },
   BOWL = { radius: 0.13, depth: 0.13 },
   SCALE = { radius: 0.2, depth: 0.16 }
 
-/** The beds' depth in the play area. */
+/** The beds' depth in the play area: against the house wall. */
 const BED_D = 1.7
 /** Centre to centre for beds side by side: a little over 0.1 between their rims. */
 const BED_STEP = 2 * BEDS.two.radius + 0.11
+/** Between two beds one behind the other, measured on their ovals grown by half of it each. */
+const BED_GAP = 0.12
+/** How much of a bed's radius may lie over the doorway strip; none of it on the grass. */
+const BED_OVER_STRIP = 0.15
 /**
  * Bowls sit wider apart than their rims need: two puppies eating side by side stay outside each
  * other's personal space (0.45), so neither is pushed off its bowl.
  */
-const BOWL_STEP = 0.47
-/** The scale's depth when there is no room for it beside the bowls. */
-const SCALE_BACK_D = 0.8
-/** With two, the scale stays in front only with the right-hand bowl this far left of the middle. */
-const EATER_CLEAR = 0.3
+export const BOWL_STEP = 0.47
+/** The bowls' depth, when no bed is in the way of the puppies eating there. */
+const BOWL_D = 0.62
+/**
+ * A puppy eating stands behind its bowl, as the camera sees it: its muzzle (0.36 at most) and its
+ * rump (0.32) reach this far back, and this far to each side.
+ */
+const EATER = { back: 0.69, half: 0.17 }
+/** The scale's depth, at the front of the house, when the bowls leave room for it. */
+const SCALE_D = -0.4
+/** From the doorway strip to the rim of a piece set just inside the house. */
+const BY_STRIP = 0.02
 /** How far a curled sleeper reaches across its bed, ears and all, and towards the camera. */
 const SLEEPER = { reach: 0.45, ahead: 0.3 }
 /** The share of the screen's half width a sleeper may reach. */
 const SLEEPER_EDGE = 0.93
 
 /** The garden as drawn, before `layout` stretches it to the frame. */
-const GARDEN = { radius: 0.315, depth: 0.45 }
+export const GARDEN = { radius: 0.315, depth: 0.45 }
 /** The garden's width over its depth. */
 const GARDEN_WIDTH = 0.7
 /** The puddle within the garden, in fractions of its half sizes: towards the front, a little to the left. */
-const MUD = { u: -0.12, v: 0.35, size: 0.55 }
+export const MUD = { u: -0.12, v: 0.35, size: 0.55 }
+
+/** The house side of the doorway strip, as a side in the play area. */
+const HOUSE = SPLIT + STRIP_HALF
+
+/** Centre to centre from the scale to a bowl, outside a puppy's personal space. */
+const SCALE_FROM_BOWL = 0.47
 
 /**
- * Sides for `n` pieces `step` apart around `want`, the row kept within `limit` of the middle.
+ * The scale at the front of the house just inside it, or as far right as the bowls need. With
+ * the bowls right across the front of a narrow house, it stands just outside on the grass instead,
+ * where a puppy can walk round to it: between two bowls there is no way through.
  */
-const row = (n: number, step: number, want: number, limit: number) => {
-  const ext = ((n - 1) * step) / 2
-  const mid = clamp(want, Math.min(0, ext - limit), Math.max(0, limit - ext))
-  return Array.from({ length: n }, (_, i) => mid - ext + i * step)
+function scalePlace(cam: FixedCamera, bowlD: number, bowlSides: number[]) {
+  const d = Math.max(PLAY.near, Math.min(SCALE_D, bowlD - BOWL.depth - 0.1 - SCALE.depth))
+  const half = playHalf(cam, d)
+  const clear = (side: number) =>
+    bowlSides.every((s) => Math.hypot(d - bowlD, side - s) >= SCALE_FROM_BOWL)
+  const inside = HOUSE + BY_STRIP + SCALE.radius
+  for (let side = inside; side <= half; side += 0.01) if (clear(side)) return { d, side }
+  for (let side = SPLIT - STRIP_HALF - BY_STRIP - SCALE.radius; side >= -half; side -= 0.01)
+    if (clear(side)) return { d, side }
+  return { d, side: inside }
 }
 
 /**
- * Places each piece at a depth and a fraction of the play area's half width there, so it stays in
- * frame for every aspect. The bowls and scale sit ahead of where the puppies start, the beds at
- * the back, and the garden runs along the left edge with its puddle beside the puppies. Each
- * puppy has a bed and a bowl, side by side.
+ * Places each piece in the house, right of the doorway strip, so it stays in frame for every
+ * aspect: the beds against the wall, the bowls on their mat in front of them, the scale at the
+ * front. Two beds stand side by side where the wall has room for them; otherwise the second
+ * stands in front of the first and further right, the bowls come forward to stay clear of it and
+ * the scale steps out onto the grass by the strip (see `scalePlace`). The garden runs along the
+ * left edge with its puddle.
  */
 export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const facing = cam.az
@@ -100,29 +175,51 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   }
   const spot = (d: number, side: number, size: { radius: number; depth: number }): Spot =>
     at(d, side * playHalf(cam, d), size)
-  // On a narrow screen the beds come in from the edge so the sleepers in them stay in frame
-  const frustumHalf = (playAxes(cam).camD + BED_D - SLEEPER.ahead) * cam.tanH
+  const { camD } = playAxes(cam)
   const bed = puppies === 1 ? BEDS.alone : BEDS.two
-  const beds = row(
-    puppies,
-    BED_STEP,
-    0.55 * playHalf(cam, BED_D),
-    SLEEPER_EDGE * frustumHalf - Math.max(SLEEPER.reach, bed.radius),
-  ).map((side) => at(BED_D, side, bed))
-  const bowlD = -0.48,
-    half = playHalf(cam, bowlD)
-  const bowlSides = row(puppies, BOWL_STEP, -0.8 * half, 0.95 * half)
-  // The scale steps right when two bowls reach towards it; when they leave it no room in front,
-  // as on a narrow screen, it goes further back on the right, across from the garden. So it does
-  // with a second bowl near the middle: a puppy going to be weighed would pass behind it and
-  // shove the one eating there
-  const scaleOff = BOWL.radius + 0.125 + SCALE.radius
-  const last = bowlSides.at(-1)!,
-    nextTo = last + scaleOff
-  const scaleAt =
-    nextTo <= 0.95 * half && (puppies === 1 || last <= -EATER_CLEAR)
-      ? { d: bowlD, side: Math.max(0.8 * half, nextTo) }
-      : { d: SCALE_BACK_D, side: 0.8 * playHalf(cam, SCALE_BACK_D) }
+  const leftmost = HOUSE - BED_OVER_STRIP * bed.radius + bed.radius
+  // On a narrow screen the beds come in from the edge so the sleepers in them stay in frame
+  const rightmost = (d: number) =>
+    Math.min(
+      playHalf(cam, d),
+      SLEEPER_EDGE * (camD + d - SLEEPER.ahead) * cam.tanH - Math.max(SLEEPER.reach, bed.radius),
+    )
+  const want = 0.55 * playHalf(cam, BED_D) - ((puppies - 1) * BED_STEP) / 2
+  const first = clamp(
+    want,
+    leftmost,
+    Math.max(leftmost, rightmost(BED_D) - (puppies - 1) * BED_STEP),
+  )
+  const beds = [at(BED_D, first, bed)]
+  if (puppies === 2) {
+    if (first + BED_STEP <= rightmost(BED_D)) beds.push(at(BED_D, first + BED_STEP, bed))
+    else {
+      // As deep as it goes clear of the first, as far right as its sleeper stays in frame
+      const across = 2 * bed.radius + BED_GAP,
+        along = 2 * bed.depth + BED_GAP
+      let d = BED_D - along
+      for (let i = 0; i < 8; i++) {
+        const off = Math.min(1, Math.max(0, rightmost(d) - first) / across)
+        d = BED_D - along * Math.sqrt(1 - off * off)
+      }
+      beds.push(at(d, Math.max(first, rightmost(d)), bed))
+    }
+  }
+  // The bowls start just inside the house; one eating must not stand in a bed
+  const bowlSides = (d: number) => {
+    const left = HOUSE + BY_STRIP + BOWL.radius,
+      over = Math.max(0, left + (puppies - 1) * BOWL_STEP - playHalf(cam, d))
+    return Array.from({ length: puppies }, (_, i) => left - over + i * BOWL_STEP)
+  }
+  let bowlD = BOWL_D
+  for (let pass = 0; pass < 2; pass++)
+    for (const b of beds) {
+      const { d, side } = playLocal(cam, b.center.x, b.center.z)
+      if (bowlSides(bowlD).some((s) => Math.abs(s - side) < b.radius + EATER.half))
+        bowlD = Math.min(bowlD, d - b.depth - EATER.back)
+    }
+  const bowls = bowlSides(bowlD).map((side) => at(bowlD, side, BOWL))
+  const scaleAt = scalePlace(cam, bowlD, bowlSides(bowlD))
   const gd = 0.8,
     depth = clamp(0.35 * playHalf(cam, gd), 0.45, 0.8)
   const garden = spot(gd, -0.9, { radius: GARDEN_WIDTH * depth, depth })
@@ -143,14 +240,14 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   }
   return {
     beds,
-    bowls: bowlSides.map((side) => at(bowlD, side, BOWL)),
+    bowls,
     scale: at(scaleAt.d, scaleAt.side, SCALE),
     mud,
     garden,
   }
 }
 
-const smoothstep = (a: number, b: number, v: number) => {
+export const smoothstep = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / (b - a), 0, 1)
   return t * t * (3 - 2 * t)
 }
@@ -166,6 +263,15 @@ export function inMud(spots: Spots, x: number, z: number): number {
   const u = (rx * Math.cos(facing) - rz * Math.sin(facing)) / radius,
     v = (rx * Math.sin(facing) + rz * Math.cos(facing)) / depth
   return 1 - smoothstep(0.3, 0.9, Math.hypot(u, v))
+}
+
+/** Whether a point is inside `s`'s oval grown by `grow` all round. */
+export const inOval = (s: Spot, x: number, z: number, grow: number) => {
+  const rx = x - s.center.x,
+    rz = z - s.center.z
+  const u = (rx * Math.cos(s.facing) - rz * Math.sin(s.facing)) / (s.radius + grow),
+    v = (rx * Math.sin(s.facing) + rz * Math.cos(s.facing)) / (s.depth + grow)
+  return Math.hypot(u, v) < 1
 }
 
 /** What puppies walk around, as circles that hold each oval: the garden is open ground. */
@@ -254,454 +360,4 @@ export function showBowls(
   puppies: readonly { place: number; bowl: number }[],
 ): void {
   for (const p of puppies) furniture.bowlFill(p.place, p.bowl)
-}
-
-const INK = '#22302e'
-
-export function rng(seed: number) {
-  let s = seed >>> 0
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0
-    let t = s
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** A soft irregular outline: 1 ± a few percent around the circle. */
-const wobble = (a: number, k: number, seed: number) =>
-  1 +
-  k *
-    (0.6 * Math.sin(3 * a + seed) +
-      0.3 * Math.sin(5 * a + seed * 1.7) +
-      0.2 * Math.sin(9 * a + seed * 2.3))
-
-/** A soft dark round fading out to nothing, for the shade right under a piece. */
-function contactTexture(): THREE.CanvasTexture {
-  const c = document.createElement('canvas')
-  c.width = c.height = 64
-  const g = c.getContext('2d')!
-  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32)
-  gr.addColorStop(0, '#fff')
-  gr.addColorStop(0.55, '#aaa')
-  gr.addColorStop(1, '#000')
-  g.fillStyle = gr
-  g.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(c)
-}
-
-/**
- * Grounds a piece wherever the sun's shadow box, which follows the puppies, leaves it out: `rx`
- * and `rz` are the piece's half sizes.
- */
-function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: number): THREE.Mesh {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(2, 2),
-    new THREE.MeshBasicMaterial({
-      color: '#3b2a1c',
-      alphaMap,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-    }),
-  )
-  m.rotation.x = -Math.PI / 2
-  m.scale.set(rx * 1.15, rz * 1.15, 1)
-  m.position.y = 0.001
-  return m
-}
-
-/** The bed's bolster: the tube's half thickness, and its height over that. */
-const BOLSTER = { tube: 0.1, squash: 0.78 }
-/** The fabric base the bolster sits on. */
-const BED_BASE = 0.03
-
-/**
- * A round bed built on a circle of `radius` and pressed to `depth` along the view: a fabric base,
- * a thick bolster all round and a cushion sunk in the middle.
- */
-function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
-  const g = new THREE.Group()
-  const { tube, squash } = BOLSTER
-  const lathe = (points: number[][], color: string) =>
-    new THREE.Mesh(
-      new THREE.LatheGeometry(
-        points.map(([x, y]) => new THREE.Vector2(x, y)),
-        64,
-      ),
-      new THREE.MeshStandardMaterial({ color, roughness: 1 }),
-    )
-  const base = lathe(
-    [
-      [0, 0],
-      [radius - 0.02, 0],
-      [radius, 0.012],
-      [radius - 0.004, BED_BASE + 0.012],
-      [0, BED_BASE + 0.012],
-    ],
-    '#b9765b',
-  )
-  base.receiveShadow = true
-  const bolster = new THREE.Mesh(
-    new THREE.TorusGeometry(radius - tube, tube, 20, 72),
-    new THREE.MeshStandardMaterial({ color: '#e39a7c', roughness: 0.95 }),
-  )
-  bolster.rotation.x = -Math.PI / 2
-  bolster.scale.z = squash
-  bolster.position.y = BED_BASE + tube * squash
-  bolster.castShadow = bolster.receiveShadow = true
-  // Lowest in the middle, rising to tuck under the bolster; drawn from the rim in, so it faces up
-  const inner = radius - tube
-  const cushion = lathe(
-    [
-      [inner + 0.02, BED_BASE + 0.07],
-      [0.85 * inner, BED_BASE + 0.05],
-      [0.5 * inner, BED_BASE + 0.028],
-      [0, BED_BASE + 0.022],
-    ],
-    '#f6dccd',
-  )
-  cushion.receiveShadow = true
-  g.add(base, bolster, cushion, contact(shade, radius, radius, 0.35))
-  g.scale.z = depth / radius
-  return g
-}
-
-export const KIBBLE = 110
-
-export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.InstancedMesh } {
-  const g = new THREE.Group()
-  const profile = [
-    [0, 0],
-    [0.095, 0],
-    [0.112, 0.006],
-    [0.124, 0.024],
-    [0.128, 0.05],
-    [0.124, 0.066],
-    [0.114, 0.072],
-    [0.104, 0.067],
-    [0.097, 0.05],
-    [0.086, 0.028],
-    [0.068, 0.016],
-    [0, 0.014],
-  ].map(([x, y]) => new THREE.Vector2(x, y))
-  const dish = new THREE.Mesh(
-    new THREE.LatheGeometry(profile, 48),
-    new THREE.MeshStandardMaterial({ color: INK, roughness: 0.32 }),
-  )
-  dish.receiveShadow = true
-  const kibble = new THREE.InstancedMesh(
-    new THREE.SphereGeometry(0.016, 5, 3),
-    new THREE.MeshStandardMaterial({ roughness: 0.75 }),
-    KIBBLE,
-  )
-  // A dome of pellets, lowest first, so a partial fill is a lower mound
-  const rand = rng(7)
-  const pellets: { x: number; y: number; z: number }[] = []
-  while (pellets.length < KIBBLE) {
-    const r = Math.sqrt(rand()) * 0.07,
-      a = rand() * Math.PI * 2
-    const top = 0.054 * (1 - (r / 0.078) ** 2)
-    pellets.push({ x: r * Math.cos(a), y: 0.02 + rand() * top, z: r * Math.sin(a) })
-  }
-  pellets.sort((p, q) => p.y - q.y)
-  const m = new THREE.Matrix4(),
-    q = new THREE.Quaternion(),
-    e = new THREE.Euler(),
-    sc = new THREE.Vector3(),
-    c = new THREE.Color()
-  pellets.forEach((p, i) => {
-    e.set(rand() * 6, rand() * 6, rand() * 6)
-    sc.set(1, 0.7, 0.9).multiplyScalar(0.85 + rand() * 0.3)
-    kibble.setMatrixAt(i, m.compose(new THREE.Vector3(p.x, p.y, p.z), q.setFromEuler(e), sc))
-    kibble.setColorAt(i, c.set('#8b5a32').offsetHSL(0, 0, (rand() - 0.5) * 0.12))
-  })
-  // Three caches the sphere on the first draw; bowlFill(…, 0) would leave it empty and cull the kibble for good
-  kibble.computeBoundingSphere()
-  // Over the mat the bowls stand on
-  const shadow = contact(shade, BOWL.radius, BOWL.depth, 0.45)
-  shadow.position.y = 2 * MAT_Y
-  g.add(dish, kibble, shadow)
-  return { group: g, kibble }
-}
-
-/** The mat's height over the floor, and how far it reaches past the bowls on it. */
-const MAT_Y = 0.002,
-  MAT = { side: 0.18, depth: 0.15, corner: 0.08 }
-
-/** A flat rounded mat under a row of `n` bowls `BOWL_STEP` apart. */
-function bowlMat(n: number): THREE.Mesh {
-  const hx = ((n - 1) * BOWL_STEP) / 2 + MAT.side,
-    hz = MAT.depth,
-    r = MAT.corner
-  const shape = new THREE.Shape()
-  shape.moveTo(-hx + r, -hz)
-  shape.lineTo(hx - r, -hz)
-  shape.quadraticCurveTo(hx, -hz, hx, -hz + r)
-  shape.lineTo(hx, hz - r)
-  shape.quadraticCurveTo(hx, hz, hx - r, hz)
-  shape.lineTo(-hx + r, hz)
-  shape.quadraticCurveTo(-hx, hz, -hx, hz - r)
-  shape.lineTo(-hx, -hz + r)
-  shape.quadraticCurveTo(-hx, -hz, -hx + r, -hz)
-  const m = new THREE.Mesh(
-    new THREE.ShapeGeometry(shape, 6),
-    new THREE.MeshStandardMaterial({ color: '#8fb3a6', roughness: 0.95 }),
-  )
-  m.geometry.rotateX(-Math.PI / 2)
-  m.position.y = MAT_Y
-  m.receiveShadow = true
-  return m
-}
-
-/** The scale's readout: the canvas it is drawn on and the face that shows it. */
-const SCREEN = { width: 240, height: 80, face: [0.13, 0.043] as const }
-
-/**
- * A vet's platform scale on the `SCALE` footprint: a low rounded platform with a dark rubber top,
- * and at its front right a short mast holding the display, so the puppy on it does not hide it.
- */
-function scale(shade: THREE.Texture): { group: THREE.Group; readout: ScaleReadout } {
-  const g = new THREE.Group()
-  const w = 2 * SCALE.radius,
-    d = 2 * SCALE.depth,
-    h = 0.05
-  const platform = new THREE.Mesh(
-    new RoundedBoxGeometry(w, h, d, 3, 0.02),
-    new THREE.MeshStandardMaterial({ color: '#d9dfdd', roughness: 0.55 }),
-  )
-  platform.position.y = h / 2
-  platform.castShadow = platform.receiveShadow = true
-  const rubber = new THREE.Mesh(
-    new RoundedBoxGeometry(w - 0.05, 0.012, d - 0.05, 2, 0.005),
-    new THREE.MeshStandardMaterial({ color: '#3d4a47', roughness: 0.95 }),
-  )
-  rubber.position.y = h
-  rubber.receiveShadow = true
-  const post = { x: 0.125, z: SCALE.depth - 0.035, height: 0.085 }
-  const mast = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.011, 0.013, post.height, 12),
-    new THREE.MeshStandardMaterial({ color: '#9aa3a0', roughness: 0.5 }),
-  )
-  mast.position.set(post.x, h + post.height / 2, post.z)
-  const head = new THREE.Group()
-  head.position.set(post.x, h + post.height + 0.03, post.z)
-  // Tipped back a little towards the camera, which looks down on it
-  head.rotation.x = -0.3
-  const box = new THREE.Mesh(
-    new RoundedBoxGeometry(0.155, 0.062, 0.035, 2, 0.008),
-    new THREE.MeshStandardMaterial({ color: '#24302c', roughness: 0.6 }),
-  )
-  box.castShadow = true
-  const screen = document.createElement('canvas')
-  screen.width = SCREEN.width
-  screen.height = SCREEN.height
-  const readout = scaleReadout(screen)
-  const display = new THREE.Mesh(
-    new THREE.PlaneGeometry(...SCREEN.face),
-    new THREE.MeshBasicMaterial({ map: readout.map, toneMapped: false }),
-  )
-  display.name = 'scale-display'
-  display.position.z = 0.0185
-  head.add(box, display)
-  g.add(platform, rubber, mast, head, contact(shade, SCALE.radius, SCALE.depth, 0.35))
-  return { group: g, readout }
-}
-
-export interface ScaleReadout {
-  map: THREE.CanvasTexture
-  /** Shows `kg`, or nothing; the texture is drawn and uploaded again only when the text changes. */
-  show(kg: number | null): void
-}
-
-/** The scale's display drawn on `screen`, blank to start with. */
-export function scaleReadout(screen: HTMLCanvasElement): ScaleReadout {
-  const map = new THREE.CanvasTexture(screen)
-  map.colorSpace = THREE.SRGBColorSpace
-  let shown: string | null = null
-  return {
-    map,
-    show(kg) {
-      const text = formatKg(kg)
-      if (text === shown) return
-      shown = text
-      drawReading(screen, text)
-      map.needsUpdate = true
-    },
-  }
-}
-
-/** Green digits on the dark display while weighing, «5,24» with a small «kg»; dark otherwise. */
-function drawReading(screen: HTMLCanvasElement, text: string) {
-  const g = screen.getContext('2d')
-  if (!g) return
-  const { width, height } = screen
-  g.fillStyle = text ? '#1f2b29' : '#182220'
-  g.fillRect(0, 0, width, height)
-  if (!text) return
-  const [digits = '', unit = ''] = text.split(' ')
-  g.fillStyle = '#9be3c4'
-  g.textBaseline = 'alphabetic'
-  g.font = '700 60px ui-monospace, Menlo, Consolas, monospace'
-  const big = g.measureText(digits).width
-  g.font = '700 24px ui-monospace, Menlo, Consolas, monospace'
-  const small = g.measureText(unit).width
-  const left = (width - big - 8 - small) / 2,
-    base = height / 2 + 21
-  g.fillText(unit, left + big + 8, base)
-  g.font = '700 60px ui-monospace, Menlo, Consolas, monospace'
-  g.fillText(digits, left, base)
-}
-
-/**
- * An irregular oval with vertex colours: half sizes `rx` across and `rz` along the view, its rim
- * `rim(a)` times those and its height `y(t)` from the middle out.
- */
-function blob(
-  rx: number,
-  rz: number,
-  rim: (a: number) => number,
-  y: (t: number) => number,
-  color: (t: number, a: number, out: THREE.Color) => THREE.Color,
-  alpha: (t: number) => number,
-): THREE.BufferGeometry {
-  const rings = 10,
-    segs = 64
-  const pos: number[] = [0, y(0), 0],
-    col: number[] = []
-  const c = new THREE.Color()
-  color(0, 0, c)
-  col.push(c.r, c.g, c.b, alpha(0))
-  for (let i = 1; i <= rings; i++) {
-    const t = i / rings
-    for (let j = 0; j < segs; j++) {
-      const a = (j / segs) * Math.PI * 2,
-        k = t * rim(a)
-      pos.push(k * rx * Math.cos(a), y(t), -k * rz * Math.sin(a))
-      color(t, a, c)
-      col.push(c.r, c.g, c.b, alpha(t))
-    }
-  }
-  const idx: number[] = []
-  for (let j = 0; j < segs; j++) idx.push(0, 1 + j, 1 + ((j + 1) % segs))
-  for (let i = 1; i < rings; i++)
-    for (let j = 0; j < segs; j++) {
-      const a = 1 + (i - 1) * segs + j,
-        b = 1 + (i - 1) * segs + ((j + 1) % segs),
-        c2 = a + segs,
-        d = b + segs
-      idx.push(a, c2, b, b, c2, d)
-    }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4))
-  geo.setIndex(idx)
-  geo.computeVertexNormals()
-  return geo
-}
-
-/**
- * The puddle, on the backdrop's garden ground: just clear of the floor, with a soft lip around a
- * lower middle.
- */
-function garden(): THREE.Group {
-  const g = new THREE.Group()
-  const mudRim = (a: number) => wobble(a, 0.08, 4.1)
-  const wetEdge = new THREE.Color('#5a3b22'),
-    deep = new THREE.Color('#3a2312')
-  const mud = new THREE.Mesh(
-    blob(
-      MUD.size * GARDEN.radius,
-      MUD.size * GARDEN.depth,
-      mudRim,
-      (t) => 0.002 + 0.005 * t * t * (1 - smoothstep(0.9, 1, t)),
-      (t, _a, out) => out.copy(deep).lerp(wetEdge, smoothstep(0.55, 1, t)),
-      (t) => 1 - smoothstep(0.92, 1, t),
-    ),
-    // Damp rather than glossy: seen this low, the rim light glances off it from behind and any
-    // ordinary shine turns the puddle grey, so its specular is nearly off
-    new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      roughness: 0.6,
-      specularIntensity: 0.03,
-      envMapIntensity: 0.25,
-      transparent: true,
-      depthWrite: false,
-    }),
-  )
-  mud.position.set(MUD.u * GARDEN.radius, 0, MUD.v * GARDEN.depth)
-  mud.receiveShadow = true
-  mud.renderOrder = 2
-  g.add(mud)
-  return g
-}
-
-/** A bed and a bowl for each of `puppies`, the scale and the garden corner, laid out for `cam`. */
-export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 2): Furniture {
-  const group = new THREE.Group()
-  const shade = contactTexture()
-  const spots = computeSpots(cam, puppies)
-  const beds = spots.beds.map((s) => bed(shade, s)),
-    bowls = spots.bowls.map(() => bowl(shade)),
-    mat = bowlMat(spots.bowls.length),
-    scaleParts = scale(shade),
-    gardenG = garden()
-  group.add(...beds, mat, ...bowls.map((b) => b.group), scaleParts.group, gardenG)
-  scene.add(group)
-
-  const placed: [THREE.Object3D, Spot][] = [
-    ...beds.map((b, i): [THREE.Object3D, Spot] => [b, spots.beds[i]!]),
-    ...bowls.map((b, i): [THREE.Object3D, Spot] => [b.group, spots.bowls[i]!]),
-    [scaleParts.group, spots.scale],
-    [gardenG, spots.garden],
-  ]
-  const update = (spot: Spot, fresh: Spot) => {
-    const { center, ...size } = fresh
-    Object.assign(spot, size).center.copy(center)
-  }
-  const furniture: Furniture = {
-    group,
-    puppies,
-    spots,
-    layout(next) {
-      const fresh = computeSpots(next, puppies)
-      fresh.beds.forEach((s, i) => update(spots.beds[i]!, s))
-      fresh.bowls.forEach((s, i) => update(spots.bowls[i]!, s))
-      for (const k of ['scale', 'mud', 'garden'] as const) update(spots[k], fresh[k])
-      // Everything faces the camera, so the bed's long side and the scale's display face the screen
-      for (const [o, s] of placed) {
-        o.position.copy(s.center)
-        o.rotation.y = next.az
-      }
-      mat.position.set(0, MAT_Y, 0)
-      for (const b of spots.bowls) mat.position.add(b.center)
-      mat.position.divideScalar(spots.bowls.length).setY(MAT_Y)
-      mat.rotation.y = next.az
-      gardenG.scale.set(spots.garden.radius / GARDEN.radius, 1, spots.garden.depth / GARDEN.depth)
-    },
-    bowlFill(place, level) {
-      const parts = bowls[place]
-      if (parts) parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
-    },
-    scaleReading: (kg) => scaleParts.readout.show(kg),
-    inMud: (x, z) => inMud(spots, x, z),
-    dispose() {
-      scene.remove(group)
-      group.traverse((o) => {
-        if (!(o instanceof THREE.Mesh)) return
-        if (o instanceof THREE.InstancedMesh) o.dispose()
-        o.geometry.dispose()
-        const mat = o.material as THREE.MeshStandardMaterial
-        mat.map?.dispose()
-        mat.alphaMap?.dispose()
-        mat.dispose()
-      })
-    },
-  }
-  furniture.layout(cam)
-  // Empty until someone fills them
-  bowls.forEach((_, i) => furniture.bowlFill(i, 0))
-  furniture.scaleReading(null)
-  return furniture
 }

@@ -155,3 +155,74 @@ describe('createBackdrop', () => {
     expect(backdrop.group.parent).toBeNull()
   })
 })
+
+describe('the window', () => {
+  /** Where the pane's corners land on screen, -1 to 1. */
+  const paneOnScreen = (backdrop: Backdrop, camera: THREE.Camera) => {
+    backdrop.group.updateMatrixWorld(true)
+    const pane = backdrop.group.getObjectByName('pane') as THREE.Mesh
+    const box = new THREE.Box2()
+    for (const [x, y] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const)
+      box.expandByPoint(
+        new THREE.Vector2().copy(
+          new THREE.Vector3(x, y, 0).applyMatrix4(pane.matrixWorld).project(camera),
+        ),
+      )
+    return box
+  }
+
+  it.each([
+    [1, 1],
+    [1, 2],
+    [2.05, 1],
+    [2.05, 2],
+    [0.46, 1],
+    [0.46, 2],
+  ] as const)(
+    'stays whole in view, over the beds and the puppies asleep in them, at aspect %f for %i',
+    (aspect, n) => {
+      const { cam, camera } = view(aspect)
+      const spots = computeSpots(cam, n)
+      const backdrop = createBackdrop(cam)
+      backdrop.layout(cam, spots.mud, spots.beds)
+      const pane = paneOnScreen(backdrop, camera)
+      expect(pane.min.x).toBeGreaterThan(-1)
+      expect(pane.max.x).toBeLessThan(1)
+      expect(pane.max.y).toBeLessThan(1)
+      // A curled sleeper is about 0.45 tall and reaches 0.45 across its bed
+      for (const bed of spots.beds) {
+        const q = playLocal(cam, bed.center.x, bed.center.z)
+        for (const off of [-0.45, 0, 0.45]) {
+          const [x, z] = playWorld(cam, q.d, q.side + off)
+          const top = new THREE.Vector3(x, 0.45, z).project(camera)
+          if (top.x > pane.min.x && top.x < pane.max.x) expect(top.y).toBeLessThan(pane.min.y)
+        }
+      }
+      backdrop.dispose()
+    },
+  )
+
+  it('moves along the wall clear of the beds where the wall has room', () => {
+    const { cam, camera } = view(2.05)
+    for (const n of [1, 2] as const) {
+      const spots = computeSpots(cam, n)
+      const backdrop = createBackdrop(cam)
+      backdrop.layout(cam, spots.mud, spots.beds)
+      const pane = paneOnScreen(backdrop, camera)
+      for (const bed of spots.beds) {
+        const q = playLocal(cam, bed.center.x, bed.center.z)
+        const [l, r] = [-0.45, 0.45].map((off) => {
+          const [x, z] = playWorld(cam, q.d, q.side + off)
+          return new THREE.Vector3(x, 0.45, z).project(camera).x
+        })
+        expect(r! < pane.min.x || l! > pane.max.x).toBe(true)
+      }
+      backdrop.dispose()
+    }
+  })
+})
