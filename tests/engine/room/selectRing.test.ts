@@ -11,14 +11,15 @@ const ringIn = (scene: THREE.Scene) =>
 
 describe('ringRadius', () => {
   it.each(Object.values(BREEDS).map((b) => [b.id, b] as const))(
-    'goes round the chest and rump of a %s standing',
+    'goes round the chest and rump of a %s standing, from midway between them',
     (_, breed) => {
       const shape = bodyShape(anatomy(breed)),
-        { stand } = shape
+        { chest, rump } = shape.stand,
+        mid = (chest.z + rump.z) / 2
       const r = ringRadius(shape)
-      expect(r).toBeGreaterThan(Math.abs(stand.rump.z) + stand.rump.r)
-      expect(r).toBeGreaterThan(stand.chest.z + stand.chest.r)
-      expect(r).toBeLessThan(0.5)
+      expect(r).toBeGreaterThan(mid - rump.z + rump.r)
+      expect(r).toBeGreaterThan(chest.z - mid + chest.r)
+      expect(r).toBeLessThan(0.45)
     },
   )
 })
@@ -47,20 +48,20 @@ describe('createSelectRing', () => {
     const position = ring.position,
       scale = ring.scale
 
-    select.follow({ x: 0.4, z: -0.3 }, 0.35)
+    select.follow(0.4, -0.3, 0.35)
     expect(ring.visible).toBe(true)
     expect([ring.position.x, ring.position.z]).toEqual([0.4, -0.3])
     expect(ring.position.y).toBeGreaterThan(0)
     expect(ring.position.y).toBeLessThan(0.01)
     expect([ring.scale.x, ring.scale.z]).toEqual([0.35, 0.35])
 
-    select.follow({ x: -1, z: 0.2 }, 0.35)
+    select.follow(-1, 0.2, 0.35)
     expect([ring.position.x, ring.position.z]).toEqual([-1, 0.2])
     // Followed frame after frame in place, with nothing new made
     expect(ring.position).toBe(position)
     expect(ring.scale).toBe(scale)
 
-    select.follow(null, 0)
+    select.hide()
     expect(ring.visible).toBe(false)
   })
 

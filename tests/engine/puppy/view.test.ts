@@ -33,6 +33,7 @@ import { legRigs } from '@/engine/motion/ik'
 import { anatomy } from '@/engine/puppy/anatomy'
 import {
   brushPuppy,
+  callOver,
   cheerUp,
   dropFetch,
   putToBed,
@@ -135,6 +136,45 @@ describe('offerBall', () => {
       peckish = pup(0.2)
     offerBall([hungry, peckish], createBall())
     expect([hungry.fetch.task, peckish.fetch.task]).toEqual(['free', 'wait'])
+  })
+})
+
+describe('callOver', () => {
+  const pup = () => ({
+    motion: createMotionState(),
+    behaviour: createBehaviourState(),
+    routine: createRoutineState(),
+    care: createCare(BREEDS.shiba, 0),
+  })
+  const opts = () => ({
+    happy: 0.5,
+    energy: 0.5,
+    clamp: (x: number, z: number) => [x, z] as [number, number],
+  })
+
+  it('sends only the selected puppy of two where the floor was tapped', () => {
+    const first = pup(),
+      second = pup()
+    callOver([first, second], 1, 0.6, -0.4, opts)
+    expect(first.motion.goal).toBeNull()
+    expect(second.motion.goal?.toArray()).toEqual([0.6, 0, -0.4])
+    expect(second.behaviour.perk).toBe(1)
+    callOver([first, second], 0, 0.2, 0.3, opts)
+    expect(first.motion.goal?.toArray()).toEqual([0.2, 0, 0.3])
+    expect(second.motion.goal?.toArray()).toEqual([0.6, 0, -0.4])
+  })
+
+  it('sends the only puppy in the room whatever is selected', () => {
+    const only = pup()
+    callOver([only], 1, 0.6, -0.4, opts)
+    expect(only.motion.goal?.toArray()).toEqual([0.6, 0, -0.4])
+  })
+
+  it('leaves a puppy in its brushing where it is', () => {
+    const held = pup()
+    held.routine.held = 'brushing'
+    callOver([held, pup()], 0, 0.6, -0.4, opts)
+    expect(held.motion.goal).toBeNull()
   })
 })
 

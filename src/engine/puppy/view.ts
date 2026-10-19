@@ -25,6 +25,7 @@ import {
   restWorld,
   stepLocomotion,
   type BodyPose,
+  type GoToOpts,
   type LegState,
   type MotionState,
 } from '@/engine/motion/locomotion'
@@ -1155,6 +1156,23 @@ export function throwBall(
  * Asks for a trick; only while the puppy is not playing ball or deep in a meal. A sleeping one
  * wakes instead.
  */
+/**
+ * A tap on the floor at (x, z): the puppy at `index` comes over, or the only one in the room,
+ * unless it is busy where it is.
+ */
+export function callOver<V extends Pick<PuppyView, 'motion' | 'routine' | 'behaviour' | 'care'>>(
+  views: readonly V[],
+  index: number,
+  x: number,
+  z: number,
+  opts: (v: V) => GoToOpts,
+): void {
+  const v = views.length > 1 ? views[index] : views[0]
+  if (!v || touch(v.routine) || v.routine.held || keepsEating(v.routine, v.care)) return
+  goTo(v.motion, x, z, opts(v))
+  v.behaviour.perk = 1
+}
+
 export function askTrick(view: PuppyView, pose: Exclude<PoseId, 'stand' | 'sleep'>): boolean {
   if (
     touch(view.routine) ||
