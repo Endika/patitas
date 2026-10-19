@@ -13,12 +13,14 @@ export const SPLIT = -0.1
 export const BACK_D = PLAY.far + 0.5
 
 const STRIP_HALF = 0.032
-const WALL_H = 1.02
+const WALL_H = 1.25
 const FENCE = { step: 0.16, width: 0.08, height: 0.55, board: 0.45 }
 const WINDOW = { x: 0.75, bottom: 0.3, top: 0.84, width: 0.62, frame: 0.045 }
 /** The fence and its bushes are built this far left of the split, for the widest screens. */
 const REACH = 12
 const BLADES = 1800
+const BLADE_LIGHT = new THREE.Color('#729a4b'),
+  BLADE_DARK = new THREE.Color('#5a8039')
 
 export interface Backdrop {
   group: THREE.Group
@@ -81,7 +83,11 @@ uniform vec2 uOrigin;
 uniform vec2 uAhead;
 uniform vec3 uGrassFar, uGrassNear, uWoodFar, uWoodNear, uSeam, uStrip;
 varying vec2 vGround;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 float vnoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
@@ -211,17 +217,29 @@ function picketGeometry(): THREE.BufferGeometry {
   return geo
 }
 
-/** One tapered blade: two crossed triangles, so it shows from any side. */
+/**
+ * One tapered blade: two crossed triangles, each also wound the other way, so it shows from any
+ * side with the same upward normal. A double-sided material would flip that normal on the back
+ * faces and turn them dark.
+ */
 function bladeGeometry(): THREE.BufferGeometry {
   const w = 0.0055,
     h = 0.038
   const geo = new THREE.BufferGeometry()
   geo.setAttribute(
     'position',
-    new THREE.Float32BufferAttribute([-w, 0, 0, w, 0, 0, 0, h, 0, 0, 0, -w, 0, 0, w, 0, h, 0], 3),
+    new THREE.Float32BufferAttribute(
+      [
+        [-w, 0, 0, w, 0, 0, 0, h, 0],
+        [w, 0, 0, -w, 0, 0, 0, h, 0],
+        [0, 0, -w, 0, 0, w, 0, h, 0],
+        [0, 0, w, 0, 0, -w, 0, h, 0],
+      ].flat(),
+      3,
+    ),
   )
   // Lit like the ground under it, so the blades read as soft grass rather than facets
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(Array(6).fill([0, 1, 0]).flat(), 3))
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(Array(12).fill([0, 1, 0]).flat(), 3))
   return geo
 }
 
@@ -440,7 +458,7 @@ export function createBackdrop(cam: FixedCamera): Backdrop {
   blooms.count = planted.flowers
   const blades = new THREE.InstancedMesh(
     bladeGeometry(),
-    new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ roughness: 0.9 }),
     BLADES,
   )
   blades.name = 'blades'
@@ -456,31 +474,39 @@ export function createBackdrop(cam: FixedCamera): Backdrop {
   const grow = (cam: FixedCamera, clear?: Spot) => {
     const { camD, camY, dir } = rays(cam)
     const rand = rng(11)
-    const light = new THREE.Color('#729a4b'),
-      dark = new THREE.Color('#5a8039'),
-      world = new THREE.Vector3()
-    const out = clear ? { c: Math.cos(clear.facing), s: Math.sin(clear.facing) } : null
+    const cf = Math.cos(clear?.facing ?? 0),
+      sf = Math.sin(clear?.facing ?? 0)
     let n = 0
     for (let tries = 0; n < BLADES && tries < BLADES * 12; tries++) {
-      const r = dir(rand() * 1.4 - 1, rand() * 1.5 - 1)
+      const sy = rand() * 1.5 - 1
+      const r = dir(rand() * 1.4 - 1, sy)
       if (r.y >= 0) continue
       const t = camY / -r.y,
         x = r.x * t,
         d = -(camD + r.z * t)
       if (x > SPLIT - STRIP_HALF - 0.01 || d > BACK_D - 0.06) continue
-      toWorld(x, d, world)
-      if (clear && out) {
-        const rx = world.x - clear.center.x,
-          rz = world.z - clear.center.z
-        const u = (rx * out.c - rz * out.s) / clear.radius,
-          v = (rx * out.s + rz * out.c) / clear.depth
+      toWorld(x, d, at)
+      if (clear) {
+        const rx = at.x - clear.center.x,
+          rz = at.z - clear.center.z
+        const u = (rx * cf - rz * sf) / clear.radius,
+          v = (rx * sf + rz * cf) / clear.depth
         if (Math.hypot(u, v) < 1.12) continue
       }
       euler.set((rand() - 0.5) * 0.7, rand() * 6, (rand() - 0.5) * 0.7)
       at.set(x, 0, -d)
-      size.set(1, 0.5 + rand() * 0.6, 1)
+      // The nearest blades are the biggest on screen: shorter and closer to the ground's colour,
+      // they read as soft lawn rather than stubble
+      const far = Math.min(1, (sy + 1) / 0.7)
+      size.set(1, (0.5 + rand() * 0.6) * (0.35 + 0.65 * far), 1)
       blades.setMatrixAt(n, matrix.compose(at, quat.setFromEuler(euler), size))
-      blades.setColorAt(n, tint.copy(dark).lerp(light, rand()))
+      blades.setColorAt(
+        n,
+        tint
+          .copy(BLADE_DARK)
+          .lerp(BLADE_LIGHT, rand())
+          .lerp(BLADE_LIGHT, 0.6 * (1 - far)),
+      )
       n++
     }
     blades.count = n

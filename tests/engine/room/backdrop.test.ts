@@ -110,6 +110,27 @@ describe('createBackdrop', () => {
     },
   )
 
+  it('shows each blade from both sides with front faces only, so none is lit from below', () => {
+    const backdrop = createBackdrop(view(1).cam)
+    const blades = meshes(backdrop.group).find((m) => m.name === 'blades')!
+    expect((blades.material as THREE.Material).side).toBe(THREE.FrontSide)
+    const pos = blades.geometry.getAttribute('position')
+    const facing = (i: number) => {
+      const [a, b, c] = [0, 1, 2].map((k) =>
+        new THREE.Vector3().fromBufferAttribute(pos, i * 3 + k),
+      )
+      return new THREE.Vector3().subVectors(b!, a!).cross(new THREE.Vector3().subVectors(c!, a!))
+    }
+    // Every triangle has a twin wound the other way
+    for (let i = 0; i < pos.count / 3; i += 2)
+      expect(
+        facing(i)
+          .normalize()
+          .dot(facing(i + 1).normalize()),
+      ).toBeCloseTo(-1)
+    backdrop.dispose()
+  })
+
   it('casts no shadow from the backdrop and takes the puppies’ on the floor', () => {
     const backdrop = createBackdrop(view(1).cam)
     const all = meshes(backdrop.group)
