@@ -225,6 +225,15 @@ describe('stepBehaviour', () => {
     for (let f = 0; f < 60; f++) pose = stepBehaviour(rig, s, input, DT, 3 + f * DT)
     expect(pose.dig).toBeLessThan(0.01)
   })
+
+  it('writes the dig strokes into the same two arrays every frame', () => {
+    const { rig, s, input } = world()
+    const first = stepBehaviour(rig, s, input, DT, 0).digLegs
+    const next = stepBehaviour(rig, s, input, DT, DT).digLegs
+    expect(next).toBe(first)
+    expect(next[0]).toBe(first[0])
+    expect(next[1]).toBe(first[1])
+  })
 })
 
 describe('bath', () => {
