@@ -163,6 +163,8 @@ export interface BehaviourState {
   shakeRoll: number
   /** How far into digging the front legs are, 0 to 1. */
   dig: number
+  /** Each front leg's dig stroke this frame, written in place rather than built. */
+  digLegs: [Rot, Rot]
 }
 
 export function createBehaviourState(): BehaviourState {
@@ -209,6 +211,10 @@ export function createBehaviourState(): BehaviourState {
     earsBack: 0,
     shakeRoll: 0,
     dig: 0,
+    digLegs: [
+      [0, 0, 0],
+      [0, 0, 0],
+    ],
   }
 }
 
@@ -502,10 +508,11 @@ export function stepBehaviour(
     body.roll * (1 - fk) + bw * 2.7 + rolled + shakeRoll + tremble,
   ]
   s.dig = damp(s.dig, M.pose === 'dig' ? 1 : 0, 8, dt)
-  const stroke = (i: number): Rot => {
+  for (let i = 0; i < 2; i++) {
     // 1 at the reach, 0 at the pull; the other paw half a stroke behind
-    const k = 0.5 + 0.5 * Math.cos(t * 2 * Math.PI * DIG.hz + i * Math.PI)
-    return [0, 1, 2].map((j) => DIG.pull[j]! + (DIG.reach[j]! - DIG.pull[j]!) * k) as Rot
+    const k = 0.5 + 0.5 * Math.cos(t * 2 * Math.PI * DIG.hz + i * Math.PI),
+      leg = s.digLegs[i]!
+    for (let j = 0; j < 3; j++) leg[j] = DIG.pull[j]! + (DIG.reach[j]! - DIG.pull[j]!) * k
   }
 
   // Rump wiggle with the tail, and the scratch reflex: the hind leg moves on its own
@@ -605,7 +612,7 @@ export function stepBehaviour(
     lowLid,
     sacc: s.sacc,
     dig: s.dig,
-    digLegs: [stroke(0), stroke(1)],
+    digLegs: s.digLegs,
   }
 }
 
