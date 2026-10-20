@@ -28,6 +28,7 @@ import {
   WALK_CLEARANCE,
   inOval,
   SLOT_APART,
+  BOWL_STEP,
   type Spot,
   type Spots,
 } from '@/engine/room/furniture'
@@ -306,6 +307,26 @@ describe('computeSpots', () => {
     for (const mat of bowlMats(cam, spots))
       expect(local(mat).side - mat.across).toBeGreaterThanOrEqual(grass - 1e-6)
   })
+
+  it.each(WIDE)(
+    'keeps every mat its full size, rounded, under all of its bowls at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const spots = spotsFor(aspect, n),
+        mats = bowlMats(cam, spots),
+        local = (v: { x: number; z: number }) => playLocal(cam, v.x, v.z)
+      // 0.18 across from the middle of a lone bowl, and the row's half length more under two
+      const full = mats.length === 1 ? ((n - 1) * BOWL_STEP) / 2 + 0.18 : 0.18
+      for (const mat of mats) expect(mat.across).toBeCloseTo(full, 9)
+      spots.bowls.forEach((b, i) => {
+        const mat = local(mats[mats.length === 1 ? 0 : i]!),
+          across = mats[mats.length === 1 ? 0 : i]!.across,
+          at = local(b.center)
+        expect(at.side - b.radius).toBeGreaterThanOrEqual(mat.side - across - 1e-9)
+        expect(at.side + b.radius).toBeLessThanOrEqual(mat.side + across + 1e-9)
+      })
+    },
+  )
 
   it.each(SWEEP)(
     'keeps every place two puppies stand at once SLOT_APART apart at aspect %f for %i',
