@@ -88,11 +88,11 @@ describe('createSelectRing', () => {
 
 describe('syncRing', () => {
   const shape = bodyShape(anatomy(BREEDS.dorado))
-  const puppy = (x: number): RingView => {
+  const puppy = (x: number) => {
     const body = createBody()
     Object.assign(body.chest, { x, z: 1 })
     Object.assign(body.rump, { x, z: 0.6 })
-    return { body, shape, bath: createBath(), brush: createBrush() }
+    return { body, shape, bath: createBath(), brush: createBrush() } satisfies RingView
   }
   const fakeRing = () => {
     const calls: string[] = []

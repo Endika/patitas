@@ -1,6 +1,5 @@
 import * as THREE from 'three'
-import type { PuppyView } from '@/engine/puppy/view'
-import type { BodyShape } from './bodies'
+import type { Body, BodyShape } from './bodies'
 
 /** The HUD's accent, so the ring reads as the controls' target. */
 const RING_COLOR = 0xe0674f,
@@ -56,8 +55,13 @@ export function createSelectRing(scene: THREE.Scene): SelectRing {
   }
 }
 
-/** What the ring needs of a puppy. */
-export type RingView = Pick<PuppyView, 'body' | 'shape' | 'bath' | 'brush'>
+/** What the ring needs of a puppy: where its body is, its shape, and whether it is bathed or brushed. */
+export interface RingView {
+  body: Body
+  shape: BodyShape
+  bath: { phase: string }
+  brush: { on: boolean }
+}
 
 /**
  * Puts the ring under the puppy at `chosen`, or hides it: with fewer than two puppies there is
