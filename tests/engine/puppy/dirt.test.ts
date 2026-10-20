@@ -81,52 +81,57 @@ describe('dirt', () => {
     expect(meanDirt(rolled)).toBeGreaterThan(2 * meanDirt(stood))
   })
 
-  it('one roll leaves the back and the flank it lies on about half dirty, the other flank and the top of the head far less', () => {
-    const built = buildPuppyGeometry(BREEDS.dorado),
-      g = built.geometry,
-      A = built.anatomy
-    const pos = g.attributes.position!.array,
-      nrm = g.attributes.normal!.array,
-      bone = g.attributes.skinIndex!.array,
-      weight = g.attributes.skinWeight!.array
-    const rest = dirtRest(pos, nrm, A.nose.c),
-      n = pos.length / 3,
-      field = createDirtField(n)
-    for (let t = 0; t < 2 - 1e-9; t += DIRT_STEP) soilFromMud(field, rest, 1, DIRT_STEP, 'roll')
-    let top = 0
-    for (let i = 0; i < n; i++) top = Math.max(top, pos[i * 3 + 1]!)
-    const heads = new Set([
-      A.bi.head,
-      ...Object.keys(A.bi)
-        .filter((k) => k.startsWith('ear'))
-        .map((k) => A.bi[k]),
-    ])
-    const bands = {
-      back: [] as number[],
-      under: [] as number[],
-      over: [] as number[],
-      head: [] as number[],
-    }
-    for (let i = 0; i < n; i++) {
-      const y = pos[i * 3 + 1]! / top,
-        up = nrm[i * 3 + 1]!,
-        across = nrm[i * 3]!
-      let onHead = 0
-      for (let k = 0; k < 4; k++) if (heads.has(bone[i * 4 + k]!)) onHead += weight[i * 4 + k]!
-      if (up > 0.6 && onHead > 0.5) bands.head.push(i)
-      else if (up > 0.6 && y > 0.5 && y < 0.8) bands.back.push(i)
-      // It rolls onto the flank facing −x
-      if (y > 0.35 && y < 0.75 && across < -0.7) bands.under.push(i)
-      if (y > 0.35 && y < 0.75 && across > 0.7) bands.over.push(i)
-    }
-    const mean = (band: number[]) => band.reduce((s, i) => s + field[i]!, 0) / band.length
-    for (const band of [bands.back, bands.under]) {
-      expect(mean(band)).toBeGreaterThan(0.35)
-      expect(mean(band)).toBeLessThan(0.55)
-    }
-    expect(mean(bands.over)).toBeLessThan(mean(bands.under) / 2)
-    expect(mean(bands.head)).toBeLessThan(0.06)
-  })
+  // Building a real mesh takes a few seconds
+  it(
+    'one roll leaves the back and the flank it lies on about half dirty, the other flank and the top of the head far less',
+    { timeout: 30000 },
+    () => {
+      const built = buildPuppyGeometry(BREEDS.dorado),
+        g = built.geometry,
+        A = built.anatomy
+      const pos = g.attributes.position!.array,
+        nrm = g.attributes.normal!.array,
+        bone = g.attributes.skinIndex!.array,
+        weight = g.attributes.skinWeight!.array
+      const rest = dirtRest(pos, nrm, A.nose.c),
+        n = pos.length / 3,
+        field = createDirtField(n)
+      for (let t = 0; t < 2 - 1e-9; t += DIRT_STEP) soilFromMud(field, rest, 1, DIRT_STEP, 'roll')
+      let top = 0
+      for (let i = 0; i < n; i++) top = Math.max(top, pos[i * 3 + 1]!)
+      const heads = new Set([
+        A.bi.head,
+        ...Object.keys(A.bi)
+          .filter((k) => k.startsWith('ear'))
+          .map((k) => A.bi[k]),
+      ])
+      const bands = {
+        back: [] as number[],
+        under: [] as number[],
+        over: [] as number[],
+        head: [] as number[],
+      }
+      for (let i = 0; i < n; i++) {
+        const y = pos[i * 3 + 1]! / top,
+          up = nrm[i * 3 + 1]!,
+          across = nrm[i * 3]!
+        let onHead = 0
+        for (let k = 0; k < 4; k++) if (heads.has(bone[i * 4 + k]!)) onHead += weight[i * 4 + k]!
+        if (up > 0.6 && onHead > 0.5) bands.head.push(i)
+        else if (up > 0.6 && y > 0.5 && y < 0.8) bands.back.push(i)
+        // It rolls onto the flank facing −x
+        if (y > 0.35 && y < 0.75 && across < -0.7) bands.under.push(i)
+        if (y > 0.35 && y < 0.75 && across > 0.7) bands.over.push(i)
+      }
+      const mean = (band: number[]) => band.reduce((s, i) => s + field[i]!, 0) / band.length
+      for (const band of [bands.back, bands.under]) {
+        expect(mean(band)).toBeGreaterThan(0.35)
+        expect(mean(band)).toBeLessThan(0.55)
+      }
+      expect(mean(bands.over)).toBeLessThan(mean(bands.under) / 2)
+      expect(mean(bands.head)).toBeLessThan(0.06)
+    },
+  )
 
   it('digging soils the paws, belly and muzzle faster, and not the back', () => {
     const { rest, parts } = body()
