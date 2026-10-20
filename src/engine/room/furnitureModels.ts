@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { clamp, rng } from '@/engine/math'
-import { playLocal, type FixedCamera } from './camera'
+import { playLocal, playWorld, type FixedCamera } from './camera'
 import {
   BOWL,
   BOWL_STEP,
@@ -189,14 +189,16 @@ export interface MatPlace {
 
 /**
  * The bowls' mats: one under both in a row, else one under each; none reaching the grass, so a
- * mat by the strip is narrowed (from both sides) to end at the grass's edge.
+ * mat by the strip keeps its size and rounded corners and moves away from the grass until its
+ * edge is at the grass's edge.
  */
 export function bowlMats(cam: FixedCamera, spots: Pick<Spots, 'bowls'>): MatPlace[] {
   const [a, b] = spots.bowls
   const inRow = !b || Math.abs(a!.center.distanceTo(b.center) - BOWL_STEP) < 1e-6
   const lay = (x: number, z: number, across: number): MatPlace => {
-    const { side } = playLocal(cam, x, z)
-    return { x, z, across: Math.min(across, side - GRASS), along: MAT.depth }
+    const { d, side } = playLocal(cam, x, z)
+    const [mx, mz] = playWorld(cam, d, Math.max(side, GRASS + across))
+    return { x: mx, z: mz, across, along: MAT.depth }
   }
   if (inRow) {
     const n = spots.bowls.length
@@ -461,19 +463,18 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
         o.position.copy(s.center)
         o.rotation.y = next.az
       }
-      // The mats as planned, each built at its full width and narrowed to the plan
+      // The mats as planned, each at its full size
       const plan = bowlMats(next, spots),
         inRow = plan.length === 1 && spots.bowls.length > 1
-      const lay = (m: THREE.Mesh, at: MatPlace, full: number) => {
+      const lay = (m: THREE.Mesh, at: MatPlace) => {
         m.position.set(at.x, MAT_Y, at.z)
         m.rotation.y = next.az
-        m.scale.x = at.across / full
       }
       mat.visible = inRow || spots.bowls.length === 1
-      if (mat.visible) lay(mat, plan[0]!, ((spots.bowls.length - 1) * BOWL_STEP) / 2 + MAT.side)
+      if (mat.visible) lay(mat, plan[0]!)
       ownMats.forEach((m, i) => {
         m.visible = !inRow
-        if (m.visible) lay(m, plan[i]!, MAT.side)
+        if (m.visible) lay(m, plan[i]!)
       })
       // The beds as planned: built on a circle of the radius they were laid out with first
       beds.forEach((g, i) => {
