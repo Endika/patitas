@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { BREEDS, type BreedId } from '@/domain/breeds'
 import { addMess, createCare, type Care } from '@/domain/care'
 import { legRigs } from '@/engine/motion/ik'
@@ -104,6 +104,7 @@ function run(
     ;[p.x, p.z] = clamp(p.x, p.z)
   }
   const random = seeded(7)
+  nearest = Infinity
   for (let n = 0; n * DT < secs; n++) {
     pups.forEach((p, i) => {
       const ev = stepRoutine(
@@ -147,8 +148,8 @@ function run(
       clamp,
       spots,
     )
-    closest = Math.min(
-      closest,
+    nearest = Math.min(
+      nearest,
       Math.hypot(ms[0]!.pos.x - ms[1]!.pos.x, ms[0]!.pos.z - ms[1]!.pos.z),
     )
     each?.(n * DT)
@@ -171,12 +172,19 @@ const cases = rooms.flatMap((room) =>
 /** The failures of a sweep, kept for the summary at the end. */
 const failed: string[] = []
 /**
- * The closest two centres came, and the times one backed off for the other (the last resort).
- * Two standing bodies that only touch, a dorado's and a shiba's turned head to tail and offset,
- * stand 0.334 apart centre to centre: nearer than TOUCHING, one is in the other.
+ * The closest two centres came in the last run and in all, and the times one backed off for the
+ * other (the last resort). Two standing bodies that only touch, a dorado's and a shiba's turned
+ * head to tail and offset, stand 0.334 apart centre to centre: nearer than TOUCHING, one is in the
+ * other.
  */
-let closest = Infinity,
+let nearest = Infinity,
+  closest = Infinity,
   lastResorts = 0
+/** Each run keeps the bodies out of each other. */
+const keptApart = () => {
+  closest = Math.min(closest, nearest)
+  expect(nearest).toBeGreaterThanOrEqual(TOUCHING)
+}
 const TOUCHING = 0.33
 
 describe('two puppies from random starts', () => {
@@ -186,6 +194,7 @@ describe('two puppies from random starts', () => {
     const t = run(pups, cam, spots, noon, 30, () => pups.every((p) => p.fed > 0))
     if (t == null)
       failed.push(`eat ${aspect} ${seed} ${pups.map((p) => p.r.routine + ':' + p.fed)}`)
+    keptApart()
     expect(t).not.toBeNull()
   })
 
@@ -222,6 +231,7 @@ describe('two puppies from random starts', () => {
         },
       )
       if (t == null) failed.push(`weigh ${aspect} ${seed} ${who}`)
+      keptApart()
       expect(t).not.toBeNull()
     },
   )
@@ -240,6 +250,7 @@ describe('two puppies from random starts', () => {
         failed.push(
           `sleep ${aspect} ${seed} t=${t} off=${off.map((o) => o.toFixed(2))} ${pups.map((p) => p.r.routine)}`,
         )
+      keptApart()
       expect(t).not.toBeNull()
       for (const o of off) expect(o).toBeLessThan(0.1)
     },
@@ -275,17 +286,17 @@ describe('two puppies from random starts', () => {
         failed.push(
           `mud ${aspect} ${seed} ${who} wallowed=${wallowed} back=${back} ${mud.r.routine} ${other.r.routine}:${other.fed}`,
         )
+      keptApart()
       expect(t).not.toBeNull()
     },
   )
 
-  it('summary', () => {
+  // Each case asserts its own run; a longer sweep prints what they came to
+  afterAll(() => {
     if (process.env.SWEEP_SEEDS)
       console.warn(
         `SWEEP ${SEEDS} seeds: ${failed.length} failed, closest ${closest.toFixed(3)}, ${lastResorts} last resorts`,
         failed,
       )
-    expect(failed).toEqual([])
-    expect(closest).toBeGreaterThanOrEqual(TOUCHING)
   })
 })
