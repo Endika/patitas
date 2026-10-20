@@ -420,6 +420,25 @@ function puddle(): THREE.Group {
   return g
 }
 
+/** The soft rug on the house floor: a muted pink oval of unit size, under everything on it. */
+function rug(): THREE.Mesh {
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({
+      color: '#e7a58f',
+      roughness: 1,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    }),
+  )
+  m.position.y = MAT_Y / 2
+  m.receiveShadow = true
+  return m
+}
+
 /** A bed and a bowl for each of `puppies`, the scale and the puddle, laid out for `cam`. */
 export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 2): Furniture {
   const group = new THREE.Group()
@@ -432,8 +451,17 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
     // Bowls set apart one in front of the other each stand on a mat of their own
     ownMats = spots.bowls.length > 1 ? spots.bowls.map(() => bowlMat(1)) : [],
     scaleParts = scale(shade),
-    puddleG = puddle()
-  group.add(...beds, mat, ...ownMats, ...bowls.map((b) => b.group), scaleParts.group, puddleG)
+    puddleG = puddle(),
+    rugMesh = rug()
+  group.add(
+    ...beds,
+    mat,
+    ...ownMats,
+    ...bowls.map((b) => b.group),
+    scaleParts.group,
+    puddleG,
+    rugMesh,
+  )
   scene.add(group)
 
   const placed: [THREE.Object3D, Spot][] = [
@@ -457,6 +485,13 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       spots.walk = fresh.walk
       spots.fallback = fresh.fallback
       spots.starts = fresh.starts
+      spots.rug = fresh.rug
+      rugMesh.visible = !!spots.rug
+      if (spots.rug) {
+        rugMesh.position.set(spots.rug.center.x, MAT_Y / 2, spots.rug.center.z)
+        rugMesh.rotation.y = next.az
+        rugMesh.scale.set(spots.rug.radius, 1, spots.rug.depth)
+      }
       // Everything faces the camera, so the bed's long side and the scale's display face the screen
       for (const [o, s] of placed) {
         o.position.copy(s.center)

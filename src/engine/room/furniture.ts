@@ -6,6 +6,7 @@ import {
   layOut,
   mudPlace,
   pottyPlace,
+  rugPlace,
   START_WANT,
   wantedStarts,
   type Oval,
@@ -32,6 +33,8 @@ export interface Spots {
   scale: Spot
   mud: Spot
   garden: Spot
+  /** The soft rug on the house floor, clear of every piece and mat; none where there is no room. */
+  rug: Spot | null
   /** No layout met every rule (see `layOut`): never so in the tests' sweep. */
   fallback?: boolean
   /** Where each puppy starts, as the layout found it with the furniture (see `startPlaces`). */
@@ -119,13 +122,15 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     return { center: new THREE.Vector3(x, 0, z), radius: o.radius, depth: o.depth, facing }
   }
   const mud = mudPlace(cam, MUD_D)
-  const plan = layOut(cam, puppies, mud)
+  const plan = layOut(cam, puppies, mud),
+    rugAt = rugPlace(plan, cam)
   const spots: Spots = {
     beds: plan.beds.map(placed),
     bowls: plan.bowls.map(placed),
     scale: placed(plan.scale),
     mud: placed(mud),
     garden: placed(pottyPlace(plan, mud, cam)),
+    rug: rugAt ? placed(rugAt) : null,
     fallback: plan.fallback,
     starts: plan.starts.map((p) => {
       const [x, z] = playWorld(cam, p.d, p.side)
