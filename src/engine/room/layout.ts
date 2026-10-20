@@ -683,3 +683,94 @@ export function pottyPlace(
     }
   return best ?? far ?? at(POTTY_D, GRASS - BY_STRIP - POTTY.radius)
 }
+
+/** A bowl's mat: how far it reaches across past the middle of its bowls, and along the view. */
+export const MAT = { side: 0.18, depth: 0.15 }
+
+/**
+ * The bowls' mats in the play area's terms, as rectangles of half sizes: one under both in a row
+ * (BOWL_STEP apart at one depth), else one under each; moved off the grass, never narrowed.
+ */
+export function matsOf(bowls: readonly Oval[]): Oval[] {
+  const [a, b] = bowls
+  const inRow = !b || (Math.abs(a!.d - b.d) < 1e-6 && Math.abs(dist(a!, b) - BOWL_STEP) < 1e-6)
+  const at = (d: number, side: number, across: number): Oval => ({
+    d,
+    side: Math.max(side, GRASS + across),
+    radius: across,
+    depth: MAT.depth,
+  })
+  if (inRow) {
+    const d = bowls.reduce((s, o) => s + o.d, 0) / bowls.length,
+      side = bowls.reduce((s, o) => s + o.side, 0) / bowls.length
+    return [at(d, side, ((bowls.length - 1) * BOWL_STEP) / 2 + MAT.side)]
+  }
+  return bowls.map((o) => at(o.d, o.side, MAT.side))
+}
+
+/** The rug's sizes tried, largest first: its half size across; along the view it is RUG_LONG of that. */
+const RUG_SIZES = [0.5, 0.45, 0.4, 0.35, 0.3, 0.26, 0.22, 0.18, 0.15],
+  RUG_LONG = 0.7
+/** From the rug's rim to every piece and mat, and to the doorway strip. */
+const RUG_GAP = 0.06
+/** Where it would rather lie: across the middle of the house's floor, at the front, in sight. */
+const RUG_D = -0.2
+/** It may reach this far in front of the play area, onto the floor the screen shows there. */
+const RUG_FRONT = 0.4
+/** The share of the screen's half width its rim may reach. */
+const RUG_SHOWN = 0.92
+
+/** Whether a point lies in a rectangle of half sizes `radius` across and `depth` along, grown by `grow`. */
+const inRect = (o: Oval, d: number, side: number, grow: number) =>
+  Math.abs(side - o.side) < o.radius + grow && Math.abs(d - o.d) < o.depth + grow
+
+/**
+ * The soft rug in the house: an oval on the open floor, clear by RUG_GAP of the beds, the bowls,
+ * their mats and the scale, inside the house and the play area, as big as there is room for and
+ * nearest the middle of the house's floor. It is no obstacle: puppies walk and lie on it. Null
+ * when even the smallest fits nowhere.
+ */
+export function rugPlace(
+  l: Pick<Layout, 'beds' | 'bowls' | 'scale'>,
+  cam: FixedCamera,
+): Oval | null {
+  const lay = layoutCamera(cam)
+  const { camD } = playAxes(lay)
+  // What the screen shows across at depth d, a little in from its edge
+  const shown = (d: number) => RUG_SHOWN * (camD + d) * lay.tanH
+  const half = (d: number) => playHalf(lay, d)
+  const pieces = [...l.beds, ...l.bowls, l.scale],
+    mats = matsOf(l.bowls)
+  const want = { d: RUG_D, side: (HOUSE + half(RUG_D)) / 2 }
+  for (const radius of RUG_SIZES) {
+    const depth = radius * RUG_LONG
+    let best: Oval | null = null,
+      nearest = Infinity
+    for (const d of range(PLAY.near - RUG_FRONT + depth, PLAY.far - depth, 0.05))
+      for (const side of range(HOUSE + RUG_GAP + radius, shown(d) - radius, 0.05)) {
+        const rug: Oval = { d, side, radius, depth }
+        const far = Math.hypot(d - want.d, side - want.side)
+        if (far >= nearest) continue
+        // On screen, on the near and far side too
+        if (side + radius > shown(d - depth)) continue
+        if (pieces.some((o) => !clearOf(rug, o, RUG_GAP))) continue
+        if (mats.some((m) => rimIn(rug, m))) continue
+        best = rug
+        nearest = far
+      }
+    if (best) return best
+  }
+  return null
+}
+
+/** Whether any point of `rug`'s rim, or its middle, comes within RUG_GAP of the rectangle `m`. */
+function rimIn(rug: Oval, m: Oval): boolean {
+  if (inRect(m, rug.d, rug.side, RUG_GAP)) return true
+  for (let i = 0; i < RIM; i++) {
+    const t = (i / RIM) * Math.PI * 2
+    if (inRect(m, rug.d + rug.depth * Math.sin(t), rug.side + rug.radius * Math.cos(t), RUG_GAP))
+      return true
+  }
+  // A mat wholly inside the rug
+  return ((m.side - rug.side) / rug.radius) ** 2 + ((m.d - rug.d) / rug.depth) ** 2 < 1
+}

@@ -74,3 +74,27 @@ describe('the beds drawn on a resize', () => {
     furniture.dispose()
   })
 })
+
+describe('the rug', () => {
+  it('lies where the layout puts it, one flat mesh that casts no shadow, and goes with the rest', () => {
+    const scene = new THREE.Scene()
+    const furniture = addFurniture(scene, fitCamera(createCamera(), 1.23), 2)
+    const rugs: THREE.Mesh[] = []
+    furniture.group.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.geometry instanceof THREE.CircleGeometry) rugs.push(o)
+    })
+    expect(rugs).toHaveLength(1)
+    const [rug] = rugs as [THREE.Mesh]
+    const spot = furniture.spots.rug!
+    expect(rug.visible).toBe(true)
+    expect(rug.castShadow).toBe(false)
+    expect(rug.position.x).toBeCloseTo(spot.center.x, 9)
+    expect(rug.position.z).toBeCloseTo(spot.center.z, 9)
+    expect([rug.scale.x, rug.scale.z]).toEqual([spot.radius, spot.depth])
+    let gone = 0
+    rug.geometry.addEventListener('dispose', () => gone++)
+    ;(rug.material as THREE.Material).addEventListener('dispose', () => gone++)
+    furniture.dispose()
+    expect(gone).toBe(2)
+  })
+})

@@ -290,6 +290,52 @@ describe('computeSpots', () => {
     60000,
   )
 
+  it.each(COUNTS)(
+    'at every aspect from 0.3 to 3.5 in steps of 0.01 for %i, lays a soft rug in the house, clear of every piece and mat',
+    (n) => {
+      const wrong: string[] = []
+      for (let k = 0; k <= 320; k++) {
+        const aspect = +(0.3 + k * 0.01).toFixed(2),
+          { cam } = view(aspect),
+          spots = computeSpots(cam, n),
+          { rug } = spots
+        if (!rug) {
+          wrong.push(`${aspect} no rug`)
+          continue
+        }
+        const local = (v: { x: number; z: number }) => playLocal(cam, v.x, v.z)
+        const edge = rim(rug)
+        // In the house, past the strip
+        if (edge.some((p) => local(p).side < SPLIT + STRIP_HALF))
+          wrong.push(`${aspect} off the house`)
+        for (const [name, s] of named(spots).filter(([k]) => k !== 'mud'))
+          if (gap(rug, s) < 0.05) wrong.push(`${aspect} on ${name}`)
+        for (const mat of bowlMats(cam, spots)) {
+          const m = local(mat)
+          if (
+            edge.some((p) => {
+              const q = local(p)
+              return (
+                Math.abs(q.side - m.side) < mat.across + 0.05 &&
+                Math.abs(q.d - m.d) < mat.along + 0.05
+              )
+            })
+          )
+            wrong.push(`${aspect} on a mat`)
+        }
+      }
+      expect(wrong).toEqual([])
+    },
+    60000,
+  )
+
+  it('never walks round the rug: it is no obstacle', () => {
+    const spots = spotsFor(1, 2)
+    expect(spots.rug).not.toBeNull()
+    const { x, z } = spots.rug!.center
+    expect(furnitureObstacles(spots).some((c) => Math.hypot(c.x - x, c.z - z) < 1e-9)).toBe(false)
+  })
+
   it.each(SWEEP)(
     'carries the starts the layout found with it, the same as looked for anew, at aspect %f for %i',
     (aspect, n) => {
