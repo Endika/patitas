@@ -21,8 +21,9 @@ describe('fpsOverlay', () => {
   it('sits in the top-left corner, over the HUD', () => {
     const { host } = mount('/?fps')
     const el = host.lastElementChild as HTMLElement
-    expect(el.style.top).not.toBe('')
-    expect(el.style.left).not.toBe('')
+    // Clear of a notch or rounded corner, as the HUD is
+    expect(el.style.top).toBe('max(8px, env(safe-area-inset-top, 0px))')
+    expect(el.style.left).toBe('max(8px, env(safe-area-inset-left, 0px))')
     expect(el.style.bottom).toBe('')
     expect(el.style.right).toBe('')
     // The sheet that opens under «Cachorros», the highest in the HUD, has z-index 2
