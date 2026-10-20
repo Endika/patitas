@@ -1,4 +1,12 @@
-import { useCallback, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from 'react'
 import type { PuppyNeeds } from '../roomStage'
 import { useDismiss, type Closable, type Dismissal } from './useDismiss'
 
@@ -38,6 +46,7 @@ export default function NeedsPanel({
   selected,
   onSelect,
   breedOf,
+  onOpen,
   ref,
 }: {
   needs: PuppyNeeds[]
@@ -45,6 +54,8 @@ export default function NeedsPanel({
   onSelect(id: string): void
   /** The breed's name of the puppy with this id. */
   breedOf(id: string): string
+  /** A card opened: the system back should close it. */
+  onOpen?(): void
   /** Closes the open card, as Escape does. */
   ref?: Ref<Closable>
 }) {
@@ -62,6 +73,9 @@ export default function NeedsPanel({
   )
   const shown = needs.find((n) => n.id === open)
   useDismiss(box, !!shown, close)
+  useEffect(() => {
+    if (shown) onOpen?.()
+  }, [shown, onOpen])
   useImperativeHandle(
     ref,
     () => ({

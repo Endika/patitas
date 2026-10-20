@@ -33,6 +33,7 @@ export default function Hud({
   onTrick,
   care,
   mode,
+  onOpen,
   ref,
 }: {
   status: StageStatus
@@ -44,6 +45,8 @@ export default function Hud({
   care?: ReactNode
   /** Controls that take the place of everything else while they last. */
   mode?: ReactNode
+  /** A tray opened: the system back should close it. */
+  onOpen?(): void
   /** Closes the open tray, as Escape does. */
   ref?: Ref<Closable>
 }) {
@@ -80,6 +83,9 @@ export default function Hud({
   useEffect(() => {
     if (open) footer.current?.querySelector<HTMLElement>('.room-tray button')?.focus()
   }, [open])
+  useEffect(() => {
+    if (open) onOpen?.()
+  }, [open, onOpen])
 
   // The controls a mode brings take focus, and «Cuidar» gets it back when the mode ends
   const inMode = Boolean(mode)

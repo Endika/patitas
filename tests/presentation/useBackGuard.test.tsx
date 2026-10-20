@@ -35,14 +35,14 @@ describe('useBackGuard', () => {
     tab.history.back()
     expect(open).toBe(0)
     expect(tab.entries()).toEqual([null, guard])
-    expect(result.current).toBe(0)
+    expect(result.current.asked).toBe(0)
   })
 
   it('with nothing open, asks and waits on the page’s own entry, then puts the guard back', () => {
     const tab = fakeHistory()
     const { result } = mount(tab)
     tab.history.back()
-    expect(result.current).toBe(1)
+    expect(result.current.asked).toBe(1)
     expect(tab.entries()).toEqual([null])
     expect(tab.left()).toBe(false)
     wait(EXIT_MS - 1)
@@ -70,7 +70,7 @@ describe('useBackGuard', () => {
     wait(EXIT_MS)
     expect(tab.entries()).toEqual([null, guard])
     tab.history.back()
-    expect(result.current).toBe(2)
+    expect(result.current.asked).toBe(2)
     expect(tab.left()).toBe(false)
   })
 
@@ -98,7 +98,7 @@ describe('useBackGuard', () => {
     tab.history.back()
     tab.history.forward()
     expect(asked).toBe(1)
-    expect(result.current).toBe(1)
+    expect(result.current.asked).toBe(1)
     expect(tab.entries()).toEqual([null, guard])
     wait(EXIT_MS)
     expect(tab.length()).toBe(3)
@@ -114,6 +114,42 @@ describe('useBackGuard', () => {
     expect(tab.entries()).toEqual([null])
     tab.history.back()
     expect(asked).toBe(1)
+  })
+
+  it('puts no guard in front until it is ready, then one', () => {
+    const tab = fakeHistory()
+    const { rerender } = renderHook(
+      ({ ready }) => useBackGuard(() => false, { history: tab.history, target: tab.target }, ready),
+      { initialProps: { ready: false } },
+    )
+    expect(tab.entries()).toEqual([null])
+    // A back before then is the page's own: it leaves as it would
+    rerender({ ready: true })
+    expect(tab.entries()).toEqual([null, guard])
+  })
+
+  it('puts the guard straight back when something opens while it waits, so the next back closes it', () => {
+    const tab = fakeHistory()
+    let open = false
+    const { result } = mount(tab, () => {
+      const was = open
+      open = false
+      return was
+    })
+    tab.history.back()
+    expect(tab.entries()).toEqual([null])
+    wait(500)
+    // A tray opens within the wait: the back after it closes the tray, and does not leave
+    open = true
+    act(() => result.current.rearm())
+    expect(tab.entries()).toEqual([null, guard])
+    tab.history.back()
+    expect(open).toBe(false)
+    expect(tab.left()).toBe(false)
+    expect(tab.entries()).toEqual([null, guard])
+    // Opening something with the guard in front changes nothing
+    act(() => result.current.rearm())
+    expect(tab.length()).toBe(3)
   })
 
   it('never piles up entries, however many times back is pressed', () => {
