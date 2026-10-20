@@ -54,6 +54,7 @@ export default function RoomScreen({
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
+  onOpen,
   ref,
 }: {
   puppies: Puppy[]
@@ -71,6 +72,8 @@ export default function RoomScreen({
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   /** A back with nothing open: one more leaves. */
   exitAsked?: boolean
+  /** Something opened that the system back should close: a tray, a card, the list, a bath. */
+  onOpen?(): void
   /** Closes what is open in the room for the system back, as Escape or «Terminar» would. */
   ref?: Ref<Closable>
 }) {
@@ -237,6 +240,9 @@ export default function RoomScreen({
     return Boolean(busy)
   }
   useImperativeHandle(ref, () => ({ close: closeTop }))
+  useEffect(() => {
+    if (castOpen || busy) onOpen?.()
+  }, [castOpen, busy, onOpen])
 
   return (
     <div className="room">
@@ -253,6 +259,7 @@ export default function RoomScreen({
             selected={selected}
             onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
             breedOf={breedOf}
+            onOpen={onOpen}
           />
           {/* With nobody in the room, who to bring in is the only thing to do */}
           <div ref={cast} className="room-cast">
@@ -316,6 +323,7 @@ export default function RoomScreen({
         onTrick={(pose) => stageRef.current?.trick(selected, pose)}
         care={<CareActions selected={selected} idle={!status.needs.length} stage={stage} />}
         mode={busy ? <CareMode needs={status.needs} stage={stage} /> : undefined}
+        onOpen={onOpen}
       />
       {status.notice && <div className="room-loading">{status.notice}</div>}
     </div>

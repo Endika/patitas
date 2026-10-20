@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { openGameStorage, type StorageHooks } from '@/infrastructure/idbStorage'
 import type { GameStorage } from '@/infrastructure/storage'
 import type { RoomStage } from './roomStage'
@@ -60,7 +60,13 @@ export default function App({
     }
     return roomScreen.current?.close() ?? false
   }
-  const exitAsked = useFleeting(useBackGuard(closeTop, history) || null, EXIT_MS) !== null
+  // Armed once the game has loaded: a back on the blank screen before it leaves as it would
+  const guard = useBackGuard(closeTop, history, !!game.state)
+  const exitAsked = useFleeting(guard.asked || null, EXIT_MS) !== null
+  const { rearm } = guard
+  useEffect(() => {
+    if (adopting) rearm()
+  }, [adopting, rearm])
 
   if (!game.state) return <Blank blocked={blocked} />
   const { puppies, room, persistent } = game.state
@@ -97,6 +103,7 @@ export default function App({
           return game.leave(id)
         }}
         onAdoptAnother={() => setAdopting(true)}
+        onOpen={rearm}
         loadCare={game.loadCare}
         saveCare={game.saveCare}
         now={now}

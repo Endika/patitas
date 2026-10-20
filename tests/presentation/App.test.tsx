@@ -59,6 +59,65 @@ describe('App', () => {
     expect(reloads).toBe(1)
   })
 
+  it('arms no guard while the game loads: a back then leaves as the page would', async () => {
+    const tab = fakeHistory()
+    let loaded: (storage: ReturnType<typeof savingStorage>) => void = () => {}
+    render(
+      <App
+        openStorage={() => new Promise((done) => (loaded = done))}
+        createStage={createFakeStage().create}
+        createPreview={createFakePreview().create}
+        history={tab}
+      />,
+    )
+    expect(tab.entries()).toEqual([null])
+    await act(async () => loaded(savingStorage()))
+    await screen.findByRole('heading', { name: 'Adopta un cachorro' })
+    expect(tab.entries()).toEqual([null, { patitas: 'guard' }])
+  })
+
+  it('opening «Adoptar otro» or a tray just after an ask puts the guard back: the next back closes it', async () => {
+    const user = userEvent.setup()
+    const storage = savingStorage()
+    await adoptPuppy(
+      storage,
+      { name: 'Kuma', breedId: 'shiba' },
+      { now: () => 1, random: () => 0.5 },
+    )
+    const tab = fakeHistory()
+    render(
+      <App
+        openStorage={async () => storage}
+        createStage={createFakeStage().create}
+        createPreview={createFakePreview().create}
+        history={tab}
+      />,
+    )
+    const guard = { patitas: 'guard' }
+    expect(
+      await screen.findByRole('heading', { name: 'Kuma' }, { timeout: 3000 }),
+    ).toBeInTheDocument()
+    // Asked, then «Adoptar otro» within the wait: the back returns to the room
+    tab.history.back()
+    expect(screen.getByText(ASK)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cachorros' }))
+    await user.click(screen.getByRole('button', { name: 'Adoptar otro' }))
+    expect(tab.entries()).toEqual([null, guard])
+    tab.history.back()
+    expect(await screen.findByRole('heading', { name: 'Kuma' })).toBeInTheDocument()
+    expect(tab.left()).toBe(false)
+    // Asked, then «Trucos» within the wait: the back closes the tray
+    tab.history.back()
+    expect(tab.entries()).toEqual([null])
+    await user.click(screen.getByRole('button', { name: 'Trucos' }))
+    expect(screen.getByRole('button', { name: 'Trucos' })).toHaveAttribute('aria-expanded', 'true')
+    expect(tab.entries()).toEqual([null, guard])
+    tab.history.back()
+    expect(screen.getByRole('button', { name: 'Trucos' })).toHaveAttribute('aria-expanded', 'false')
+    expect(tab.left()).toBe(false)
+    expect(tab.entries()).toEqual([null, guard])
+  })
+
   it('asks before leaving on the system back when there is only adoption', async () => {
     const tab = fakeHistory()
     render(
