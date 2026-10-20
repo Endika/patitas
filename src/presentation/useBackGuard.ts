@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 /** How long «Pulsa atrás otra vez para salir» waits for a second back that leaves, in ms. */
 export const EXIT_MS = 2000
@@ -44,7 +44,8 @@ export function useBackGuard(
   })
   const armed = useRef<() => void>(() => {})
 
-  useEffect(() => {
+  // Before the screen it guards is painted, so no back comes in between
+  useLayoutEffect(() => {
     if (!ready) return
     let rearm: ReturnType<typeof setTimeout> | undefined
     // A reload keeps the guard entry it stood on, so there is never more than one
