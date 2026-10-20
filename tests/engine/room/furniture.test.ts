@@ -290,6 +290,22 @@ describe('computeSpots', () => {
     60000,
   )
 
+  it.each(SWEEP)(
+    'carries the starts the layout found with it, the same as looked for anew, at aspect %f for %i',
+    (aspect, n) => {
+      const { cam } = view(aspect)
+      const spots = spotsFor(aspect, n)
+      expect(spots.starts).toHaveLength(n)
+      expect(startPlaces(cam, spots, n)).toBe(spots.starts)
+      const anew = startPlaces(cam, { ...spots, starts: undefined }, n)
+      spots.starts!.forEach((p, i) => {
+        expect(p.x).toBeCloseTo(anew[i]!.x, 9)
+        expect(p.z).toBeCloseTo(anew[i]!.z, 9)
+        expect(p.heading ?? 0).toBeCloseTo(anew[i]!.heading ?? 0, 9)
+      })
+    },
+  )
+
   it.each(WIDE)('keeps every bed, bowl and mat off the grass at aspect %f for %i', (aspect, n) => {
     const { cam } = view(aspect)
     const spots = spotsFor(aspect, n)

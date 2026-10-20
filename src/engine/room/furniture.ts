@@ -34,6 +34,8 @@ export interface Spots {
   garden: Spot
   /** No layout met every rule (see `layOut`): never so in the tests' sweep. */
   fallback?: boolean
+  /** Where each puppy starts, as the layout found it with the furniture (see `startPlaces`). */
+  starts?: StartPlace[]
   /**
    * What a puppy walks round on its way to each piece (`pieces` order) and, last, to anywhere
    * else: worked out once per layout.
@@ -67,6 +69,9 @@ export function startPlacesOf(
   spots: Spots | null,
   puppies: 1 | 2,
 ): { places: StartPlace[]; fallback: boolean } {
+  // Laid out with the furniture already, for as many
+  if (spots?.starts?.length === puppies && !spots.fallback)
+    return { places: spots.starts, fallback: false }
   const local = (s: Spot): Oval => ({
     ...playLocal(cam, s.center.x, s.center.z),
     radius: s.radius,
@@ -122,6 +127,10 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     mud: placed(mud),
     garden: placed(pottyPlace(plan, mud, cam)),
     fallback: plan.fallback,
+    starts: plan.starts.map((p) => {
+      const [x, z] = playWorld(cam, p.d, p.side)
+      return 'heading' in p ? { x, z, heading: p.heading as number } : { x, z }
+    }),
   }
   spots.walk = walkLists(spots)
   return spots
@@ -276,8 +285,8 @@ export interface Furniture {
   puppies: 1 | 2
   /** Kept current: `layout` moves and resizes these in place. */
   spots: Spots
-  /** Places every piece for the camera's current framing. */
-  layout(cam: FixedCamera): void
+  /** Places every piece for the camera's current framing, or as `spots` (laid out for it) say. */
+  layout(cam: FixedCamera, spots?: Spots): void
   /** Shows the bowl at `place` this full, 0 to 1. */
   bowlFill(place: number, level: number): void
   scaleReading(kg: number | null): void
