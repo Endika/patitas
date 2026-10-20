@@ -67,10 +67,10 @@ const BOLSTER = { tube: 0.1, squash: 0.78 }
 const BED_BASE = 0.03
 
 /**
- * A round bed built on a circle of `radius` and pressed to `depth` along the view: a fabric base,
- * a thick bolster all round and a cushion sunk in the middle.
+ * A round bed built on a circle of `radius`, a fabric base, a thick bolster all round and a cushion
+ * sunk in the middle; `layout` presses it to its depth along the view.
  */
-function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
+function bed(shade: THREE.Texture, { radius }: Spot): THREE.Group {
   const g = new THREE.Group()
   const { tube, squash } = BOLSTER
   const lathe = (points: number[][], color: string) =>
@@ -113,7 +113,6 @@ function bed(shade: THREE.Texture, { radius, depth }: Spot): THREE.Group {
   )
   cushion.receiveShadow = true
   g.add(base, bolster, cushion, contact(shade, radius, radius, 0.35))
-  g.scale.z = depth / radius
   return g
 }
 
@@ -451,13 +450,13 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
     group,
     puppies,
     spots,
-    layout(next) {
-      const fresh = computeSpots(next, puppies)
+    layout(next, fresh = computeSpots(next, puppies)) {
       fresh.beds.forEach((s, i) => update(spots.beds[i]!, s))
       fresh.bowls.forEach((s, i) => update(spots.bowls[i]!, s))
       for (const k of ['scale', 'mud', 'garden'] as const) update(spots[k], fresh[k])
       spots.walk = fresh.walk
       spots.fallback = fresh.fallback
+      spots.starts = fresh.starts
       // Everything faces the camera, so the bed's long side and the scale's display face the screen
       for (const [o, s] of placed) {
         o.position.copy(s.center)
@@ -502,7 +501,8 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       })
     },
   }
-  furniture.layout(cam)
+  // Laid out once: `spots` is already this layout
+  furniture.layout(cam, spots)
   // Empty until someone fills them
   bowls.forEach((_, i) => furniture.bowlFill(i, 0))
   furniture.scaleReading(null)

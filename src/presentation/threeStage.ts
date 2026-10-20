@@ -240,6 +240,16 @@ export function createThreeStage(
     }
   }
 
+  /** Where the bowls, the mud and the garden stood when last looked. */
+  let placesWere = ''
+  const placesNow = () => {
+    const s = room.furniture?.spots
+    return s
+      ? [...s.bowls, s.mud, s.garden]
+          .map((p) => `${p.center.x.toFixed(4)},${p.center.z.toFixed(4)}`)
+          .join(' ')
+      : ''
+  }
   /** Each puppy's place in the room is its place in `wanted`: its bed and bowl. */
   const order = () => {
     views = wanted.flatMap((p, i) => {
@@ -250,6 +260,7 @@ export function createThreeStage(
     })
     const refurnished = room.furnish(wanted.length > 1 ? 2 : 1)
     if (refurnished) for (const v of views) forgetRoute(v.routine, v.motion)
+    placesWere = placesNow()
     followBeds()
     if (refurnished && room.furniture) rebed(views, room.furniture.spots, ball)
   }
@@ -345,8 +356,12 @@ export function createThreeStage(
     },
     tapsAt: (x, y, w, h) => !!messes.hit(room.camera, x, y, w, h),
   })
-  // The beds move with the frame
+  // The beds move with the frame, and where the bowls, the mud or the garden moved, one on its way
+  // there (or eating) chooses again where that now is
   const offResize = room.onResize(() => {
+    const now = placesNow()
+    if (now !== placesWere) for (const v of views) forgetRoute(v.routine, v.motion)
+    placesWere = now
     followBeds()
     messes.relayout(room.cam)
     for (const v of views) keepInPlay(v.motion, room.cam, mood(v))
@@ -449,7 +464,11 @@ export function createThreeStage(
     placeAccidents(count) {
       if (!room.furniture) return undefined
       const there = [...incoming.values(), ...views.map((v) => v.care)].flatMap((c) => c.messes)
-      return placeAccident(room.cam, computeSpots(room.cam, count > 1 ? 2 : 1), undefined, there)
+      const puppies = count > 1 ? 2 : 1
+      // The room as it stands, when it is laid out for as many
+      const spots =
+        room.furniture.puppies === puppies ? room.furniture.spots : computeSpots(room.cam, puppies)
+      return placeAccident(room.cam, spots, undefined, there)
     },
     resume(cares, away) {
       const spots = room.furniture?.spots

@@ -918,6 +918,29 @@ describe('pushed off its place', () => {
   })
 })
 
+describe('the room laid out anew', () => {
+  it('on its way to its bowl when the screen turns, it eats at the bowl where it now stands', () => {
+    // The room's own spots, moved in place as the furniture's layout moves them on a resize
+    const spots = computeSpots(cam, 1)
+    const moved = SPOTS2.bowls[0]!.center
+    expect(moved.distanceTo(spots.bowls[0]!.center)).toBeGreaterThan(0.2)
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    let n = 0,
+      at0: string | null = null
+    run([p], 20, at(12), spots, () => {
+      if (++n !== 30) return
+      at0 = p.r.routine
+      spots.bowls[0]!.center.copy(moved)
+      // As the stage does once the bowls have moved
+      forgetRoute(p.r, p.m)
+    })
+    const meal = mealSpot(spots.bowls[0]!, MUZZLE)
+    expect(at0).toBe('toBowl')
+    expect(p.fed).toBe(1)
+    expect(Math.hypot(p.m.pos.x - meal.x, p.m.pos.z - meal.z)).toBeLessThan(0.3)
+  })
+})
+
 describe('two hungry puppies from where the review saw them stall', () => {
   /** Open floor 0.2 clear of every piece, two spots half a metre apart, as the review's probe drew them. */
   const starts = (framed: ReturnType<typeof fitCamera>, spots: Spots, random: () => number) => {
