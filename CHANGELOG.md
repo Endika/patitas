@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.6.0](https://github.com/Endika/patitas/compare/v0.5.0...v0.6.0) (2026-10-20)
+
+
+### Features
+
+* **puppy:** roll or dig in the mud after stamping about, side on to the screen, and get muddier doing it ([589bc9a](https://github.com/Endika/patitas/commit/589bc9a8257837483b08721238c1ea7ec83f37a5))
+* **room:** lay a soft rug on the house floor, clear of every piece and mat ([3035e5e](https://github.com/Endika/patitas/commit/3035e5ed68cb508815a018cdce7e931dbf0fffd7))
+* **room:** lay the furniture out in the house, start the puppies in open floor and move the window clear of the beds ([4ab4b0f](https://github.com/Endika/patitas/commit/4ab4b0fa5223dd3543fb5f80391954edd292e0e3))
+* **room:** make the puddle three times bigger at the front of the lawn, keep it in sight and give the garden its own place to pee ([6dcf89d](https://github.com/Endika/patitas/commit/6dcf89d612de40abe90a8a8e57a5d8a917a7b3f0))
+* **room:** replace the fading round floor with a garden and house backdrop ([068e5fa](https://github.com/Endika/patitas/commit/068e5fa0f103b940c0d0423804cbeb92416745c5))
+* **room:** round bolster bed, bowl mat and vet scale with a green readout ([9bafc23](https://github.com/Endika/patitas/commit/9bafc23e8e831ff73520b0dfbc740379147151a7))
+
+
+### Bug Fixes
+
+* **app:** arm the back guard before the screen paints, so no test or back races it ([9e68661](https://github.com/Endika/patitas/commit/9e686618514404168c3b37c6914a08e5782eab55))
+* **app:** arm the back guard once the game loads, and again as soon as something opens after an ask ([6fcf62a](https://github.com/Endika/patitas/commit/6fcf62a6296b0565b882963c241292d0bda1179f))
+* **puppy:** soil about half the back and the flank it rolls onto, and leave the head clean ([00db34f](https://github.com/Endika/patitas/commit/00db34fadbe96396379c6048c14ffc103ca2160c))
+* **room:** back off and walk round a penned puppy instead of squeezing through it, and keep off the scale within one step a frame ([b136f25](https://github.com/Endika/patitas/commit/b136f25aa0bef509a2e6e20c0f1591b4b30b440f))
+* **room:** draw the beds the size each layout plans and keep beds and bowl mats off the grass ([7941c29](https://github.com/Endika/patitas/commit/7941c291f4ee107b1d0fd1cf01bf7ad4d1a84af3))
+* **room:** give each bowl its own mat when the two stand one in front of the other ([fcff8e9](https://github.com/Endika/patitas/commit/fcff8e9241b5693125e3ed44714995e49d9e6423))
+* **room:** keep the scale by the strip, lay narrow screens out as 0.33 and start two puppies clear of the puddle, faster ([c245e50](https://github.com/Endika/patitas/commit/c245e505fedb1af223ba33f1c3868ea18f6e66a5))
+* **room:** keep two puppies' places apart, walk round groups of pieces and let a blocked puppy give way ([8b52ab3](https://github.com/Endika/patitas/commit/8b52ab38fd979bfce528ce87d9b999877d6df803))
+* **room:** light grass blades from both sides, soften the near lawn and raise the house wall ([fe1cf7f](https://github.com/Endika/patitas/commit/fe1cf7f8855aee8c5b4d11a2f1432e3fd574fe5d))
+* **room:** make way clear of furniture and paths, hold still while waiting and walk back when pushed off ([4b30402](https://github.com/Endika/patitas/commit/4b304029c1d028d1bb52f5add64bbd115f23ddb2))
+* **room:** move a bowl mat by the strip clear of the grass instead of narrowing it ([960749d](https://github.com/Endika/patitas/commit/960749db874aa6ca21346b3c84e132fe9236d657))
+
+
+### Performance Improvements
+
+* **puppy:** write the dig strokes in place each frame ([a5a94b7](https://github.com/Endika/patitas/commit/a5a94b73a67d4f7cf788d4ae1e7f47a4b56bc178))
+* **room:** lay the room out at most once a frame while the window resizes ([3312656](https://github.com/Endika/patitas/commit/331265649b2a254a7b6d7a9b861bfe2d25ca3053))
+* **room:** lay the room out once per change, carry its starts, and send puppies to where their places moved on a resize ([86a0ff4](https://github.com/Endika/patitas/commit/86a0ff4da0206f916f3db60bbba2d0b0ad07fdf7))
+
 ## [0.5.0](https://github.com/Endika/patitas/compare/v0.4.1...v0.5.0) (2026-10-19)
 
 
