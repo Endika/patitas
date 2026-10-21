@@ -126,9 +126,8 @@ describe('accidents while away', () => {
   it('gives up rather than piling onto the furniture when there is no room', () => {
     const { cam } = view(1)
     const spots = computeSpots(cam, 1)
-    const place = placeAccident(cam, spots, () => 0.3)
-    // Every draw lands on the same spot of open floor (the middle is the bowls' now): once taken,
-    // there is nowhere else to go
+    const place = placeAccident(cam, spots, () => 0.2)
+    // Every draw lands on the same spot of open floor: once taken, there is nowhere else to go
     const first = place('pee', [])
     expect(first).not.toBeNull()
     expect(place('pee', [{ kind: 'pee', ...first!, createdAt: 0 }])).toBeNull()

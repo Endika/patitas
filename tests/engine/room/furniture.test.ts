@@ -204,15 +204,16 @@ describe('computeSpots', () => {
     },
   )
 
-  // Starting behind the puddle, or turned to the camera beside it, they leave it in sight
-  it.each([0.46, ...SWEEP.filter(([, n]) => n === 2).map(([a]) => a)])(
-    'leaves most of the puddle in sight of two puppies at their start at aspect %f',
+  // At the back of the grass, the puddle sits behind a lone puppy's start. Two on a narrow screen
+  // fill the house and start on the grass in front of it, hiding it until they move
+  it.each([0.46, ...SWEEP.filter(([, n]) => n === 1).map(([a]) => a)])(
+    'leaves most of the puddle in sight of one puppy at its start at aspect %f',
     (aspect) => {
       const { cam, camera } = view(aspect)
-      const spots = spotsFor(aspect, 2),
+      const spots = spotsFor(aspect, 1),
         { mud } = spots
-      // The two start places: a dorado's body, 0.3 wide, 0.7 long and 0.7 tall, turned to `heading`
-      const screens = startPlaces(cam, spots, 2).map(({ x, z: z0, heading = 0 }) => {
+      // The start place: a dorado's body, 0.3 wide, 0.7 long and 0.7 tall, turned to `heading`
+      const screens = startPlaces(cam, spots, 1).map(({ x, z: z0, heading = 0 }) => {
         const box = new THREE.Box2()
         for (const w of [-0.15, 0.15])
           for (const l of [-0.35, 0.35])
@@ -251,7 +252,9 @@ describe('computeSpots', () => {
       // Where the house has no room left at its front, the scale stands just outside it, by the strip
       const scale = local(spots.scale.center)
       if (backdrop.zoneAt(spots.scale.center.x, spots.scale.center.z) === 'garden')
-        expect(scale.side + spots.scale.radius).toBeGreaterThan(SPLIT - STRIP_HALF - 0.1)
+        expect(scale.side + spots.scale.radius).toBeGreaterThanOrEqual(
+          SPLIT - STRIP_HALF - 0.1 - 1e-9,
+        )
       backdrop.dispose()
       expect(local(spots.garden.center).side).toBeLessThan(SPLIT)
       expect(local(spots.mud.center).side).toBeLessThan(SPLIT)

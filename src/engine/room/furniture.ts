@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
-import { PLAY, playLocal, playWorld, type FixedCamera } from './camera'
+import { playLocal, playWorld, type FixedCamera } from './camera'
 import {
   findStarts,
   layOut,
@@ -105,15 +105,9 @@ export function startPlacesOf(
 export { BEDS, BOWL, BOWL_STEP, SCALE, SLOT_APART } from './layout'
 
 /**
- * The puddle's middle along the view: at the front of the play area, where the puppies starting
- * behind it leave it in sight and the floor in front of them shows the rest of it.
- */
-const MUD_D = PLAY.near + 0.15
-
-/**
  * Places each piece for `cam` (see `layOut`): the beds against the house wall, the bowls on their
  * mat in front of them, the scale at the front, every place a puppy stands still at SLOT_APART from
- * the other's. The puddle lies at the front of the grass, and the garden's place to squat behind it.
+ * the other's. The puddle lies at the back of the grass, and the garden's place to squat in front of it.
  */
 export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
   const facing = cam.az
@@ -121,7 +115,7 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     const [x, z] = playWorld(cam, o.d, o.side)
     return { center: new THREE.Vector3(x, 0, z), radius: o.radius, depth: o.depth, facing }
   }
-  const mud = mudPlace(cam, MUD_D)
+  const mud = mudPlace(cam)
   const plan = layOut(cam, puppies, mud),
     rugAt = rugPlace(plan, cam)
   const spots: Spots = {
