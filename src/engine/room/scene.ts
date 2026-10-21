@@ -23,6 +23,23 @@ export function pickQuality(dogs: 1 | 2, coarse: boolean): Quality {
     : { shells: 12, dpr: 1.5, shadowMap: 1024 }
 }
 
+/**
+ * `?dpr=`, `?shells=` and `?shadows=0` in the URL override the budget, to find out on a real
+ * device which part of it the GPU can't keep up with. A `shadowMap` of 0 turns shadows off.
+ */
+export function tuneQuality(q: Quality, search: string): Quality {
+  const params = new URLSearchParams(search)
+  const positive = (key: string) => {
+    const v = Number(params.get(key))
+    return params.has(key) && v > 0 ? v : null
+  }
+  return {
+    shells: Math.round(positive('shells') ?? q.shells),
+    dpr: positive('dpr') ?? q.dpr,
+    shadowMap: params.get('shadows') === '0' ? 0 : q.shadowMap,
+  }
+}
+
 /** Anything the room shows: a puppy view or a prop. */
 export interface SceneView {
   group: THREE.Object3D
@@ -251,7 +268,8 @@ export function createRoomScene(
   frame: (cam: FixedCamera, aspect: number) => void = fitCamera,
   { furniture: withFurniture = true }: { furniture?: boolean } = {},
 ): RoomScene {
-  let quality = pickQuality(1, coarse)
+  const budget = (dogs: 1 | 2) => tuneQuality(pickQuality(dogs, coarse), location.search)
+  let quality = budget(1)
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
@@ -261,7 +279,7 @@ export function createRoomScene(
   renderer.setPixelRatio(Math.min(devicePixelRatio, quality.dpr))
   renderer.setClearColor(0x000000, 0)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.shadowMap.enabled = true
+  renderer.shadowMap.enabled = quality.shadowMap > 0
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
   const scene = new THREE.Scene()
@@ -376,7 +394,7 @@ export function createRoomScene(
   const requality = () => {
     let dogs = 0
     for (const v of views) if (v.setQuality) dogs++
-    const q = pickQuality(dogs > 1 ? 2 : 1, coarse)
+    const q = budget(dogs > 1 ? 2 : 1)
     if (q.shells === quality.shells && q.dpr === quality.dpr && q.shadowMap === quality.shadowMap)
       return
     quality = room.quality = q
