@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/Endika/patitas/compare/v0.8.0...v0.9.0) (2026-10-21)
+
+
+### Features
+
+* override render budget from the URL to diagnose slow devices ([05efabe](https://github.com/Endika/patitas/commit/05efabeaabcab40406a7ec9258ba60e100977618))
+
 ## [0.8.0](https://github.com/Endika/patitas/compare/v0.7.0...v0.8.0) (2026-10-21)
 
 
