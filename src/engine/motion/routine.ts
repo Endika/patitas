@@ -1225,7 +1225,9 @@ function makeWay(
   spots: Spots | undefined,
   clamp: RoutineCtx['clamp'],
 ): boolean {
-  const pieces = spots ? [...spots.beds, ...spots.bowls, spots.scale] : []
+  const pieces = spots
+    ? [...spots.beds, ...spots.bowls, ...(spots.scaleAway ? [] : [spots.scale])]
+    : []
   const { via, target: to } = way
   const offPath = (x: number, z: number) =>
     Math.min(

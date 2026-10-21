@@ -64,6 +64,10 @@ import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
 import { separate } from '@/engine/room/crowd'
 import {
   computeSpots,
+  createScaleDisplay,
+  READING_HOLD,
+  SCALE_POP,
+  showScale,
   inMud,
   inOval,
   startPlaces,
@@ -1002,6 +1006,30 @@ describe('the scale', () => {
     expect(drift).toBeLessThan(0.08)
     expect(offScale(p)).toBeGreaterThan(SPOTS.scale.radius + 0.2)
     expect(weighing(p.r)).toBe(false)
+  })
+
+  it('comes out before the puppy gets there, and is put away once its reading is gone', () => {
+    const p = pup(-0.3, -0.1)
+    const d = createScaleDisplay()
+    const frame = () =>
+      showScale(d, null, p.r.routine === 'onScale' ? 4.2 : null, weighing(p.r), DT)
+    run([p], 2, at(12), SPOTS, frame)
+    expect(d.out).toBe(0)
+    goWeigh(p.r, p.m)
+    let outOnArrival = -1,
+      off = -1,
+      t = 0
+    run([p], 20, at(12), SPOTS, () => {
+      frame()
+      t += DT
+      if (p.r.routine === 'onScale' && outOnArrival < 0) outOnArrival = d.out
+      if (outOnArrival >= 0 && p.r.routine !== 'onScale' && off < 0) off = t
+      if (off >= 0 && d.out === 0 && t - off < READING_HOLD) throw new Error('away too soon')
+    })
+    expect(outOnArrival).toBe(1)
+    expect(off).toBeGreaterThan(0)
+    expect(t - off).toBeGreaterThan(READING_HOLD + SCALE_POP)
+    expect(d.out).toBe(0)
   })
 
   it('stands side on, facing the room, so the display stays in view', () => {

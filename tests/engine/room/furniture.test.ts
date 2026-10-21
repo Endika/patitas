@@ -17,6 +17,7 @@ import {
   createScaleDisplay,
   formatKg,
   READING_HOLD,
+  SCALE_POP,
   showScale,
   showBowls,
   furnitureObstacles,
@@ -593,6 +594,20 @@ describe('walkRound', () => {
     expect(walkingRound(spots, spots.bowls[0]!)).toBe(spots.walk![2])
     expect(walkingRound(spots, spots.mud)).toBe(spots.walk![5])
   })
+
+  it('leaves the scale out while it is put away, and walks round it once it is out', () => {
+    const spots = { ...computeSpots(view(1).cam, 2) }
+    const { x, z } = spots.scale.center
+    const hasScale = (groups: readonly (readonly { x: number; z: number }[])[]) =>
+      groups.some((g) => g.some((c) => c.x === x && c.z === z))
+    for (const to of [spots.beds[0]!, spots.bowls[1]!, spots.mud]) {
+      expect(hasScale(walkingRound(spots, to))).toBe(true)
+      expect(hasScale(walkingRound({ ...spots, scaleAway: true }, to))).toBe(false)
+      // Without the lists worked out, the same
+      const bare = { ...spots, scaleAway: true, walk: undefined, walkBare: undefined }
+      expect(hasScale(walkingRound(bare, to))).toBe(false)
+    }
+  })
 })
 
 describe('furnitureObstacles', () => {
@@ -625,20 +640,26 @@ describe('formatKg', () => {
 describe('showScale', () => {
   const DT = 1 / 60
   const fake = () => {
-    const drawn: string[] = []
-    return { drawn, scaleReading: (kg: number | null) => void drawn.push(formatKg(kg)) }
+    const drawn: string[] = [],
+      out: number[] = []
+    return {
+      drawn,
+      out,
+      scaleReading: (kg: number | null) => void drawn.push(formatKg(kg)),
+      scaleOut: (t: number) => void out.push(t),
+    }
   }
 
   it('reads the weight while a puppy stands on it, holds it a while, then goes blank', () => {
     const d = createScaleDisplay(),
       f = fake()
-    showScale(d, f, null, DT)
+    showScale(d, f, null, false, DT)
     expect(f.drawn).toEqual([])
-    for (let t = 0; t < 3; t += DT) showScale(d, f, 4.26, DT)
+    for (let t = 0; t < 3; t += DT) showScale(d, f, 4.26, true, DT)
     expect(f.drawn).toEqual(['4,26 kg'])
-    for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, DT)
+    for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, false, DT)
     expect(f.drawn).toEqual(['4,26 kg'])
-    for (let t = 0; t < 0.2; t += DT) showScale(d, f, null, DT)
+    for (let t = 0; t < 0.2; t += DT) showScale(d, f, null, false, DT)
     expect(f.drawn).toEqual(['4,26 kg', ''])
   })
 
@@ -646,12 +667,44 @@ describe('showScale', () => {
     const d = createScaleDisplay(),
       f = fake(),
       g = fake()
-    showScale(d, f, 4.311, DT)
-    showScale(d, f, 4.314, DT)
-    showScale(d, f, 4.36, DT)
+    showScale(d, f, 4.311, true, DT)
+    showScale(d, f, 4.314, true, DT)
+    showScale(d, f, 4.36, true, DT)
     expect(f.drawn).toEqual(['4,31 kg', '4,36 kg'])
-    showScale(d, g, 4.36, DT)
+    showScale(d, g, 4.36, true, DT)
     expect(g.drawn).toEqual(['4,36 kg'])
+  })
+
+  it('stays put away until a puppy sets off to be weighed, then comes out in SCALE_POP', () => {
+    const d = createScaleDisplay(),
+      f = fake()
+    for (let t = 0; t < 5; t += DT) showScale(d, f, null, false, DT)
+    expect(f.out.every((t) => t === 0)).toBe(true)
+    showScale(d, f, null, true, SCALE_POP / 2)
+    expect(f.out.at(-1)).toBeCloseTo(0.5, 9)
+    showScale(d, f, null, true, SCALE_POP / 2)
+    expect(f.out.at(-1)).toBe(1)
+  })
+
+  it('stays out while it reads after the puppy steps off, then goes away in SCALE_POP', () => {
+    const d = createScaleDisplay(),
+      f = fake()
+    for (let t = 0; t < 2; t += DT) showScale(d, f, 4.26, true, DT)
+    for (let t = 0; t < READING_HOLD - 0.1; t += DT) showScale(d, f, null, false, DT)
+    expect(f.out.at(-1)).toBe(1)
+    for (let t = 0; t < 0.1 + SCALE_POP / 2; t += DT) showScale(d, f, null, false, DT)
+    expect(f.out.at(-1)).toBeGreaterThan(0)
+    expect(f.out.at(-1)).toBeLessThan(1)
+    for (let t = 0; t < SCALE_POP; t += DT) showScale(d, f, null, false, DT)
+    expect(f.out.at(-1)).toBe(0)
+  })
+
+  it('goes away again when the weighing is called off before the puppy gets there', () => {
+    const d = createScaleDisplay(),
+      f = fake()
+    for (let t = 0; t < 1; t += DT) showScale(d, f, null, true, DT)
+    for (let t = 0; t < SCALE_POP + DT; t += DT) showScale(d, f, null, false, DT)
+    expect(f.out.at(-1)).toBe(0)
   })
 })
 
