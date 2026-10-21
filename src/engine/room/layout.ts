@@ -190,8 +190,7 @@ export function layOut(screen: FixedCamera, puppies: 1 | 2, mud: Oval): Layout {
   const { camD } = playAxes(cam)
   const half = (d: number) => playHalf(cam, d)
   const frame = (d: number) => (camD + d) * cam.tanH
-  let first: Layout | null = null,
-    crowded: Layout | null = null
+  let first: Layout | null = null
   // What holds for the bowls whatever the beds, and the puddle each start hides, worked out once
   const rows = [...bowlRows(puppies, half)].filter((bowls) => bowlsFit(bowls, half))
   const hides = startHider(cam, mud)
@@ -202,16 +201,12 @@ export function layOut(screen: FixedCamera, puppies: 1 | 2, mud: Oval): Layout {
         if (!bowlsClear(bowls, beds) || bowls.some((b) => !clearOf(b, mud, GAP))) continue
         const scale = scalePlace(beds, bowls, mud, half)
         if (!scale) continue
-        const starts = startsOf({ beds, bowls, scale }, mud, cam, puppies, hides)
-        // Starts that hide a good part of the puddle: another layout may leave it in sight
-        if (starts && starts.hides <= START_HIDES)
-          return { beds, bowls, scale, starts: starts.places, fallback: false }
-        if (starts) crowded ??= { beds, bowls, scale, starts: starts.places, fallback: false }
+        const starts = findStarts({ beds, bowls, scale }, mud, cam, puppies, hides)
+        if (starts) return { beds, bowls, scale, starts, fallback: false }
         first ??= { beds, bowls, scale, starts: wantedStarts(puppies), fallback: true }
       }
     }
   return (
-    crowded ??
     first ?? {
       beds: [...bedRows(bedSizes(puppies)[0]!, puppies, half, frame)][0]!,
       bowls: rows[0] ?? [...bowlRows(puppies, half)][0]!,
@@ -480,20 +475,6 @@ export function findStarts(
   puppies: 1 | 2,
   hides: StartHider = startHider(layoutCamera(screen), mud),
 ): StartPlace[] | null {
-  return startsOf(l, mud, screen, puppies, hides)?.places ?? null
-}
-
-/** The share of the puddle the starts may hide between them before another layout is tried. */
-const START_HIDES = 0.05
-
-/** `findStarts`, and the share of the puddle the starts hide between them. */
-function startsOf(
-  l: Pick<Layout, 'beds' | 'bowls' | 'scale'>,
-  mud: Oval,
-  screen: FixedCamera,
-  puppies: 1 | 2,
-  hides: StartHider,
-): { places: StartPlace[]; hides: number } | null {
   const cam = layoutCamera(screen)
   const half = (d: number) => playHalf(cam, d)
   const want = START_WANT[puppies - 1]!
@@ -532,17 +513,16 @@ function startsOf(
       })
       .sort((a, b) => a.c - b.c)
   const first = ranked(0)
-  if (puppies === 1)
-    return first[0] ? { places: [start(first[0].p)], hides: first[0].p.hides } : null
+  if (puppies === 1) return first[0] ? [start(first[0].p)] : null
   const second = ranked(1)
-  let best: { places: StartPlace[]; hides: number } | null = null,
+  let best: StartPlace[] | null = null,
     least = Infinity
   for (const a of first) {
     if (!second[0] || a.c + second[0].c >= least) break
     for (const b of second) {
       if (a.c + b.c >= least) break
       if (b.p.side <= a.p.side || dist(a.p, b.p) < SLOT_APART) continue
-      best = { places: [start(a.p), start(b.p)], hides: a.p.hides + b.p.hides }
+      best = [start(a.p), start(b.p)]
       least = a.c + b.c
       break
     }
@@ -620,21 +600,31 @@ function puddleHider(cam: FixedCamera, mud: Oval) {
 }
 
 /** From the puddle's rim to the doorway strip, and from its middle to the play area's edge. */
-const MUD_BY_STRIP = 0.05,
+const MUD_BY_STRIP = 0.06,
   MUD_IN = 0.06
+/** How far past the play area's back its far rim reaches, short of the bushes along the fence. */
+const MUD_PAST = 0.15
 
 /**
- * The puddle on the grass at depth `d`: its size grows with the frame, from 0.43 square metres
- * on a tall phone; where the grass is narrow it stretches along the view instead of widening.
- * Its middle stays in the play area, where a puppy can stand in it, and it keeps off the strip.
+ * The puddle at the back of the grass, by the fence, so a puppy only gets muddy if it goes there:
+ * its size grows with the frame, from 0.43 square metres on a tall phone; where the grass is narrow
+ * it stretches along the view instead of widening. Its middle stays in the play area, where a puppy
+ * can stand in it, and it keeps off the strip.
  */
-export function mudPlace(cam: FixedCamera, d: number): Oval {
+export function mudPlace(cam: FixedCamera): Oval {
   const scale = Math.min(0.8, Math.max(0.45, 0.35 * playHalf(cam, 0.8)))
   const want = { radius: 0.69 * scale, depth: 0.99 * scale }
   const area = want.radius * want.depth
-  const half = playHalf(cam, d),
-    right = GRASS - MUD_BY_STRIP
-  const radius = Math.min(want.radius, right + half - MUD_IN)
+  const right = GRASS - MUD_BY_STRIP
+  // The width it gets depends on its depth and the other way round: settle it in a few rounds
+  let d: number = PLAY.far,
+    radius = want.radius,
+    half = 0
+  for (let i = 0; i < 3; i++) {
+    d = Math.min(PLAY.far - MUD_IN, PLAY.far + MUD_PAST - area / radius)
+    half = playHalf(cam, d)
+    radius = Math.min(want.radius, right + half - MUD_IN)
+  }
   return {
     d,
     side: Math.min((GRASS - half) / 2, right - radius),
