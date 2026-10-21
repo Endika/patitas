@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/Endika/patitas/compare/v0.7.0...v0.8.0) (2026-10-21)
+
+
+### Features
+
+* **room:** bring the scale out only while a puppy is weighed ([bfa55e5](https://github.com/Endika/patitas/commit/bfa55e592a893f0e833207b7c4b5487b84bba4c4))
+
 ## [0.7.0](https://github.com/Endika/patitas/compare/v0.6.0...v0.7.0) (2026-10-21)
 
 
