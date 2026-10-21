@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Endika/patitas/compare/v0.6.0...v0.7.0) (2026-10-21)
+
+
+### Features
+
+* **room:** move the mud puddle to the back of the garden, by the fence ([0848bc8](https://github.com/Endika/patitas/commit/0848bc81d8d5627e3ddb6bb031e79ecb4aa7e780))
+
 ## [0.6.0](https://github.com/Endika/patitas/compare/v0.5.0...v0.6.0) (2026-10-20)
 
 
