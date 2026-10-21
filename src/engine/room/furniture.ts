@@ -44,6 +44,10 @@ export interface Spots {
    * else: worked out once per layout.
    */
   walk?: Circle[][][]
+  /** `walk` with the scale put away. */
+  walkBare?: Circle[][][]
+  /** The scale is put away until a puppy is weighed: nobody walks round its place. */
+  scaleAway?: boolean
 }
 
 export interface Circle {
@@ -132,6 +136,7 @@ export function computeSpots(cam: FixedCamera, puppies: 1 | 2): Spots {
     }),
   }
   spots.walk = walkLists(spots)
+  spots.walkBare = walkLists(spots, [pieces(spots).indexOf(spots.scale)])
   return spots
 }
 
@@ -202,23 +207,29 @@ export function walkRound(circles: readonly Circle[]): Circle[][] {
   return [...out.values()]
 }
 
-/** Every piece's walk groups, and last the ones for walking anywhere else. */
-function walkLists(spots: Spots): Circle[][][] {
-  const all = furnitureObstacles(spots)
-  return [...all.map((_, k) => walkRound(all.filter((_, i) => i !== k))), walkRound(all)]
+/**
+ * Every piece's walk groups, and last the ones for walking anywhere else, leaving out the pieces
+ * at the indices in `out` (as `pieces` orders them) besides the one walked to.
+ */
+function walkLists(spots: Spots, out: number[] = []): Circle[][][] {
+  const all = furnitureObstacles(spots),
+    kept = (k: number) => all.filter((_, i) => i !== k && !out.includes(i))
+  return [...all.map((_, k) => walkRound(kept(k))), walkRound(kept(-1))]
 }
 
-/** What a puppy walks round on its way to `to`: every piece but `to`, in groups. */
+/** What a puppy walks round on its way to `to`: every piece but `to`, leaving out the scale too while it is put away, in groups. */
 export function walkingRound(spots: Spots, to: Spot): readonly (readonly Circle[])[] {
-  const { beds, bowls } = spots,
+  const { beds, bowls, scale } = spots,
     n = beds.length + bowls.length
   const bed = beds.indexOf(to),
     bowl = bowls.indexOf(to)
-  const k = bed >= 0 ? bed : bowl >= 0 ? beds.length + bowl : to === spots.scale ? n : n + 1
-  const listed = spots.walk?.[k]
+  const k = bed >= 0 ? bed : bowl >= 0 ? beds.length + bowl : to === scale ? n : n + 1
+  const listed = (spots.scaleAway ? spots.walkBare : spots.walk)?.[k]
   if (listed) return listed
   return walkRound(
-    furnitureObstacles(spots).filter((c) => c.x !== to.center.x || c.z !== to.center.z),
+    furnitureObstacles(spots).filter(
+      (c, i) => (c.x !== to.center.x || c.z !== to.center.z) && !(spots.scaleAway && i === n),
+    ),
   )
 }
 
@@ -231,10 +242,15 @@ export function formatKg(kg: number | null): string {
 /** Seconds the scale keeps showing a weight once the puppy has stepped off. */
 export const READING_HOLD = 4
 
-/** What the scale shows, and what it last drew and on which furniture. */
+/** Seconds the scale takes to come out, and to go away again. */
+export const SCALE_POP = 0.25
+
+/** What the scale shows, how far out it is, and what it last drew and on which furniture. */
 export interface ScaleDisplay {
   kg: number | null
   hold: number
+  /** 0 put away to 1 out. */
+  out: number
   hundredths: number
   on: object | null
 }
@@ -242,19 +258,22 @@ export interface ScaleDisplay {
 export const createScaleDisplay = (): ScaleDisplay => ({
   kg: null,
   hold: 0,
+  out: 0,
   hundredths: 0,
   on: null,
 })
 
 /**
- * One frame of the scale's readout: `kg` of the puppy on it, or null with nobody there, when it
- * keeps the last weight READING_HOLD seconds before going blank. It draws only when what
- * it shows changes, so the display's texture is not uploaded every frame.
+ * One frame of the scale: `kg` of the puppy on it, or null with nobody there, when it keeps the
+ * last weight READING_HOLD seconds before going blank. It comes out while a puppy is `weighing`
+ * and stays while it reads, then goes away, SCALE_POP seconds either way. The readout draws only
+ * when what it shows changes, so the display's texture is not uploaded every frame.
  */
 export function showScale(
   d: ScaleDisplay,
-  furniture: Pick<Furniture, 'scaleReading'> | null,
+  furniture: Pick<Furniture, 'scaleReading' | 'scaleOut'> | null,
   kg: number | null,
+  weighing: boolean,
   dt: number,
 ): void {
   if (kg != null) {
@@ -264,7 +283,10 @@ export function showScale(
     d.hold -= dt
     if (d.hold <= 0) d.kg = null
   }
+  const step = dt / SCALE_POP
+  d.out = weighing || d.kg != null ? Math.min(1, d.out + step) : Math.max(0, d.out - step)
   if (!furniture) return
+  furniture.scaleOut(d.out)
   const hundredths = Math.round(Math.max(0, d.kg ?? 0) * 100)
   if (d.on === furniture && hundredths === d.hundredths) return
   // Fresh furniture is already blank
@@ -289,6 +311,8 @@ export interface Furniture {
   /** Shows the bowl at `place` this full, 0 to 1. */
   bowlFill(place: number, level: number): void
   scaleReading(kg: number | null): void
+  /** Shows the scale `t` of the way out, 0 put away to 1 out. */
+  scaleOut(t: number): void
   inMud(x: number, z: number): number
   dispose(): void
 }

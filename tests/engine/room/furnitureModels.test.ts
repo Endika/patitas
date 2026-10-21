@@ -2,7 +2,7 @@
 import * as THREE from 'three'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createCamera, fitCamera } from '@/engine/room/camera'
-import { addFurniture } from '@/engine/room/furnitureModels'
+import { addFurniture, popOut } from '@/engine/room/furnitureModels'
 import type { Spot } from '@/engine/room/furniture'
 
 /** jsdom draws on no canvas: a 2D context that takes every call and draws nothing. */
@@ -96,5 +96,32 @@ describe('the rug', () => {
     ;(rug.material as THREE.Material).addEventListener('dispose', () => gone++)
     furniture.dispose()
     expect(gone).toBe(2)
+  })
+})
+
+describe('the scale', () => {
+  /** The scale's group: the one holding its display. */
+  const scaleOf = (group: THREE.Object3D) =>
+    group.children.find((g) => g.getObjectByName('scale-display'))!
+
+  it('starts put away, and shows as far out as it is told', () => {
+    const scene = new THREE.Scene()
+    const furniture = addFurniture(scene, fitCamera(createCamera(), 0.46), 1)
+    const scale = scaleOf(furniture.group)
+    expect(scale.visible).toBe(false)
+    furniture.scaleOut(1)
+    expect(scale.visible).toBe(true)
+    expect(scale.scale.toArray()).toEqual([1, 1, 1])
+    furniture.scaleOut(0)
+    expect(scale.visible).toBe(false)
+    furniture.dispose()
+  })
+
+  it('grows from nothing to its size with a small overshoot on the way', () => {
+    const sizes = Array.from({ length: 101 }, (_, i) => popOut(i / 100))
+    expect(sizes[0]).toBeCloseTo(0, 12)
+    expect(sizes[100]).toBe(1)
+    expect(Math.max(...sizes)).toBeGreaterThan(1.05)
+    expect(Math.max(...sizes)).toBeLessThan(1.15)
   })
 })

@@ -384,7 +384,13 @@ export function createThreeStage(
     brushes.sync(views, dt, room.camera)
     syncRing(ring, views, chosen)
     const onScale = views.find((w) => w.routine.routine === 'onScale')
-    showScale(scaleDisplay, room.furniture, onScale ? onScale.care.weightKg : null, dt)
+    showScale(
+      scaleDisplay,
+      room.furniture,
+      onScale ? onScale.care.weightKg : null,
+      views.some((w) => weighing(w.routine)),
+      dt,
+    )
     messes.begin()
     for (const v of views) for (const m of v.care.messes) messes.show(m, room.cam)
     messes.end()

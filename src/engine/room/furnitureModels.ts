@@ -293,6 +293,12 @@ function scale(shade: THREE.Texture): { group: THREE.Group; readout: ScaleReadou
   return { group: g, readout }
 }
 
+/** How big the scale is `t` of the way out: it overshoots a little, as if set down with a bounce. */
+export function popOut(t: number): number {
+  const u = clamp(t, 0, 1) - 1
+  return 1 + u * u * (2.7 * u + 1.7)
+}
+
 export interface ScaleReadout {
   map: THREE.CanvasTexture
   /** Shows `kg`, or nothing; the texture is drawn and uploaded again only when the text changes. */
@@ -483,6 +489,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       fresh.bowls.forEach((s, i) => update(spots.bowls[i]!, s))
       for (const k of ['scale', 'mud', 'garden'] as const) update(spots[k], fresh[k])
       spots.walk = fresh.walk
+      spots.walkBare = fresh.walkBare
       spots.fallback = fresh.fallback
       spots.starts = fresh.starts
       spots.rug = fresh.rug
@@ -522,6 +529,11 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       if (parts) parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
     },
     scaleReading: (kg) => scaleParts.readout.show(kg),
+    scaleOut(t) {
+      scaleParts.group.visible = t > 0
+      spots.scaleAway = t === 0
+      scaleParts.group.scale.setScalar(popOut(t))
+    },
     inMud: (x, z) => inMud(spots, x, z),
     dispose() {
       scene.remove(group)
@@ -541,5 +553,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   // Empty until someone fills them
   bowls.forEach((_, i) => furniture.bowlFill(i, 0))
   furniture.scaleReading(null)
+  // Put away until a puppy is weighed
+  furniture.scaleOut(0)
   return furniture
 }
