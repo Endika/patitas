@@ -6,7 +6,7 @@ import { createLegStates, createMotionState, stepLocomotion } from '@/engine/mot
 import { stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
-import { keepInPlay, pickQuality, shadowBox } from '@/engine/room/scene'
+import { keepInPlay, pickQuality, shadowBox, tuneQuality } from '@/engine/room/scene'
 
 describe('keepInPlay', () => {
   it('walks a puppy left outside a narrower play area back in without jumping', () => {
@@ -43,6 +43,26 @@ describe('pickQuality', () => {
     expect(pickQuality(2, true)).toEqual({ shells: 12, dpr: 1.5, shadowMap: 1024 })
     expect(pickQuality(1, false)).toEqual({ shells: 24, dpr: 2, shadowMap: 2048 })
     expect(pickQuality(2, false)).toEqual({ shells: 24, dpr: 2, shadowMap: 2048 })
+  })
+})
+
+describe('tuneQuality', () => {
+  const q = { shells: 16, dpr: 1.6, shadowMap: 2048 }
+
+  it('keeps the budget without overrides', () => {
+    expect(tuneQuality(q, '?fps')).toEqual(q)
+  })
+
+  it('takes resolution, fur and shadows from the URL', () => {
+    expect(tuneQuality(q, '?fps&dpr=1&shells=6&shadows=0')).toEqual({
+      shells: 6,
+      dpr: 1,
+      shadowMap: 0,
+    })
+  })
+
+  it('ignores values that are not positive numbers', () => {
+    expect(tuneQuality(q, '?dpr=abc&shells=0&shadows=1')).toEqual(q)
   })
 })
 
