@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/Endika/patitas/compare/v0.9.0...v0.9.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **puppy:** reject unknown breeds in the geometry worker ([c5d0837](https://github.com/Endika/patitas/commit/c5d083751a518d1a860e3cd26360f9909e706567))
+
 ## [0.9.0](https://github.com/Endika/patitas/compare/v0.8.0...v0.9.0) (2026-10-21)
 
 
