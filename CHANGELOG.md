@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/Endika/patitas/compare/v0.17.0...v0.18.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** treats teach a trick, and a learnt trick comes at once ([8b9310c](https://github.com/Endika/patitas/commit/8b9310c6384f7c54079f69fa3390d635eb76df9b))
+
 ## [0.17.0](https://github.com/Endika/patitas/compare/v0.16.0...v0.17.0) (2026-10-23)
 
 
