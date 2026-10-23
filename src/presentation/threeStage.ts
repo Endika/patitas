@@ -37,12 +37,15 @@ import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import {
   bedSlots,
   followBed,
+  forgetMovedRoute,
   forgetRoute,
   goToMud,
   relieveNow,
+  routePlaces,
   touch,
   tuckIn,
   weighing,
+  type RoutePlaces,
 } from '@/engine/motion/routine'
 import {
   computeSpots,
@@ -240,15 +243,11 @@ export function createThreeStage(
     }
   }
 
-  /** Where the bowls, the mud and the garden stood when last looked. */
-  let placesWere = ''
+  /** Where the bowls, the scale, the mud and the garden stood when last looked. */
+  let placesWere: RoutePlaces | null = null
   const placesNow = () => {
     const s = room.furniture?.spots
-    return s
-      ? [...s.bowls, s.mud, s.garden]
-          .map((p) => `${p.center.x.toFixed(4)},${p.center.z.toFixed(4)}`)
-          .join(' ')
-      : ''
+    return s ? routePlaces(s) : null
   }
   /** Each puppy's place in the room is its place in `wanted`: its bed and bowl. */
   const order = () => {
@@ -356,11 +355,11 @@ export function createThreeStage(
     },
     tapsAt: (x, y, w, h) => !!messes.hit(room.camera, x, y, w, h),
   })
-  // The beds move with the frame, and where the bowls, the mud or the garden moved, one on its way
-  // there (or eating) chooses again where that now is
+  // The beds move with the frame, and one whose own bowl, mud, garden or scale moved (on its way
+  // there, eating or weighed) chooses again where that now is
   const offResize = room.onResize(() => {
     const now = placesNow()
-    if (now !== placesWere) for (const v of views) forgetRoute(v.routine, v.motion)
+    for (const v of views) forgetMovedRoute(v.routine, v.motion, placesWere, now, v.place)
     placesWere = now
     followBeds()
     messes.relayout(room.cam)

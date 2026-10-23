@@ -413,10 +413,68 @@ export function followBed(r: RoutineState, body: readonly Vec3[], dx: number, dz
   }
 }
 
+/** How far its own piece may move in a resize before one on its way there chooses again. */
+export const ROUTE_MOVED = 0.05
+
+/**
+ * The piece its routine is about: its bowl, the mud, the garden or the scale. Null otherwise: its
+ * bed is carried by `followBed`, and the rest are about no piece.
+ */
+export function routeSpot(r: RoutineState, spots: RoutePlaces, place: number): Spot | null {
+  switch (r.routine) {
+    case 'toBowl':
+    case 'eating':
+    case 'begging':
+      return spots.bowls[place] ?? null
+    case 'onScale':
+      return spots.scale
+    case 'toMud':
+      return spots.mud
+    case 'toGarden':
+      return spots.garden
+    case 'relieving':
+      return r.inGarden ? spots.garden : null
+    default:
+      return null
+  }
+}
+
+/** The pieces as `routeSpot` reads them. */
+export type RoutePlaces = Pick<Spots, 'bowls' | 'scale' | 'mud' | 'garden'>
+
+/** The pieces where they stand now, kept apart from `spots`, which a resize moves in place. */
+export function routePlaces(spots: Spots): RoutePlaces {
+  const copy = (p: Spot): Spot => ({ ...p, center: p.center.clone() })
+  return {
+    bowls: spots.bowls.map(copy),
+    scale: copy(spots.scale),
+    mud: copy(spots.mud),
+    garden: copy(spots.garden),
+  }
+}
+
+/**
+ * The room was laid out again on a resize: `forgetRoute` for one whose own piece moved more than
+ * ROUTE_MOVED, or came or went, and the rest carry on.
+ */
+export function forgetMovedRoute(
+  r: RoutineState,
+  m: MotionState,
+  was: RoutePlaces | null,
+  now: RoutePlaces | null,
+  place: number,
+): void {
+  const from = was && routeSpot(r, was, place),
+    to = now && routeSpot(r, now, place)
+  if (!from && !to) return
+  if (!from || !to || from.center.distanceTo(to.center) > ROUTE_MOVED) forgetRoute(r, m)
+}
+
 /**
  * The beds and bowls were laid out again for a puppy coming or going: one on its way to a piece
  * stops, to choose again where its own now stands. A sleeper sleeps on, for `followBed` to carry,
- * and one on its way to the scale keeps going: it heads wherever the scale is now.
+ * one on its way to the scale keeps going: it heads wherever the scale is now, and one in the mud
+ * finishes there and trots back to where it came from.
  */
 export function forgetRoute(r: RoutineState, m: MotionState): void {
   if (
@@ -425,7 +483,8 @@ export function forgetRoute(r: RoutineState, m: MotionState): void {
     r.routine === 'stretch' ||
     r.routine === 'bathing' ||
     r.routine === 'brushing' ||
-    r.routine === 'toScale'
+    r.routine === 'toScale' ||
+    r.routine === 'splashing'
   )
     return
   m.goal = null
