@@ -7,7 +7,6 @@
   --glass: rgba(249, 252, 251, 0.8);
   --line: rgba(34, 48, 46, 0.13);
   --coral: #e0674f;
-  --coral-soft: #f2c3b5;
   --health-good: #4f9a6b;
   --health-ok: #7d8a86;
   --health-warn: #b5731a;
@@ -199,23 +198,28 @@
 .room-need-head small[data-health='Necesita cuidados']::before {
   background: var(--health-warn);
 }
-.room-pup-mood {
-  flex: none;
-  width: 24px;
-  height: 5px;
-  border-radius: 99px;
-  background: var(--line);
-  overflow: hidden;
+.room-pup-state {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
-.room-pup-mood i,
 .room-bar i {
   display: block;
   height: 100%;
   width: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--coral-soft), var(--coral));
+  background: var(--health-ok);
   transform-origin: left center;
-  transition: transform 0.25s ease-out;
+  transition:
+    transform 0.25s ease-out,
+    background-color 0.25s ease-out;
+}
+.room-need-bar[data-level='good'] .room-bar i {
+  background: var(--health-good);
+}
+.room-need-bar[data-level='low'] .room-bar i {
+  background: var(--health-warn);
 }
 .room-pup-weight {
   font-size: 0.78rem;
@@ -493,9 +497,6 @@
     gap: 6px;
     padding: 0 10px;
   }
-  .room-pup-mood {
-    width: 20px;
-  }
   .room .room-cast-toggle,
   .room-tray button,
   .room-actions button,
@@ -573,11 +574,26 @@
   .room-pups {
     flex-direction: column;
   }
+  /* The rail is too narrow for name and health side by side: the name takes a line of its own */
   .room .room-pup {
+    flex-wrap: wrap;
     justify-content: flex-start;
+    row-gap: 0;
+    padding: 6px 12px;
+    border-radius: 16px;
   }
   .room-pup-name {
+    flex: 1 0 100%;
+    text-align: left;
+  }
+  .room-pup-state {
     flex: 1;
+    min-width: 0;
+    white-space: normal;
+    text-align: left;
+  }
+  .room-pup-weight {
+    flex: 1 0 100%;
     text-align: left;
   }
   .room-need {
@@ -677,7 +693,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .room button,
-  .room-pup-mood i,
   .room-bar i {
     transition: none;
   }
