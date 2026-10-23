@@ -5,6 +5,10 @@ export interface Persona {
   energy: number
   cuddly: number
   curious: number
+  /** How much it likes its bath. */
+  bath: number
+  /** How much it seeks the other puppy's company. */
+  social: number
 }
 
 export interface BreedShape {
@@ -45,7 +49,7 @@ export const BREEDS: Record<BreedId, Breed> = {
   dorado: {
     id: 'dorado',
     label: 'Dorado',
-    defaultPersona: { energy: 0.45, cuddly: 0.9, curious: 0.4 },
+    defaultPersona: { energy: 0.45, cuddly: 0.9, curious: 0.4, bath: 0.8, social: 0.9 },
     shape: {
       leg: 1,
       body: 1.06,
@@ -69,7 +73,7 @@ export const BREEDS: Record<BreedId, Breed> = {
   shiba: {
     id: 'shiba',
     label: 'Shiba',
-    defaultPersona: { energy: 0.55, cuddly: 0.3, curious: 0.9 },
+    defaultPersona: { energy: 0.55, cuddly: 0.3, curious: 0.9, bath: 0.15, social: 0.35 },
     shape: {
       leg: 1.02,
       body: 1,
@@ -93,7 +97,7 @@ export const BREEDS: Record<BreedId, Breed> = {
   beagle: {
     id: 'beagle',
     label: 'Beagle',
-    defaultPersona: { energy: 1, cuddly: 0.6, curious: 0.6 },
+    defaultPersona: { energy: 1, cuddly: 0.6, curious: 0.6, bath: 0.5, social: 0.85 },
     shape: {
       leg: 0.92,
       body: 1.02,

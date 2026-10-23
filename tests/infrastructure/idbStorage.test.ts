@@ -35,6 +35,28 @@ describe('idbStorage', () => {
     expect(await reopened.listPuppies()).toEqual([early, late])
   })
 
+  it('gives a puppy saved before it had them a liking for the bath and for company, and keeps it', async () => {
+    const { bath: _bath, social: _social, ...persona } = puppyAt('Luna', 1).persona
+    const older = { ...puppyAt('Luna', 1), persona }
+    const db = await openDB('patitas', 2, {
+      upgrade(upgrading) {
+        upgrading.createObjectStore('puppies', { keyPath: 'id' })
+        upgrading.createObjectStore('meta')
+        upgrading.createObjectStore('care')
+      },
+    })
+    await db.put('puppies', older)
+    db.close()
+
+    const [loaded] = await (await openGameStorage()).listPuppies()
+    // Near the dorado's own: fond of the bath and of company
+    expect(Math.abs(loaded!.persona.bath - 0.8)).toBeLessThanOrEqual(0.15)
+    expect(Math.abs(loaded!.persona.social - 0.9)).toBeLessThanOrEqual(0.15)
+    const raw = await openDB('patitas', 2)
+    expect((await raw.get('puppies', older.id)).persona).toEqual(loaded!.persona)
+    raw.close()
+  })
+
   it('removes a puppy', async () => {
     const storage = await openGameStorage()
     const puppy = puppyAt('Luna', 1)

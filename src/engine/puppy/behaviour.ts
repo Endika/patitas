@@ -45,9 +45,20 @@ export const DIG = {
   pull: [0.3, 0.05, -0.2],
   hz: 3,
 } as const
-/** From this cuddliness a puppy likes its bath: it wags while rubbed, getting happier. */
-const BATH_FONDNESS = 0.5,
-  BATH_JOY = 0.08
+/**
+ * The more it likes its bath above half, the happier rubbing it makes it, up to BATH_JOY a second.
+ * Below BATH_DISLIKE it puts its ears back and looks away, and below BATH_HATE it wriggles too
+ * when the rubbing starts and trembles more wet. Its mood never drops for being bathed.
+ */
+const BATH_JOY = 0.08,
+  BATH_DISLIKE = 0.4,
+  BATH_HATE = 0.25
+/** The wriggle of one who hates its bath: seconds, roll and beat. */
+const WRIGGLE = 0.8,
+  WRIGGLE_ROLL = 0.07,
+  WRIGGLE_HZ = 4
+/** How much more one who hates its bath trembles wet. */
+const HATE_TREMBLE = 1.8
 /**
  * Every puppy enjoys the brush, a cuddly one more: happiness a second at no cuddliness and on top
  * at full, and how far its head leans into the brush at full.
@@ -155,9 +166,10 @@ export interface BehaviourState {
   twitchSide: number
   saccT: number
   sacc: { x: number; y: number }
-  /** Rubbed in the bath last frame; seconds left looking away; ears back, 0 to 1. */
+  /** Rubbed in the bath last frame; seconds left looking away and wriggling; ears back, 0 to 1. */
   bathRubbed: boolean
   lookAwayT: number
+  wriggleT: number
   earsBack: number
   /** The body's roll from shaking itself dry. */
   shakeRoll: number
@@ -208,6 +220,7 @@ export function createBehaviourState(): BehaviourState {
     sacc: { x: 0, y: 0 },
     bathRubbed: false,
     lookAwayT: 0,
+    wriggleT: 0,
     earsBack: 0,
     shakeRoll: 0,
     dig: 0,
@@ -340,13 +353,16 @@ export function stepBehaviour(
     begging = input.routine === 'begging',
     splashing = input.routine === 'splashing'
   const bath = input.bath && input.bath.phase !== 'off' ? input.bath : null
-  const likesBath = P.cuddly >= BATH_FONDNESS
+  const dislikesBath = P.bath < BATH_DISLIKE,
+    hatesBath = P.bath < BATH_HATE
   const rubbed = !!bath?.touched,
     brushed = !!input.brush?.touched
-  if (rubbed && !s.bathRubbed && !likesBath) s.lookAwayT = LOOK_AWAY
+  if (rubbed && !s.bathRubbed && dislikesBath) s.lookAwayT = LOOK_AWAY
+  if (rubbed && !s.bathRubbed && hatesBath) s.wriggleT = WRIGGLE
   s.bathRubbed = rubbed
   s.lookAwayT = Math.max(0, s.lookAwayT - dt)
-  s.earsBack = damp(s.earsBack, bath && !likesBath ? 1 : 0, 6, dt)
+  s.wriggleT = Math.max(0, s.wriggleT - dt)
+  s.earsBack = damp(s.earsBack, bath && dislikesBath ? 1 : 0, 6, dt)
 
   if ((zone === 'belly' || zone === 'back') && M.pose === 'lie' && s.happy > 0.4)
     setPose(M, 'belly')
@@ -444,7 +460,7 @@ export function stepBehaviour(
 
   // Happiness, breathing and panting
   s.happy = Math.max(0.12, s.happy - dt * (petting || task !== 'free' ? 0 : 0.012))
-  if (rubbed && likesBath) s.happy = Math.min(1, s.happy + dt * BATH_JOY)
+  if (rubbed) s.happy = Math.min(1, s.happy + dt * BATH_JOY * Math.max(0, (P.bath - 0.5) * 2))
   if (brushed) s.happy = Math.min(1, s.happy + dt * (BRUSH_JOY + BRUSH_FONDNESS * P.cuddly))
   s.pant = damp(s.pant, !asleep && (s.happy > 0.62 || body.k > 0.5) ? 1 : 0, 2, dt)
   s.breath += dt * (1.6 + s.pant * 6.5 + (SLEEP.breath - 1.6 - s.pant * 6.5) * sw)
@@ -498,14 +514,19 @@ export function stepBehaviour(
   const tremble =
     shakeT >= 0
       ? 0
-      : TREMBLE * sm(DAMP, 0.6, input.wet ?? 0) * aw * Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
+      : TREMBLE *
+        (hatesBath ? HATE_TREMBLE : 1) *
+        sm(DAMP, 0.6, input.wet ?? 0) *
+        aw *
+        Math.sin(t * 2 * Math.PI * TREMBLE_HZ)
+  const wriggle = WRIGGLE_ROLL * (s.wriggleT / WRIGGLE) * Math.sin(t * 2 * Math.PI * WRIGGLE_HZ)
   // On its side from the start of the roll, then wriggling towards its back and down again
   const rolled =
     M.rollW * (ROLL.side + ROLL.wriggle * (0.5 - 0.5 * Math.cos(M.poseT * 2 * Math.PI * ROLL.hz)))
   const spine: Rot = [
     body.pitch * (1 - fk),
     s.yaw.x * 0.08 * (1 - fk),
-    body.roll * (1 - fk) + bw * 2.7 + rolled + shakeRoll + tremble,
+    body.roll * (1 - fk) + bw * 2.7 + rolled + shakeRoll + tremble + wriggle,
   ]
   s.dig = damp(s.dig, M.pose === 'dig' ? 1 : 0, 8, dt)
   for (let i = 0; i < 2; i++) {

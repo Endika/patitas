@@ -74,7 +74,7 @@ describe('stepBehaviour', () => {
 
   it('wags faster with more energy', () => {
     const wagAfter = (energy: number) => {
-      const { rig, s, input } = world({ energy, cuddly: 0.5, curious: 0.5 })
+      const { rig, s, input } = world({ energy, cuddly: 0.5, curious: 0.5, bath: 0.5, social: 0.5 })
       for (let f = 1; f <= 60; f++) {
         input.now = f * DT
         stepBehaviour(rig, s, input, DT, input.now)
@@ -238,8 +238,12 @@ describe('stepBehaviour', () => {
 
 describe('bath', () => {
   /** Rolls of the spine each frame for `secs`, with `set` changing the input first. */
-  const rolls = (secs: number, set: (input: BehaviourInput, t: number) => void) => {
-    const { rig, s, input } = world()
+  const rolls = (
+    secs: number,
+    set: (input: BehaviourInput, t: number) => void,
+    persona?: Persona,
+  ) => {
+    const { rig, s, input } = world(persona)
     const out: number[] = []
     for (let f = 1; f * DT <= secs; f++) {
       input.now = f * DT
@@ -287,23 +291,35 @@ describe('bath', () => {
     expect(most(rolls(1, (input) => (input.wet = 0.28)))).toBe(0)
   })
 
+  it('wet, one who hates the bath trembles more', () => {
+    const wet = (input: BehaviourInput) => (input.wet = 1)
+    const calm = most(rolls(1, wet, { ...BREEDS.dorado.defaultPersona, bath: 0.5 })),
+      hates = most(rolls(1, wet, { ...BREEDS.dorado.defaultPersona, bath: 0.1 }))
+    expect(hates).toBeGreaterThan(calm * 1.5)
+  })
+
   /** Rubbed in the bath for `secs` with `persona`: its mood, ears and gaze. */
   const bathed = (persona: Persona, secs: number, touched = true) => {
     const { rig, s, input } = world(persona)
     input.routine = 'bathing'
     const happy = s.happy
     let pose = stepBehaviour(rig, s, input, DT, 0)
-    const yaws: number[] = []
+    const yaws: number[] = [],
+      rolls: number[] = []
     for (let f = 1; f * DT <= secs; f++) {
       input.now = f * DT
       input.bath = { phase: 'scrub', t: input.now, touched }
       pose = stepBehaviour(rig, s, input, DT, input.now)
       yaws.push(s.yaw.x)
+      rolls.push(pose.spine[2])
     }
-    return { gain: s.happy - happy, pose, yaws }
+    return { gain: s.happy - happy, pose, yaws, rolls }
   }
-  const LIKES = { energy: 0.5, cuddly: 0.9, curious: 0.5 },
-    DISLIKES = { energy: 0.5, cuddly: 0.2, curious: 0.5 }
+  const withBath = (bath: number) => ({ energy: 0.5, cuddly: 0.5, curious: 0.5, bath, social: 0.5 })
+  const LIKES = withBath(0.9),
+    DISLIKES = withBath(0.3),
+    NEUTRAL = withBath(0.5),
+    HATES = withBath(0.1)
 
   it('a puppy who likes the bath wags; one who does not puts its ears back and looks away', () => {
     const likes = bathed(LIKES, 3),
@@ -317,6 +333,33 @@ describe('bath', () => {
     const away = (r: ReturnType<typeof bathed>) => Math.max(...r.yaws.slice(0, 50).map(Math.abs))
     expect(away(dislikes)).toBeGreaterThan(away(likes) + 0.3)
     expect(Math.abs(dislikes.yaws.at(-1)! - likes.yaws.at(-1)!)).toBeLessThan(0.05)
+  })
+
+  it('the fonder of the bath, the gladder rubbing it makes it', () => {
+    const gains = [0.6, 0.8, 1].map((bath) => bathed(withBath(bath), 3).gain)
+    expect(gains[1]!).toBeGreaterThan(gains[0]! + 0.02)
+    expect(gains[2]!).toBeGreaterThan(gains[1]! + 0.02)
+  })
+
+  it('one half fond of the bath is neither glad nor put out by it', () => {
+    const neutral = bathed(NEUTRAL, 3),
+      untouched = bathed(NEUTRAL, 3, false)
+    expect(Math.abs(neutral.gain - untouched.gain)).toBeLessThan(1e-9)
+    for (const ear of neutral.pose.ears) expect(ear.base[0]).toBeGreaterThan(-0.1)
+  })
+
+  it('one who hates the bath wriggles when the rubbing starts, and never minds it more for it', () => {
+    const hates = bathed(HATES, 3),
+      dislikes = bathed(DISLIKES, 3),
+      untouched = bathed(HATES, 3, false)
+    expect(hates.gain).toBeCloseTo(untouched.gain, 9)
+    const swing = (r: ReturnType<typeof bathed>, from: number, to: number) => {
+      const part = r.rolls.slice(from, to)
+      return Math.max(...part) - Math.min(...part)
+    }
+    expect(swing(hates, 0, 40)).toBeGreaterThan(swing(dislikes, 0, 40) + 0.05)
+    // Settled again once the wriggle is over
+    expect(swing(hates, 120, 180)).toBeLessThan(0.01)
   })
 })
 
@@ -333,8 +376,8 @@ describe('brushing', () => {
     }
     return { gain: s.happy - happy, lean: s.lean }
   }
-  const FOND = { energy: 0.5, cuddly: 0.9, curious: 0.5 },
-    SHY = { energy: 0.5, cuddly: 0.1, curious: 0.5 }
+  const FOND = { energy: 0.5, cuddly: 0.9, curious: 0.5, bath: 0.5, social: 0.5 },
+    SHY = { energy: 0.5, cuddly: 0.1, curious: 0.5, bath: 0.5, social: 0.5 }
 
   it('every puppy enjoys it, a cuddly one more, and leans into the brush', () => {
     const fond = brushed(FOND, 3),

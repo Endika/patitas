@@ -252,6 +252,13 @@
   font-weight: 600;
   color: var(--ink-soft);
 }
+.room-need-traits {
+  grid-column: 1 / -1;
+  margin: -2px 0 2px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
 .room-need-head small {
   font-size: 0.75rem;
   font-weight: 700;

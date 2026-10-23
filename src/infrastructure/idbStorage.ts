@@ -1,6 +1,6 @@
 import { openDB, type DBSchema } from 'idb'
 import { withCareDefaults, type Care } from '../domain/care'
-import type { Puppy } from '../domain/puppy'
+import { withPersonaDefaults, type Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
 import { createMemoryStorage } from './memoryStorage'
 import type { GameStorage } from './storage'
@@ -41,8 +41,23 @@ export async function openGameStorage(hooks: StorageHooks = NO_HOOKS): Promise<G
     })
     return {
       persistent: true,
-      listPuppies: async () =>
-        (await db.getAll('puppies')).sort((a, b) => a.adoptedAt - b.adoptedAt),
+      listPuppies: async () => {
+        const byAdoption = (puppies: Puppy[]) => puppies.sort((a, b) => a.adoptedAt - b.adoptedAt)
+        // Saved as completed in the read's own transaction, so a puppy removed meanwhile stays
+        // gone; should saving fail, the same traits come out of its id next time
+        try {
+          const tx = db.transaction('puppies', 'readwrite')
+          const stored = await tx.store.getAll()
+          const puppies = stored.map(withPersonaDefaults)
+          await Promise.all([
+            ...puppies.filter((p, i) => p !== stored[i]).map((p) => tx.store.put(p)),
+            tx.done,
+          ])
+          return byAdoption(puppies)
+        } catch {
+          return byAdoption((await db.getAll('puppies')).map(withPersonaDefaults))
+        }
+      },
       savePuppy: async (puppy) => {
         await db.put('puppies', puppy)
       },

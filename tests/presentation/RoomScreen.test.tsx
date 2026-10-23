@@ -273,6 +273,21 @@ describe('RoomScreen', () => {
     expect(screen.getByText('5,24 kg · En su peso')).toBeInTheDocument()
   })
 
+  it('shows no traits on the card of a puppy with none marked', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna'])
+    const [luna] = await storage.listPuppies()
+    const middling = { energy: 0.5, cuddly: 0.5, curious: 0.5, bath: 0.5, social: 0.5 }
+    await storage.savePuppy({ ...luna!, persona: middling })
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ needs: [needs(luna!.id, 'Luna', { health: 'Bien' })] }))
+    await user.click(screen.getByRole('button', { name: 'Luna, Bien' }))
+    const card = screen.getByRole('region', { name: 'Luna' })
+    expect(card).toHaveTextContent('Beagle')
+    expect(card.querySelector('.room-need-traits')).toBeNull()
+  })
+
   it('shows each puppy its own needs and health on a card its chip opens', async () => {
     const user = userEvent.setup()
     const storage = await adopted(['Luna', 'Kira'])
@@ -313,6 +328,8 @@ describe('RoomScreen', () => {
     expect(luna).toHaveAttribute('aria-expanded', 'true')
     expect(luna).toHaveAttribute('aria-controls', card.id)
     expect(card).toHaveTextContent('Beagle')
+    // Its most marked traits: a beagle drawn at the middle is all energy and company
+    expect(card).toHaveTextContent('Juguetón · Sociable')
     expect(card).toHaveTextContent('Muy bien')
     expect(luna).toHaveTextContent('Luna, Muy bien')
     expect(bars.map(value)).toEqual(['90', '80', '100', '80'])

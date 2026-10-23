@@ -41,14 +41,15 @@ function Meter({ label, value }: { label: string; value: number }) {
 
 /**
  * A chip for each puppy in the room with its name, its health and what the scale read; a tap
- * opens its card with its breed and every need. With two, the chip tapped also picks the puppy the
- * care actions look after, marked as the current one.
+ * opens its card with its breed, its traits and every need. With two, the chip tapped also picks
+ * the puppy the care actions look after, marked as the current one.
  */
 export default function NeedsPanel({
   needs,
   selected,
   onSelect,
   breedOf,
+  traitsOf,
   onOpen,
   ref,
 }: {
@@ -57,6 +58,8 @@ export default function NeedsPanel({
   onSelect(id: string): void
   /** The breed's name of the puppy with this id. */
   breedOf(id: string): string
+  /** Its most marked traits in words, as `traits` gives them. */
+  traitsOf(id: string): string[]
   /** A card opened: the system back should close it. */
   onOpen?(): void
   /** Closes the open card, as Escape does. */
@@ -75,6 +78,7 @@ export default function NeedsPanel({
     [open],
   )
   const shown = needs.find((n) => n.id === open)
+  const shownTraits = shown ? traitsOf(shown.id) : []
   useDismiss(box, !!shown, close)
   useEffect(() => {
     if (shown) onOpen?.()
@@ -130,6 +134,7 @@ export default function NeedsPanel({
             </span>
             <small data-health={shown.health}>{shown.health}</small>
           </p>
+          {shownTraits.length > 0 && <p className="room-need-traits">{shownTraits.join(' · ')}</p>}
           {BARS.map(([label, value]) => (
             <Meter key={label} label={label} value={value(shown)} />
           ))}
