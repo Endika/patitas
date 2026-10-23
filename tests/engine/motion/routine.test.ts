@@ -1399,6 +1399,68 @@ describe('following the other', () => {
   })
 })
 
+describe('napping near the other', () => {
+  const LIVELY = { cuddly: 0.2, energy: 0.8 }
+  const WIDE = fitCamera(createCamera(), 2.1)
+  const WIDE_SPOTS = computeSpots(WIDE, 2),
+    WIDE_STARTS = startPlaces(WIDE, WIDE_SPOTS, 2)
+  const wide = { ...LIVELY, clamp: (x: number, z: number) => clampPlay(WIDE, x, z) }
+  /** The first asleep on the floor, the second half a metre off it and due a nap too. */
+  const nextTo = (spots: Spots, starts: typeof STARTS2, more: Partial<RoutineCtx>) => {
+    const [l, r] = starts
+    const d = Math.hypot(r!.x - l!.x, r!.z - l!.z)
+    const one = pup(l!.x, l!.z),
+      two = pup(l!.x + ((r!.x - l!.x) / d) * 0.5, l!.z + ((r!.z - l!.z) / d) * 0.5)
+    one.r.alone = 200
+    run([one, two], 12, at(12), spots, undefined, undefined, more)
+    expect([one.r.routine, one.r.nap]).toEqual(['sleeping', 'floor'])
+    two.r.alone = 200
+    return [one, two] as const
+  }
+
+  it('with room, it walks off a body length from the other lying there before its own nap', () => {
+    const [one, two] = nextTo(WIDE_SPOTS, WIDE_STARTS, wide)
+    let closest = Infinity
+    run(
+      [one, two],
+      20,
+      at(12),
+      WIDE_SPOTS,
+      () => {
+        closest = Math.min(
+          closest,
+          Math.hypot(one.m.pos.x - two.m.pos.x, one.m.pos.z - two.m.pos.z),
+        )
+      },
+      undefined,
+      wide,
+    )
+    expect(two.seen.indexOf('makingRoom')).toBeGreaterThanOrEqual(0)
+    expect(two.seen.indexOf('settling')).toBeGreaterThan(two.seen.indexOf('makingRoom'))
+    expect([two.r.routine, two.r.nap]).toEqual(['sleeping', 'floor'])
+    expect(Math.hypot(one.m.pos.x - two.m.pos.x, one.m.pos.z - two.m.pos.z)).toBeGreaterThan(0.65)
+    expect(closest).toBeGreaterThan(0.33)
+  })
+
+  it('in a narrow room it never lies down on the other: off it, or it stays up', () => {
+    const [one, two] = nextTo(SPOTS2, STARTS2, LIVELY)
+    run(
+      [one, two],
+      20,
+      at(12),
+      SPOTS2,
+      () => {
+        if (two.r.routine === 'settling' || two.r.routine === 'sleeping')
+          expect(Math.hypot(one.m.pos.x - two.m.pos.x, one.m.pos.z - two.m.pos.z)).toBeGreaterThan(
+            0.65,
+          )
+      },
+      undefined,
+      LIVELY,
+    )
+  })
+})
+
 describe('left alone by day', () => {
   /** Run untouched at noon, one second at a time, until `done` or `secs` are up. */
   const alone = (p: Pup, secs: number, more: Partial<RoutineCtx>, done?: () => boolean) => {

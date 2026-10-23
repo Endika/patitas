@@ -13,6 +13,7 @@ import type { Puppy } from '@/domain/puppy'
 import { clamp, damp, MAX_DT, type Vec3 } from '@/engine/math'
 import {
   createFetchState,
+  pursueBall,
   stepFetch,
   type FetchEvents,
   type FetchState,
@@ -918,6 +919,15 @@ export function tickPuppies(
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
+  if (views.length === 2)
+    pursueBall(
+      views.map((v) => v.fetch),
+      views.map((v) => v.motion),
+      views.map((v) => v.persona.energy),
+      ball,
+      room.cam,
+      ctx.random ?? Math.random,
+    )
   if (room.furniture) showBowls(room.furniture, views)
   const motions = crowd
   motions.length = 0
@@ -1187,6 +1197,7 @@ export function throwBall(
 ): void {
   ball.vel.copy(vel)
   ball.state = 'air'
+  ball.stolen = false
   for (const v of views) {
     if (away(v)) continue
     v.fetch.task = 'chase'

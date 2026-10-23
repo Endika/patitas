@@ -6,7 +6,7 @@ import type { GaitId } from './gaits'
 import { goTo, type MotionState } from './locomotion'
 import { setPose } from './poses'
 
-export type FetchTask = 'free' | 'wait' | 'chase' | 'grab' | 'return' | 'present'
+export type FetchTask = 'free' | 'wait' | 'chase' | 'grab' | 'return' | 'present' | 'pursue'
 
 export interface FetchState {
   task: FetchTask
@@ -204,4 +204,81 @@ export function stepFetch(
   }
   if (f.holding) ctx.mouthWorld(p)
   return ev
+}
+
+/**
+ * With two, one that lost the ball and is playful (energy from STEAL_KEEN) goes after the one
+ * bringing it back, up beside its head; there, once a throw, it takes it as likely as STEAL_CHANCE
+ * times its energy and brings it back itself, the other left watching. It tries for STEAL_TIME.
+ */
+const STEAL_KEEN = 0.6,
+  STEAL_CHANCE = 0.6,
+  STEAL_TIME = 4,
+  STEAL_SIDE = 0.45,
+  STEAL_REACH = 0.12
+
+const stealOpts = {
+  happy: 1,
+  energy: 1,
+  gait: 'hop' as GaitId,
+  clamp: (x: number, z: number): [number, number] => [x, z],
+}
+
+export function pursueBall(
+  fs: FetchState[],
+  ms: MotionState[],
+  energies: number[],
+  ball: BallState,
+  cam: FixedCamera,
+  random: () => number,
+): void {
+  const holder = fs.findIndex((f) => f.holding && f.task === 'return')
+  const other = 1 - holder
+  const f = fs[other],
+    h = fs[holder]
+  if (holder < 0 || !f || !h || ball.state !== 'mouth' || ball.stolen) {
+    for (const g of fs) if (g.task === 'pursue') g.task = 'free'
+    return
+  }
+  if (f.task === 'free' && f.watch && energies[other]! >= STEAL_KEEN) {
+    f.task = 'pursue'
+    f.taskT = 0
+  }
+  if (f.task !== 'pursue') return
+  const m = ms[other]!,
+    hm = ms[holder]!
+  if (f.taskT > STEAL_TIME || h.wading) {
+    f.task = 'free'
+    f.watch = true
+    return
+  }
+  // Up beside its head, on whichever side it is already
+  const sx = Math.cos(hm.heading),
+    sz = -Math.sin(hm.heading),
+    side = (m.pos.x - hm.pos.x) * sx + (m.pos.z - hm.pos.z) * sz >= 0 ? 1 : -1
+  const x = hm.pos.x + sx * side * STEAL_SIDE,
+    z = hm.pos.z + sz * side * STEAL_SIDE
+  stealOpts.clamp = (cx, cz) => clampPlay(cam, cx, cz)
+  if (Math.hypot(x - m.pos.x, z - m.pos.z) > STEAL_REACH) {
+    goTo(m, x, z, stealOpts)
+    return
+  }
+  ball.stolen = true
+  if (random() >= STEAL_CHANCE * energies[other]!) {
+    f.task = 'free'
+    f.watch = true
+    return
+  }
+  // Snatched: it brings the ball back, and the other is left to watch it go
+  h.holding = false
+  h.task = 'free'
+  h.taskT = 0
+  h.watch = true
+  hm.goal = null
+  f.holding = true
+  f.task = 'return'
+  f.taskT = 0
+  const toCam = playAxes(cam)
+  f.drop.set(cam.target.x - toCam.fx * 0.45, 0, cam.target.z - toCam.fz * 0.45)
+  goTo(m, f.drop.x, f.drop.z, stealOpts)
 }
