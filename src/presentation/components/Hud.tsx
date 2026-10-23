@@ -10,14 +10,9 @@ import {
   type Ref,
 } from 'react'
 import type { StageStatus, TrickPose } from '../roomStage'
+import { TRICKS } from '../tricks'
 import { useFleeting } from '../useFleeting'
 import { useDismiss, type Closable, type Dismissal } from './useDismiss'
-
-const TRICKS: [TrickPose, string][] = [
-  ['sit', 'Sentado'],
-  ['lie', 'Tumbado'],
-  ['belly', 'Panza arriba'],
-]
 
 /** How long a hint stays up, in milliseconds; a new one shows again. */
 export const HINT_MS = 6000
@@ -31,6 +26,7 @@ export default function Hud({
   idle,
   onBall,
   onTrick,
+  treats,
   care,
   mode,
   onOpen,
@@ -41,6 +37,8 @@ export default function Hud({
   idle: boolean
   onBall(inHand: boolean): void
   onTrick(pose: TrickPose): void
+  /** What else the «Trucos» tray holds after the tricks: the treat, when there are any. */
+  treats?: ReactNode
   /** The care actions «Cuidar» opens; without them there is no «Cuidar». */
   care?: ReactNode
   /** Controls that take the place of everything else while they last. */
@@ -153,6 +151,7 @@ export default function Hud({
               {label}
             </button>
           ))}
+          {treats}
         </nav>
       )}
     </footer>

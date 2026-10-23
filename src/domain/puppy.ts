@@ -3,13 +3,28 @@ import { BREEDS, type BreedId, type Persona } from './breeds'
 export const MAX_NAME_GRAPHEMES = 20
 const PERSONA_VARIATION = 0.15
 
+export type Trick = 'sit' | 'lie' | 'belly'
+
 export interface Puppy {
   id: string
   name: string
   breedId: BreedId
   persona: Persona
   adoptedAt: number
+  /** How well it knows each trick, 0 to 1; one missing it has yet to learn. */
+  tricks?: Partial<Record<Trick, number>>
 }
+
+/** What a treat just after a trick teaches of it. */
+export const TREAT_LESSON = 0.25
+
+export const knows = (puppy: Puppy, trick: Trick): number => puppy.tricks?.[trick] ?? 0
+
+/** The puppy a treat just after `trick` taught a little more of it. */
+export const teach = (puppy: Puppy, trick: Trick): Puppy => ({
+  ...puppy,
+  tricks: { ...puppy.tricks, [trick]: Math.min(1, knows(puppy, trick) + TREAT_LESSON) },
+})
 
 export class InvalidPuppyName extends Error {
   constructor() {

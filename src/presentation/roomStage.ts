@@ -1,12 +1,12 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
-import type { Puppy } from '@/domain/puppy'
 import type { FoodId } from '@/domain/shop'
+import type { Puppy, Trick } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
 
 /** Shown instead of a stage when the browser has no WebGL. */
 export const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
 
-export type TrickPose = 'sit' | 'lie' | 'belly'
+export type TrickPose = Trick
 
 /** What the player is doing for a puppy's care: bathing it, brushing it or weighing it. */
 export type CareMode = 'bath' | 'brush' | 'weigh'
@@ -73,8 +73,16 @@ export interface RoomStage {
   resume(cares: ReadonlyMap<string, Care>, away: number): void
   takeBall(): void
   stowBall(): void
-  /** The puppy at `index` does the trick, if it is free to. */
+  /**
+   * The puppy at `index` does the trick, if it is free to: at once if it knows it well, else
+   * after a puzzled look.
+   */
   trick(index: number, pose: TrickPose): void
+  /**
+   * A treat for the puppy at `index`, if it is awake to take it: null when not, else the trick
+   * it learnt a little more of, given just after doing it.
+   */
+  treat(index: number): { taught: TrickPose | null } | null
   /**
    * Rings the puppy at `index` on the floor as the one the buttons are for, or nobody: only while
    * two are in the room and neither is in its bath or being brushed.
