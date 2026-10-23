@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/Endika/patitas/compare/v0.15.0...v0.15.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **puppy:** give up the chase for the ball once alone or held, steal it mouth to mouth, and nap clear of the other's head ([6349e4f](https://github.com/Endika/patitas/commit/6349e4fc3c054d9fd51b5f84e8a95917a07ebfdd))
+
 ## [0.15.0](https://github.com/Endika/patitas/compare/v0.14.0...v0.15.0) (2026-10-23)
 
 
