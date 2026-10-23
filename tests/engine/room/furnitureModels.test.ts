@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createCamera, fitCamera } from '@/engine/room/camera'
+import { STANDARD_DECOR } from '@/domain/shop'
 import { addFurniture, popOut } from '@/engine/room/furnitureModels'
 import type { Spot } from '@/engine/room/furniture'
 
@@ -123,5 +124,37 @@ describe('the scale', () => {
     expect(sizes[100]).toBe(1)
     expect(Math.max(...sizes)).toBeGreaterThan(1.05)
     expect(Math.max(...sizes)).toBeLessThan(1.15)
+  })
+})
+
+describe('the colours bought in the shop', () => {
+  /** The colour of every bolster in the room and of every bowl's dish, as hex. */
+  const colours = (group: THREE.Object3D) => {
+    const bolsters: string[] = [],
+      dishes: string[] = []
+    group.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return
+      const mat = o.material as THREE.MeshStandardMaterial
+      if (o.geometry instanceof THREE.TorusGeometry) bolsters.push(mat.color.getHexString())
+      if (mat.userData.painted === 'dish') dishes.push(mat.color.getHexString())
+    })
+    return { bolsters, dishes }
+  }
+
+  it('paint every bed and every bowl, and back to the standard ones', () => {
+    const furniture = addFurniture(new THREE.Scene(), fitCamera(createCamera(), 0.46), 2)
+    const standard = colours(furniture.group)
+    expect(new Set(standard.bolsters).size).toBe(1)
+
+    furniture.setDecor({ ...STANDARD_DECOR, bed: 'sky', bowl: 'teal' })
+    const bought = colours(furniture.group)
+    expect(bought.bolsters).toHaveLength(2)
+    expect(new Set(bought.bolsters).size).toBe(1)
+    expect(bought.bolsters[0]).not.toBe(standard.bolsters[0])
+    expect(bought.dishes).toHaveLength(2)
+    expect(bought.dishes[0]).not.toBe(standard.dishes[0])
+
+    furniture.setDecor(STANDARD_DECOR)
+    expect(colours(furniture.group)).toEqual(standard)
   })
 })

@@ -1,6 +1,7 @@
 import { BREEDS } from '@/domain/breeds'
 import { cleanMess, createCare, eatTreat, health, isNight, type Care } from '@/domain/care'
 import { knows, teach, type Puppy, type Trick } from '@/domain/puppy'
+import { STANDARD_DECOR } from '@/domain/shop'
 import type { Deed } from '@/domain/wallet'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
@@ -183,6 +184,7 @@ export function createThreeStage(
       resume() {},
       takeBall() {},
       setToy() {},
+      setDecor() {},
       stowBall() {},
       trick() {},
       treat: () => null,
@@ -204,6 +206,8 @@ export function createThreeStage(
   const ball = createBall()
   /** The toy the player chose, swapped in once the one in play is back. */
   let toy = ball.toy
+  /** The colours chosen for the room: furniture laid out anew is painted in them too. */
+  let decor = STANDARD_DECOR
   const messes = createMessLayer(room.scene)
   const baths = createBathLayer(room.scene)
   const brushes = createBrushLayer(room.scene)
@@ -287,6 +291,7 @@ export function createThreeStage(
       return [v]
     })
     const refurnished = room.furnish(wanted.length > 1 ? 2 : 1)
+    if (refurnished) room.furniture?.setDecor(decor)
     if (refurnished) for (const v of views) forgetRoute(v.routine, v.motion)
     placesWere = placesNow()
     followBeds()
@@ -534,6 +539,10 @@ export function createThreeStage(
     },
     setToy(next) {
       toy = next
+    },
+    setDecor(next) {
+      decor = next
+      room.furniture?.setDecor(decor)
     },
     stowBall() {
       if (ball.state === 'hand') putBallAway(views, ball)

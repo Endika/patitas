@@ -1,4 +1,4 @@
-import type { Consumable, Keepsake, ToyId } from './shop'
+import { STANDARD_DECOR, type Consumable, type Decor, type Keepsake, type ToyId } from './shop'
 
 /** Something done for the puppies that earns coins. */
 export type Deed = 'meal' | 'bath' | 'brush' | 'clean' | 'fetch' | 'trick'
@@ -31,6 +31,8 @@ export interface Wallet {
   owned: Keepsake[]
   /** What the ball button throws. */
   toy: ToyId
+  /** The colours the room is in. */
+  decor: Decor
 }
 
 export function dayOf(now: number): string {
@@ -47,15 +49,20 @@ export const createWallet = (now: number): Wallet => ({
   stock: {},
   owned: [],
   toy: 'ball',
+  decor: STANDARD_DECOR,
 })
 
-/** A wallet saved before the shop or the toys: nothing bought yet, and the ball to throw. */
+/**
+ * A wallet saved before the shop, the toys or the colours: nothing bought yet, the ball to throw
+ * and the room as it came.
+ */
 export const withWalletDefaults = (
-  stored: Omit<Wallet, 'stock' | 'owned' | 'toy'> & Partial<Wallet>,
+  stored: Omit<Wallet, 'stock' | 'owned' | 'toy' | 'decor'> & Partial<Wallet>,
 ): Wallet => ({
   stock: {},
   owned: [],
   toy: 'ball',
+  decor: STANDARD_DECOR,
   ...stored,
 })
 

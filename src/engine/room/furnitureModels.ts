@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
-import type { FoodId } from '@/domain/shop'
+import { STANDARD_DECOR, type Decor, type FoodId } from '@/domain/shop'
 import { clamp, rng } from '@/engine/math'
 import { playLocal, playWorld, type FixedCamera } from './camera'
 import {
@@ -62,6 +62,38 @@ function contact(alphaMap: THREE.Texture, rx: number, rz: number, opacity: numbe
   return m
 }
 
+/** Which part of the room a material colours, for the colours bought in the shop. */
+type Painted = 'bedBase' | 'bolster' | 'cushion' | 'dish' | 'rug'
+
+/** Each look's colour for every painted part. */
+const PAINT: {
+  bed: Record<Decor['bed'], Record<'bedBase' | 'bolster' | 'cushion', string>>
+  bowl: Record<Decor['bowl'], string>
+  rug: Record<Decor['rug'], string>
+} = {
+  bed: {
+    coral: { bedBase: '#b9765b', bolster: '#e39a7c', cushion: '#f6dccd' },
+    sage: { bedBase: '#6d8b74', bolster: '#9dbca5', cushion: '#e6efe7' },
+    sky: { bedBase: '#5e7d9c', bolster: '#93b2cf', cushion: '#e5edf5' },
+  },
+  bowl: { ink: INK, cherry: '#b5403a', teal: '#2b8783' },
+  rug: { rose: '#e7a58f', sky: '#9cb8d6', sand: '#d9bf86' },
+}
+
+const paintOf = (part: Painted, decor: Decor): string =>
+  part === 'dish'
+    ? PAINT.bowl[decor.bowl]
+    : part === 'rug'
+      ? PAINT.rug[decor.rug]
+      : PAINT.bed[decor.bed][part]
+
+/** A material for `part`, tagged so the shop's colours can find it, in the standard colour. */
+const painted = (part: Painted, params: THREE.MeshStandardMaterialParameters) => {
+  const m = new THREE.MeshStandardMaterial({ ...params, color: paintOf(part, STANDARD_DECOR) })
+  m.userData.painted = part
+  return m
+}
+
 /** The bed's bolster: the tube's half thickness, and its height over that. */
 const BOLSTER = { tube: 0.1, squash: 0.78 }
 /** The fabric base the bolster sits on. */
@@ -74,13 +106,13 @@ const BED_BASE = 0.03
 function bed(shade: THREE.Texture, { radius }: Spot): THREE.Group {
   const g = new THREE.Group()
   const { tube, squash } = BOLSTER
-  const lathe = (points: number[][], color: string) =>
+  const lathe = (points: number[][], part: Painted) =>
     new THREE.Mesh(
       new THREE.LatheGeometry(
         points.map(([x, y]) => new THREE.Vector2(x, y)),
         64,
       ),
-      new THREE.MeshStandardMaterial({ color, roughness: 1 }),
+      painted(part, { roughness: 1 }),
     )
   const base = lathe(
     [
@@ -90,12 +122,12 @@ function bed(shade: THREE.Texture, { radius }: Spot): THREE.Group {
       [radius - 0.004, BED_BASE + 0.012],
       [0, BED_BASE + 0.012],
     ],
-    '#b9765b',
+    'bedBase',
   )
   base.receiveShadow = true
   const bolster = new THREE.Mesh(
     new THREE.TorusGeometry(radius - tube, tube, 20, 72),
-    new THREE.MeshStandardMaterial({ color: '#e39a7c', roughness: 0.95 }),
+    painted('bolster', { roughness: 0.95 }),
   )
   bolster.rotation.x = -Math.PI / 2
   bolster.scale.z = squash
@@ -110,7 +142,7 @@ function bed(shade: THREE.Texture, { radius }: Spot): THREE.Group {
       [0.5 * inner, BED_BASE + 0.028],
       [0, BED_BASE + 0.022],
     ],
-    '#f6dccd',
+    'cushion',
   )
   cushion.receiveShadow = true
   g.add(base, bolster, cushion, contact(shade, radius, radius, 0.35))
@@ -144,7 +176,7 @@ export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.
   ].map(([x, y]) => new THREE.Vector2(x, y))
   const dish = new THREE.Mesh(
     new THREE.LatheGeometry(profile, 48),
-    new THREE.MeshStandardMaterial({ color: INK, roughness: 0.32 }),
+    painted('dish', { roughness: 0.32 }),
   )
   dish.receiveShadow = true
   const kibble = new THREE.InstancedMesh(
@@ -434,12 +466,11 @@ function puddle(): THREE.Group {
   return g
 }
 
-/** The soft rug on the house floor: a muted pink oval of unit size, under everything on it. */
+/** The soft rug on the house floor: a muted oval of unit size, under everything on it. */
 function rug(): THREE.Mesh {
   const m = new THREE.Mesh(
     new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({
-      color: '#e7a58f',
+    painted('rug', {
       roughness: 1,
       transparent: true,
       opacity: 0.55,
@@ -531,6 +562,14 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
         g.scale.set(radius / built[i]!, 1, depth / built[i]!)
       })
       puddleG.scale.set(spots.mud.radius, 1, spots.mud.depth)
+    },
+    setDecor(decor) {
+      group.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return
+        const mat = o.material as THREE.MeshStandardMaterial
+        const part = mat.userData.painted as Painted | undefined
+        if (part) mat.color.set(paintOf(part, decor))
+      })
     },
     bowlFill(place, level, food) {
       const parts = bowls[place]

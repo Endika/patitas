@@ -12,7 +12,14 @@ import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import { knows, traits, TREAT_LESSON, type Puppy, type Trick } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
-import { SHOP, type Consumable, type FoodId, type ItemId, type ToyId } from '@/domain/shop'
+import {
+  SHOP,
+  type Consumable,
+  type FoodId,
+  type ItemId,
+  type Keepsake,
+  type ToyId,
+} from '@/domain/shop'
 import type { Deed, Wallet } from '@/domain/wallet'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
@@ -70,7 +77,7 @@ export default function RoomScreen({
   onBuy,
   onSpend,
   onTeach,
-  onToy,
+  onUse,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -95,8 +102,8 @@ export default function RoomScreen({
   onBuy(id: ItemId): boolean
   /** Uses one up. */
   onSpend(id: Consumable): boolean
-  /** The toy the ball button throws from now on. */
-  onToy(toy: ToyId): void
+  /** Puts a keepsake to use: the toy the ball button throws, or a colour for the room. */
+  onUse(id: Keepsake): void
   /** A treat taught a puppy a little more of a trick. */
   onTeach(id: string, trick: Trick): Promise<void>
   now?: () => number
@@ -262,6 +269,9 @@ export default function RoomScreen({
   useEffect(() => {
     stageRef.current?.setToy(wallet.toy)
   }, [createStage, wallet.toy, stageRef])
+  useEffect(() => {
+    stageRef.current?.setDecor(wallet.decor)
+  }, [createStage, wallet.decor, stageRef])
 
   const ringed = status.needs.length > 1 ? selected : null
   useEffect(() => {
@@ -370,7 +380,7 @@ export default function RoomScreen({
             </span>
             {shopOpen && (
               <div id={shopId} className="room-sheet">
-                <Shop wallet={wallet} onBuy={onBuy} onToy={onToy} />
+                <Shop wallet={wallet} onBuy={onBuy} onUse={onUse} />
               </div>
             )}
           </div>
