@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/Endika/patitas/compare/v0.16.0...v0.17.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** a shop with special foods for the bowl ([e4f4024](https://github.com/Endika/patitas/commit/e4f4024e9ff12734d42884fdb118aaf0f636bb31))
+
 ## [0.16.0](https://github.com/Endika/patitas/compare/v0.15.1...v0.16.0) (2026-10-23)
 
 
