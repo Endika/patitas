@@ -10,17 +10,20 @@ import {
 import type { PuppyNeeds } from '../roomStage'
 import { useDismiss, type Closable, type Dismissal } from './useDismiss'
 
-const BARS: ['happiness' | 'hunger' | 'cleanliness' | 'energy', string][] = [
-  ['happiness', 'Felicidad'],
-  ['hunger', 'Hambre'],
-  ['cleanliness', 'Limpieza'],
-  ['energy', 'Energía'],
+/** Every bar reads the same way round, fuller is better: hunger shows as how full its tummy is. */
+const BARS: [string, (n: PuppyNeeds) => number][] = [
+  ['Felicidad', (n) => n.happiness],
+  ['Tripa llena', (n) => 1 - n.hunger],
+  ['Limpieza', (n) => n.cleanliness],
+  ['Energía', (n) => n.energy],
 ]
+
+const level = (value: number) => (value < 0.3 ? 'low' : value >= 0.6 ? 'good' : 'ok')
 
 function Meter({ label, value }: { label: string; value: number }) {
   const id = useId()
   return (
-    <div className="room-need-bar">
+    <div className="room-need-bar" data-level={level(value)}>
       <span id={id}>{label}</span>
       <div
         className="room-bar"
@@ -37,9 +40,9 @@ function Meter({ label, value }: { label: string; value: number }) {
 }
 
 /**
- * A chip for each puppy in the room with its name, how happy it is, its health and what the scale
- * read; a tap opens its card with its breed and every need. With two, the chip tapped also picks
- * the puppy the care actions look after, marked as the current one.
+ * A chip for each puppy in the room with its name, its health and what the scale read; a tap
+ * opens its card with its breed and every need. With two, the chip tapped also picks the puppy the
+ * care actions look after, marked as the current one.
  */
 export default function NeedsPanel({
   needs,
@@ -111,10 +114,9 @@ export default function NeedsPanel({
             }}
           >
             <span className="room-pup-name">{n.name}</span>
-            <span className="sr-only">, {n.health}</span>
             <span className="room-pup-health" data-health={n.health} aria-hidden="true" />
-            <span className="room-pup-mood" aria-hidden="true">
-              <i style={{ transform: `scaleX(${n.happiness})` }} />
+            <span className="room-pup-state">
+              <span className="sr-only">,</span> {n.health}
             </span>
             {n.reading && <small className="room-pup-weight">{n.reading}</small>}
           </button>
@@ -128,8 +130,8 @@ export default function NeedsPanel({
             </span>
             <small data-health={shown.health}>{shown.health}</small>
           </p>
-          {BARS.map(([key, label]) => (
-            <Meter key={key} label={label} value={shown[key]} />
+          {BARS.map(([label, value]) => (
+            <Meter key={label} label={label} value={value(shown)} />
           ))}
           {shown.reading && (
             <p className="room-need-weight">
