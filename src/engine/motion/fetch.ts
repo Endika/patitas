@@ -3,7 +3,7 @@ import type { Vec3 } from '@/engine/math'
 import { BALL_R, type BallState } from '@/engine/room/ball'
 import { cameraPosition, clampPlay, playAxes, type FixedCamera } from '@/engine/room/camera'
 import type { GaitId } from './gaits'
-import { goTo, type MotionState } from './locomotion'
+import { goTo, type GoToOpts, type MotionState } from './locomotion'
 import { setPose } from './poses'
 
 export type FetchTask = 'free' | 'wait' | 'chase' | 'grab' | 'return' | 'present' | 'pursue'
@@ -207,27 +207,34 @@ export function stepFetch(
 }
 
 /**
- * With two, one that lost the ball and is playful (energy from STEAL_KEEN) goes after the one
- * bringing it back, up beside its head; there, once a throw, it takes it as likely as STEAL_CHANCE
- * times its energy and brings it back itself, the other left watching. It tries for STEAL_TIME.
+ * With two, one that lost the ball and is playful (energy from STEAL_KEEN), and free to (not held
+ * nor asleep), goes after the one bringing it back, running up alongside its head: STEAL_SIDE to
+ * one side and STEAL_LEAD ahead of it. Once their mouths are within STEAL_MOUTHS, facing the same
+ * way within STEAL_ALIGN, it takes the ball, once a throw, as likely as STEAL_CHANCE times its
+ * energy, and brings it back itself, the other left watching. It tries for STEAL_TIME.
  */
 const STEAL_KEEN = 0.6,
   STEAL_CHANCE = 0.6,
   STEAL_TIME = 4,
   STEAL_SIDE = 0.45,
-  STEAL_REACH = 0.12
+  STEAL_LEAD = 0.15,
+  STEAL_MOUTHS = 0.55,
+  STEAL_ALIGN = 0.9
+/** How far ahead of a puppy's middle its mouth is, near enough, standing or on the move. */
+const MOUTH_AHEAD = 0.41
 
-const stealOpts = {
+const stealOpts: GoToOpts = {
   happy: 1,
   energy: 1,
-  gait: 'hop' as GaitId,
-  clamp: (x: number, z: number): [number, number] => [x, z],
+  gait: 'hop',
+  clamp: (x, z) => [x, z],
 }
 
 export function pursueBall(
   fs: FetchState[],
   ms: MotionState[],
   energies: number[],
+  free: readonly boolean[],
   ball: BallState,
   cam: FixedCamera,
   random: () => number,
@@ -236,8 +243,13 @@ export function pursueBall(
   const other = 1 - holder
   const f = fs[other],
     h = fs[holder]
-  if (holder < 0 || !f || !h || ball.state !== 'mouth' || ball.stolen) {
-    for (const g of fs) if (g.task === 'pursue') g.task = 'free'
+  // With one puppy, the ball not on its way back or already taken once, nobody is after it
+  if (holder < 0 || !f || !h || !free[other] || ball.state !== 'mouth' || ball.stolen) {
+    for (const g of fs)
+      if (g.task === 'pursue') {
+        g.task = 'free'
+        g.watch = true
+      }
     return
   }
   if (f.task === 'free' && f.watch && energies[other]! >= STEAL_KEEN) {
@@ -252,15 +264,29 @@ export function pursueBall(
     f.watch = true
     return
   }
-  // Up beside its head, on whichever side it is already
-  const sx = Math.cos(hm.heading),
-    sz = -Math.sin(hm.heading),
-    side = (m.pos.x - hm.pos.x) * sx + (m.pos.z - hm.pos.z) * sz >= 0 ? 1 : -1
-  const x = hm.pos.x + sx * side * STEAL_SIDE,
-    z = hm.pos.z + sz * side * STEAL_SIDE
-  stealOpts.clamp = (cx, cz) => clampPlay(cam, cx, cz)
-  if (Math.hypot(x - m.pos.x, z - m.pos.z) > STEAL_REACH) {
-    goTo(m, x, z, stealOpts)
+  const fx = Math.sin(hm.heading),
+    fz = Math.cos(hm.heading),
+    sx = Math.cos(hm.heading),
+    sz = -Math.sin(hm.heading)
+  // Its mouth and the other's, and how far apart they face
+  const mx = m.pos.x + Math.sin(m.heading) * MOUTH_AHEAD,
+    mz = m.pos.z + Math.cos(m.heading) * MOUTH_AHEAD,
+    hx = hm.pos.x + fx * MOUTH_AHEAD,
+    hz = hm.pos.z + fz * MOUTH_AHEAD
+  const turned = Math.abs(
+    Math.atan2(Math.sin(m.heading - hm.heading), Math.cos(m.heading - hm.heading)),
+  )
+  if (Math.hypot(mx - hx, mz - hz) > STEAL_MOUTHS || turned > STEAL_ALIGN) {
+    // Alongside its head, on whichever side it is already, and a little ahead
+    const side = (m.pos.x - hm.pos.x) * sx + (m.pos.z - hm.pos.z) * sz >= 0 ? 1 : -1
+    stealOpts.clamp = (cx, cz) => clampPlay(cam, cx, cz)
+    stealOpts.random = random
+    goTo(
+      m,
+      hm.pos.x + sx * side * STEAL_SIDE + fx * STEAL_LEAD,
+      hm.pos.z + sz * side * STEAL_SIDE + fz * STEAL_LEAD,
+      stealOpts,
+    )
     return
   }
   ball.stolen = true

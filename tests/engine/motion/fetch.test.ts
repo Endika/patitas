@@ -376,11 +376,26 @@ describe('pursueBall', () => {
     energies: number[],
     random: () => number,
     secs = 5,
+    free = [true, true],
+    alone = false,
   ) => {
     let closest = Infinity
     for (let n = 0; n < secs / DT; n++) {
       for (const f of s.fs) f.taskT += DT
-      pursueBall(s.fs, s.ms, energies, s.ball, cam, random)
+      // Alone, the one bringing the ball has left the room
+      const fs = alone ? s.fs.slice(1) : s.fs,
+        ms = alone ? s.ms.slice(1) : s.ms
+      pursueBall(fs, ms, energies, free, s.ball, cam, random)
+      if (s.fs[1]!.holding && !swapped) {
+        swapped = true
+        const mouth = (m: MotionState) => [
+          m.pos.x + Math.sin(m.heading) * 0.41,
+          m.pos.z + Math.cos(m.heading) * 0.41,
+        ]
+        const [ax, az] = mouth(s.ms[0]!),
+          [bx, bz] = mouth(s.ms[1]!)
+        jump = Math.hypot(ax! - bx!, az! - bz!)
+      }
       s.ms.forEach((m, i) => {
         stepPoses(m, DT)
         stepLocomotion(m, s.legs[i]!, DT)
@@ -391,13 +406,19 @@ describe('pursueBall', () => {
       const [a, b] = s.ms as [MotionState, MotionState]
       closest = Math.min(closest, Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z))
     }
-    return closest
+    return { closest, jump }
   }
+  let swapped = false,
+    jump = NaN
 
   it('a playful one runs up beside the one bringing the ball and takes it, once a throw', () => {
     const s = setUp()
+    swapped = false
+    const { closest, jump: across } = play(s, [0.5, 1], () => 0)
     // Beside it, not in it: bodies side by side only touch at 0.33
-    expect(play(s, [0.5, 1], () => 0)).toBeGreaterThan(0.33)
+    expect(closest).toBeGreaterThan(0.33)
+    // Mouth to mouth: the ball does not leap from one to the other
+    expect(across).toBeLessThan(0.6)
     expect(s.ball.stolen).toBe(true)
     expect([s.fs[0]!.holding, s.fs[1]!.holding]).toEqual([false, true])
     expect([s.fs[0]!.task, s.fs[1]!.task]).toEqual(['free', 'return'])
@@ -412,6 +433,17 @@ describe('pursueBall', () => {
     play(s, [0.5, 1], () => 0.99)
     expect(s.ball.stolen).toBe(true)
     expect([s.fs[0]!.holding, s.fs[1]!.task]).toEqual([true, 'free'])
+  })
+
+  it('held for its bath, or left alone in the room, it gives the chase up', () => {
+    for (const how of ['held', 'alone'] as const) {
+      const s = setUp()
+      play(s, [0.5, 1], () => 0.99, 0.3)
+      expect(s.fs[1]!.task).toBe('pursue')
+      if (how === 'held') play(s, [0.5, 1], () => 0.99, 0.1, [true, false])
+      else play(s, [1], () => 0.99, 0.1, [true], true)
+      expect(s.fs[1]!.task).toBe('free')
+    }
   })
 
   it('one with little energy does not go after it', () => {

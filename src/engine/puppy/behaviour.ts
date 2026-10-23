@@ -671,7 +671,7 @@ export function pickHint(
   // Rolling and digging in the mud are its own doing, not a pose to explain
   if (pose !== 'stand' && pose !== 'roll' && pose !== 'dig' && !p.zone)
     return pose === 'belly' ? 'belly-up' : pose
-  if (task === 'chase' || task === 'grab') return 'chase'
+  if (task === 'chase' || task === 'grab' || task === 'pursue') return 'chase'
   if (task === 'return' || (task === 'present' && p.fetch.holding)) return 'bringing'
   if (task === 'present') return 'done'
   if (p.zone === 'back' && p.scratch > 0.5) return 'scratch'

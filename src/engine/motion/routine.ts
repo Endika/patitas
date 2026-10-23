@@ -337,12 +337,16 @@ const AWAY: ReadonlySet<Routine> = new Set(['sleeping', 'stretch', 'bathing', 'b
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
 const NIGHT_IDLE = 90
 /**
- * The other lying within FLOOR_ROOM, one about to nap on the floor first walks off to that far,
- * or stays up a while where there is no room or it cannot get there within ROOM_GIVE_UP.
+ * The other lying within FLOOR_ROOM of its middle or its head, one about to nap on the floor first
+ * walks off to the nearest open spot of ROOM_AROUND, ROOM_REACH round it on its own side, or stays
+ * up a while where there is none or it cannot get there within ROOM_GIVE_UP.
  */
 const FLOOR_ROOM = 0.7,
-  ROOM_AROUND = 8,
+  ROOM_REACH = 0.9,
+  ROOM_AROUND = 12,
   ROOM_GIVE_UP = 8
+/** How far ahead of a puppy's middle its head lies, lying down or standing. */
+const HEAD_AHEAD = 0.41
 /**
  * Left alone by day this many seconds, scaled from 0.75 to 1.25 by its energy, it naps: in its
  * bed if cuddly from NAP_CUDDLY or tired below NAP_TIRED, else where it stands, after sitting
@@ -904,19 +908,33 @@ const toBed: Step = (r, m, ctx, _ev, dt) => {
   lieDown(r, m)
 }
 
-/** Whether `m` stands within `d` of the other. */
-const near = (m: MotionState, peer: Readonly<Peer>, d: number) =>
-  Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z) < d
+/** How far (x, z) is from the other lying there: from its middle or its head, the nearer. */
+function offPeer(peer: Readonly<Peer>, x: number, z: number): number {
+  const hx = peer.pos.x + Math.sin(peer.heading) * HEAD_AHEAD,
+    hz = peer.pos.z + Math.cos(peer.heading) * HEAD_AHEAD
+  return Math.min(Math.hypot(peer.pos.x - x, peer.pos.z - z), Math.hypot(hx - x, hz - z))
+}
 
-/** The nearest open spot to nap FLOOR_ROOM from the other lying there, of ROOM_AROUND round it. */
+/** The nearest open spot to nap off the other lying there, if there is one. */
 function roomFrom(r: RoutineState, m: MotionState, ctx: RoutineCtx, peer: Readonly<Peer>) {
+  // Round the middle of the other's body and head
+  const cx = peer.pos.x + Math.sin(peer.heading) * HEAD_AHEAD * 0.5,
+    cz = peer.pos.z + Math.cos(peer.heading) * HEAD_AHEAD * 0.5
   let best = Infinity
   for (let k = 0; k < ROOM_AROUND; k++) {
     const a = (k / ROOM_AROUND) * Math.PI * 2
-    const x = peer.pos.x + Math.sin(a) * FLOOR_ROOM,
-      z = peer.pos.z + Math.cos(a) * FLOOR_ROOM
+    const x = cx + Math.sin(a) * ROOM_REACH,
+      z = cz + Math.cos(a) * ROOM_REACH
     const d = Math.hypot(x - m.pos.x, z - m.pos.z)
-    if (d >= best || !openAt(ctx.spots, ctx.clamp, x, z)) continue
+    // On its own side, so it walks away from the other rather than round it
+    const own = (x - cx) * (m.pos.x - cx) + (z - cz) * (m.pos.z - cz) > 0
+    if (
+      d >= best ||
+      !own ||
+      offPeer(peer, x, z) < FLOOR_ROOM ||
+      !openAt(ctx.spots, ctx.clamp, x, z)
+    )
+      continue
     best = d
     r.target.set(x, 0, z)
   }
@@ -1490,7 +1508,7 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
       r.side = (ctx.random ?? Math.random)() < 0.5 ? -1 : 1
       m.goal = null
       // Not on top of the other lying there: it moves off a body's length first, or stays up
-      if (peer && peer.pose !== 'stand' && near(m, peer, FLOOR_ROOM)) {
+      if (peer && peer.pose !== 'stand' && offPeer(peer, m.pos.x, m.pos.z) < FLOOR_ROOM) {
         if (roomFrom(r, m, ctx, peer)) return enter(r, 'makingRoom')
         r.alone = 0
         return enter(r, 'none')
