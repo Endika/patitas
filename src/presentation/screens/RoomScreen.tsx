@@ -12,12 +12,14 @@ import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import { traits, type Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
-import type { Deed } from '@/domain/wallet'
+import { SHOP, type Consumable, type FoodId, type ItemId } from '@/domain/shop'
+import type { Deed, Wallet } from '@/domain/wallet'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
 import Hud from '../components/Hud'
 import NeedsPanel from '../components/NeedsPanel'
 import Roster from '../components/Roster'
+import Shop from '../components/Shop'
 import UnsavedNotice from '../components/UnsavedNotice'
 import { useDismiss, type Closable, type Dismissal } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
@@ -55,8 +57,10 @@ export default function RoomScreen({
   onAdoptAnother,
   loadCare,
   saveCare,
-  coins,
+  wallet,
   onDeed,
+  onBuy,
+  onSpend,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -74,9 +78,13 @@ export default function RoomScreen({
   onAdoptAnother(): void
   loadCare(id: string): Promise<Care | undefined>
   saveCare(id: string, care: Care): Promise<void>
-  coins: number
+  wallet: Wallet
   /** Pays for a deed done in the room: the coins gained, 0 when none. */
   onDeed(deed: Deed): number
+  /** False when the coins do not reach. */
+  onBuy(id: ItemId): boolean
+  /** Uses one up. */
+  onSpend(id: Consumable): boolean
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   /** A back with nothing open: one more leaves. */
@@ -126,6 +134,15 @@ export default function RoomScreen({
     setCastOpen(false)
   }, [])
   useDismiss(cast, castOpen, closeCast)
+  const [shopOpen, setShopOpen] = useState(false)
+  const shopButton = useRef<HTMLButtonElement>(null)
+  const shop = useRef<HTMLDivElement>(null)
+  const shopId = useId()
+  const closeShop = useCallback((how: Dismissal) => {
+    if (how === 'escape') shopButton.current?.focus()
+    setShopOpen(false)
+  }, [])
+  useDismiss(shop, shopOpen, closeShop)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
   const [unloaded, setUnloaded] = useState<ReadonlySet<string>>(() => new Set())
   const inRoom = useMemo(
@@ -248,6 +265,10 @@ export default function RoomScreen({
     return puppy ? traits(puppy.persona) : []
   }
   const stage = () => stageRef.current
+  const foods = SHOP.flatMap((item) => {
+    const left = item.aisle === 'food' ? (wallet.stock[item.id] ?? 0) : 0
+    return left ? [{ id: item.id as FoodId, left }] : []
+  })
   const busy = status.needs.find((n) => n.mode === 'bath' || n.mode === 'brush')?.mode
 
   const hud = useRef<Closable>(null),
@@ -258,14 +279,18 @@ export default function RoomScreen({
       closeCast('escape')
       return true
     }
+    if (shopOpen) {
+      closeShop('escape')
+      return true
+    }
     if (busy === 'bath') stageRef.current?.finishBath()
     else if (busy === 'brush') stageRef.current?.endBrush()
     return Boolean(busy)
   }
   useImperativeHandle(ref, () => ({ close: closeTop }))
   useEffect(() => {
-    if (castOpen || busy) onOpen?.()
-  }, [castOpen, busy, onOpen])
+    if (castOpen || shopOpen || busy) onOpen?.()
+  }, [castOpen, shopOpen, busy, onOpen])
 
   return (
     <div className="room">
@@ -285,16 +310,33 @@ export default function RoomScreen({
             traitsOf={traitsOf}
             onOpen={onOpen}
           />
-          <p className="room-coins">
-            <span className="room-coin" aria-hidden="true" />
-            {coins}
-            <span className="sr-only"> {coins === 1 ? 'moneda' : 'monedas'}</span>
-            {gained && (
-              <span key={gained.n} role="status" className="room-gain">
-                +{gained.coins}
-              </span>
+          <div ref={shop} className="room-wallet">
+            <button
+              type="button"
+              className="room-coins"
+              ref={shopButton}
+              aria-expanded={shopOpen}
+              aria-controls={shopOpen ? shopId : undefined}
+              onClick={() => setShopOpen((o) => !o)}
+            >
+              <span className="room-coin" aria-hidden="true" />
+              {wallet.coins}
+              <span className="sr-only"> {wallet.coins === 1 ? 'moneda' : 'monedas'} · Tienda</span>
+              {gained && (
+                <span key={gained.n} className="room-gain" aria-hidden="true">
+                  +{gained.coins}
+                </span>
+              )}
+            </button>
+            <span role="status" className="sr-only">
+              {gained && `+${gained.coins} monedas`}
+            </span>
+            {shopOpen && (
+              <div id={shopId} className="room-sheet">
+                <Shop wallet={wallet} onBuy={onBuy} />
+              </div>
             )}
-          </p>
+          </div>
           {/* With nobody in the room, who to bring in is the only thing to do */}
           <div ref={cast} className="room-cast">
             {!empty && (
@@ -355,7 +397,15 @@ export default function RoomScreen({
         idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
         onTrick={(pose) => stageRef.current?.trick(selected, pose)}
-        care={<CareActions selected={selected} idle={!status.needs.length} stage={stage} />}
+        care={
+          <CareActions
+            selected={selected}
+            idle={!status.needs.length}
+            stage={stage}
+            foods={foods}
+            onFood={onSpend}
+          />
+        }
         mode={busy ? <CareMode needs={status.needs} stage={stage} /> : undefined}
         onOpen={onOpen}
       />

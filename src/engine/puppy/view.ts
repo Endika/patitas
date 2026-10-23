@@ -5,11 +5,13 @@ import {
   cheer,
   createCare,
   messPenalty,
+  savour,
   weightStatus,
   type Care,
   type WeightStatus,
 } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { FoodId } from '@/domain/shop'
 import { clamp, damp, MAX_DT, type Vec3 } from '@/engine/math'
 import {
   createFetchState,
@@ -175,6 +177,8 @@ export interface PuppyView extends BehaviourRig, SceneView {
    * bowl laid out anew shows it again.
    */
   bowl: number
+  /** The special food in its bowl, if any: its effect comes once the bowl is eaten up. */
+  food: FoodId | null
   /** Its place in the room's order: which bed and bowl are its. */
   place: number
   /**
@@ -476,6 +480,7 @@ export function mountPuppyView(
     moodWas: behaviour.happy,
     joy: 0,
     bowl: 0,
+    food: null,
     snoreT: 0,
     place: 0,
     coat,
@@ -876,7 +881,11 @@ export function tickPuppies(
           ...messLocal(room.cam, r.mess.x, r.mess.z),
           createdAt: ctx.clock,
         })
-      if (r.fed) ev.fed = true
+      if (r.fed) {
+        ev.fed = true
+        if (view.food) view.care = savour(view.care, view.food, view.breed)
+        view.food = null
+      }
       if (r.fed || r.greeted || r.played) {
         const gain = r.fed ? FED_HAPPY : r.played ? PLAY_HAPPY : GREET_HAPPY
         view.behaviour.happy = Math.min(1, view.behaviour.happy + gain)

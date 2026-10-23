@@ -72,7 +72,10 @@ export function createFakeStage(place?: PlaceAccident) {
     stowBall: () => void calls.push('stowBall'),
     trick: (index, pose) => void calls.push(`trick:${index}:${pose}`),
     select: (index) => void selected.push(index),
-    feed: (index) => void calls.push(`feed:${index}`),
+    feed(index, food) {
+      calls.push(food ? `feed:${index}:${food}` : `feed:${index}`)
+      return true
+    },
     bath: (index) => void calls.push(`bath:${index}`),
     rinse: () => void calls.push('rinse'),
     dryer: () => void calls.push('dryer'),

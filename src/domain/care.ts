@@ -1,4 +1,5 @@
 import type { Breed } from './breeds'
+import type { FoodId } from './shop'
 
 export type MessKind = 'pee' | 'poop'
 
@@ -231,6 +232,25 @@ export function feed(care: Care, breed: Breed, amount = 1): Care {
     bladder: unit(care.bladder + BLADDER_PER_MEAL * Math.min(1, amount)),
     weightKg: clampWeight(care.weightKg + MEAL_WEIGHT_KG * amount, breed),
   }
+}
+
+/** Premium food: happiness and shine on top of the meal. */
+export const PREMIUM_HAPPY = 0.15,
+  PREMIUM_SHINE = 0.1
+/** Energy food: energy back. */
+export const ENERGY_FOOD = 0.2
+
+/** What a special food does once the bowl is eaten up, on top of the meal itself. */
+export function savour(care: Care, food: FoodId, breed: Breed): Care {
+  if (food === 'premium')
+    return {
+      ...care,
+      happiness: delight(care.happiness, PREMIUM_HAPPY),
+      shine: unit(care.shine + PREMIUM_SHINE),
+    }
+  if (food === 'energy') return { ...care, energy: unit(care.energy + ENERGY_FOOD) }
+  // Light food takes back half the weight a meal puts on
+  return { ...care, weightKg: clampWeight(care.weightKg - MEAL_WEIGHT_KG / 2, breed) }
 }
 
 export function exercise(care: Care, seconds: number, breed: Breed): Care {

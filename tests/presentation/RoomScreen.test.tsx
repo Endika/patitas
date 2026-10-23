@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
 import { GAIN_MS, NOTICE_MS } from '@/presentation/screens/RoomScreen'
-import { PAY, START_COINS } from '@/domain/wallet'
+import { createWallet, PAY, START_COINS } from '@/domain/wallet'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
 import { createCare, health } from '@/domain/care'
@@ -443,6 +443,28 @@ describe('RoomScreen', () => {
     const most = START_COINS + PAY.bath.coins * PAY.bath.times
     expect(coins(most)).toBeInTheDocument()
     await waitFor(async () => expect((await storage.loadWallet())?.coins).toBe(most))
+  })
+
+  it('sells in the shop what the coins reach, and puts a special food in the bowl from «Cuidar»', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    await storage.saveWallet({ ...createWallet(0), coins: 20 })
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ needs: [needs('k', 'Kuma')] }))
+
+    await user.click(screen.getByRole('button', { name: /Tienda/ }))
+    const shop = within(screen.getByRole('region', { name: 'Tienda' }))
+    await user.click(shop.getByRole('button', { name: 'Comprar Pienso premium por 15 monedas' }))
+    expect(coins(5)).toBeInTheDocument()
+    expect(shop.getByText('Tienes 1')).toBeInTheDocument()
+    expect(shop.getByRole('button', { name: 'Comida energética: faltan 7 monedas' })).toBeDisabled()
+
+    await care(user, 'Pienso premium, quedan 1')
+    expect(stage.calls).toContain('feed:0:premium')
+    await user.click(screen.getByRole('button', { name: 'Cuidar' }))
+    expect(screen.queryByRole('button', { name: /Pienso premium/ })).not.toBeInTheDocument()
+    await waitFor(async () => expect((await storage.loadWallet())?.stock.premium).toBe(0))
   })
 
   it('lets «+5» go after a while', async () => {

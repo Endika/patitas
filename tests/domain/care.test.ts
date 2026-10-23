@@ -21,6 +21,10 @@ import {
   ENERGY_MOVE_LOSS_PER_HOUR,
   exercise,
   feed,
+  ENERGY_FOOD,
+  MEAL_WEIGHT_KG,
+  PREMIUM_SHINE,
+  savour,
   groom,
   health,
   isNight,
@@ -195,6 +199,25 @@ describe('actions', () => {
   it('tire spends energy slowly while the puppy moves about', () => {
     expect(tire({ ...care, energy: 0.8 }, 3600).energy).toBeCloseTo(0.8 - ENERGY_MOVE_LOSS_PER_HOUR)
     expect(tire(care, 360000).energy).toBe(0)
+  })
+})
+
+describe('special food', () => {
+  const care = { ...createCare(breed, 0), happiness: 0.4, shine: 0.2, energy: 0.5 }
+
+  it('premium cheers it up and makes the coat shine', () => {
+    const after = savour(care, 'premium', breed)
+    expect(after.happiness).toBeGreaterThan(care.happiness)
+    expect(after.shine).toBeCloseTo(care.shine + PREMIUM_SHINE)
+  })
+
+  it('energy food gives energy back', () => {
+    expect(savour(care, 'energy', breed).energy).toBeCloseTo(care.energy + ENERGY_FOOD)
+  })
+
+  it('light food puts on half what a meal does', () => {
+    const fed = savour(feed(care, breed), 'light', breed)
+    expect(fed.weightKg - care.weightKg).toBeCloseTo(MEAL_WEIGHT_KG / 2)
   })
 })
 
