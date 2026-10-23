@@ -122,6 +122,11 @@ export interface RoomStage {
    * its weight. One at a time; a call, a trick or the ball calls it off.
    */
   weigh(index: number): void
+  /**
+   * A sound the microphone heard: 'noise', those awake look at the player; 'call', the puppy the
+   * buttons are for, or both with none picked, comes in glad hops.
+   */
+  hear(kind: 'noise' | 'call'): void
   /** Debug page only: sends the first puppy into the puddle, if it is awake and doing nothing else. */
   toMud?(): void
   /** Debug page only: the first puppy squats where it stands, if it is awake and doing nothing else. */

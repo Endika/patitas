@@ -99,6 +99,7 @@ export function createFakeStage(place?: PlaceAccident) {
     brush: (index) => void calls.push(`brush:${index}`),
     endBrush: () => void calls.push('endBrush'),
     weigh: (index) => void calls.push(`weigh:${index}`),
+    hear: (kind) => void calls.push(`hear:${kind}`),
     onChange(listener) {
       listeners.add(listener)
       listener(status)

@@ -11,9 +11,11 @@ import {
   bathe,
   brushPuppy,
   callOver,
+  comeHopping,
   dropFetch,
   finishBath,
   headWorld,
+  hearNoise,
   hitPuppy,
   liftCoat,
   mountPuppyView,
@@ -35,7 +37,7 @@ import { loadPuppyGeometry, peekPuppyGeometry } from '@/engine/puppy/geometryCli
 import { createBall, stepBall, throwVelocity } from '@/engine/room/ball'
 import { createBathLayer, rinse, takeDryer } from '@/engine/room/bath'
 import { createBrushLayer } from '@/engine/room/brush'
-import { clampPlay } from '@/engine/room/camera'
+import { clampPlay, playAxes } from '@/engine/room/camera'
 import { attachPointer, rayHitsBall } from '@/engine/room/input'
 import {
   bedSlots,
@@ -75,6 +77,9 @@ import {
 const ASLEEP_AWAY = 10 * 60_000
 /** Seconds «¡Limpio!» stays up after a mess is cleaned. */
 const CLEANED_TIME = 1.2
+/** Called by sounds, a puppy comes this far in front of the room's middle; two this far apart. */
+const COME_NEAR = 0.35,
+  COME_APART = 0.3
 /** Seconds a trick it has yet to learn takes to come, after a puzzled look. */
 const TRICK_DOUBT = 1.2
 /** Seconds after a trick a treat still teaches it. */
@@ -199,6 +204,7 @@ export function createThreeStage(
       brush() {},
       endBrush() {},
       weigh() {},
+      hear() {},
       onChange: hub.onChange,
       onDeed: () => () => {},
       dispose: hub.clear,
@@ -629,6 +635,25 @@ export function createThreeStage(
     weigh(index) {
       const v = views[index]
       if (v && room.furniture && !views.some((w) => weighing(w.routine))) weighPuppy(v)
+    },
+    hear(kind) {
+      if (kind === 'noise') {
+        for (const v of views) hearNoise(v, room.camera.position, now())
+        return
+      }
+      const picked = chosen === null ? undefined : views[chosen]
+      const coming = picked ? [picked] : views
+      const { fx, fz } = playAxes(room.cam)
+      coming.forEach((v, i) => {
+        // Two come side by side rather than to the same spot
+        const side = coming.length > 1 ? (i ? COME_APART : -COME_APART) : 0
+        comeHopping(
+          v,
+          room.cam.target.x - fx * COME_NEAR - fz * side,
+          room.cam.target.z - fz * COME_NEAR + fx * side,
+          mood(v),
+        )
+      })
     },
     toMud() {
       const v = views[0],

@@ -91,6 +91,7 @@ import {
   createBehaviourState,
   LID_OPEN,
   LOW_LID,
+  POINTER_ATTENTION,
   stepBehaviour,
   yawn,
   type BehaviourPose,
@@ -1313,6 +1314,47 @@ export function callOver<V extends Pick<PuppyView, 'motion' | 'routine' | 'behav
   if (!v || touch(v.routine) || v.routine.held || keepsEating(v.routine, v.care)) return
   goTo(v.motion, x, z, opts(v))
   v.behaviour.perk = 1
+}
+
+/** Seconds a puppy keeps looking at the player after a loud sound, short of POINTER_ATTENTION. */
+const HEARD_LOOK = 1.5
+/** A call brings it this much happiness: it comes gladly. */
+const CALLED_JOY = 0.2
+
+/**
+ * A loud sound from the player: an awake puppy free to, ears up, looks at `at` (the camera) for a
+ * moment, as if called. Returns whether it looked.
+ */
+export function hearNoise(
+  view: Pick<PuppyView, 'routine' | 'fetch' | 'behaviour'>,
+  at: Vec3,
+  now: number,
+): boolean {
+  if (view.routine.routine === 'sleeping' || view.routine.held || view.fetch.task !== 'free')
+    return false
+  view.behaviour.pointerLook.copy(at)
+  view.behaviour.pointerAt = now - (POINTER_ATTENTION - HEARD_LOOK)
+  view.behaviour.perk = 1
+  return true
+}
+
+/**
+ * Called by sounds again and again: the puppy comes to (x, z) in glad hops. One napping by day
+ * wakes and comes once it has stretched; one asleep for the night, held, playing ball or deep in a
+ * meal stays. Returns whether it comes.
+ */
+export function comeHopping<
+  V extends Pick<PuppyView, 'motion' | 'routine' | 'behaviour' | 'care' | 'fetch'>,
+>(view: V, x: number, z: number, opts: GoToOpts): boolean {
+  const { routine } = view
+  if (routine.routine === 'sleeping' && !routine.nap) return false
+  if (routine.held || view.fetch.task !== 'free' || keepsEating(routine, view.care)) return false
+  view.behaviour.happy = Math.min(1, view.behaviour.happy + CALLED_JOY)
+  view.behaviour.perk = 1
+  // Woken from a nap, it says hello in front of the room once it has stretched
+  if (touch(routine)) return true
+  goTo(view.motion, x, z, { ...opts, gait: 'hop' })
+  return true
 }
 
 /**
