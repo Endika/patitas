@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/Endika/patitas/compare/v0.21.0...v0.22.0) (2026-10-23)
+
+
+### Features
+
+* **mic:** hear claps over the background noise ([36e9980](https://github.com/Endika/patitas/commit/36e9980e465a04c9a2b1d3146e930e75458bcfef))
+
 ## [0.21.0](https://github.com/Endika/patitas/compare/v0.20.0...v0.21.0) (2026-10-23)
 
 
