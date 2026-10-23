@@ -2,8 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
-import { teach, type Puppy, type Trick } from '@/domain/puppy'
-import { buy, choose, spendOne, type Consumable, type ItemId, type Keepsake } from '@/domain/shop'
+import { teach, wear, type Puppy, type Trick } from '@/domain/puppy'
+import {
+  buy,
+  choose,
+  spendOne,
+  type CollarLook,
+  type Consumable,
+  type ItemId,
+  type Keepsake,
+} from '@/domain/shop'
 import { createWallet, earn, withWalletDefaults, type Deed, type Wallet } from '@/domain/wallet'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
 import type { GameStorage } from '@/infrastructure/storage'
@@ -36,6 +44,8 @@ export interface Game {
   use(id: Keepsake): void
   /** A treat taught the puppy a little more of `trick`. */
   teach(id: string, trick: Trick): Promise<void>
+  /** Puts a collar on the puppy, or takes its collar off. */
+  wear(id: string, collar: CollarLook | null): Promise<void>
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
@@ -127,16 +137,25 @@ export function useGame(
     [change, now],
   )
 
-  const teachTrick = useCallback(async (id: string, trick: Trick) => {
+  /** Saves the puppy `id` as `change` leaves it. */
+  const changePuppy = useCallback(async (id: string, change: (p: Puppy) => Puppy) => {
     const s = storage.current!
     const puppy = (await s.listPuppies()).find((p) => p.id === id)
     if (!puppy) return
-    const taught = teach(puppy, trick)
-    await s.savePuppy(taught)
+    const changed = change(puppy)
+    await s.savePuppy(changed)
     setState(
-      (prev) => prev && { ...prev, puppies: prev.puppies.map((p) => (p.id === id ? taught : p)) },
+      (prev) => prev && { ...prev, puppies: prev.puppies.map((p) => (p.id === id ? changed : p)) },
     )
   }, [])
+  const teachTrick = useCallback(
+    (id: string, trick: Trick) => changePuppy(id, (p) => teach(p, trick)),
+    [changePuppy],
+  )
+  const wearCollar = useCallback(
+    (id: string, collar: CollarLook | null) => changePuppy(id, (p) => wear(p, collar)),
+    [changePuppy],
+  )
 
   return {
     state,
@@ -150,5 +169,6 @@ export function useGame(
     spend,
     use: putToUse,
     teach: teachTrick,
+    wear: wearCollar,
   }
 }

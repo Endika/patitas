@@ -11,7 +11,7 @@ import {
   type WeightStatus,
 } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
-import type { FoodId } from '@/domain/shop'
+import type { CollarLook, FoodId } from '@/domain/shop'
 import { clamp, damp, MAX_DT, type Vec3 } from '@/engine/math'
 import {
   createFetchState,
@@ -159,6 +159,8 @@ export interface PuppyView extends BehaviourRig, SceneView {
   rest: Record<string, THREE.Vector3>
   eyes: EyeRig[]
   tongue: THREE.Mesh
+  /** Round its neck, hidden while it wears none. */
+  collar: THREE.Group
   zones: ZoneRig[]
   /** In the order of `legs`: [LF, RF, LH, RH]. */
   legBones: LegBones[]
@@ -314,6 +316,55 @@ export function disposeOwn(own: THREE.BufferGeometry, shared: THREE.BufferGeomet
   own.dispose()
 }
 
+/** How much of the fur a collar presses down: it sits on it, not on the skin or the tips. */
+const COLLAR_ON_FUR = 0.55
+const COLLAR_COLOUR: Record<CollarLook, string> = {
+  red: '#c43e37',
+  blue: '#356bb5',
+  gold: '#dca22a',
+}
+
+/**
+ * A strap round the neck at `at`, along `axis`, with a little round tag in front, under the chin;
+ * placed in the frame of the neck bone at `neck`, hidden until worn.
+ */
+function collarRig(
+  { at, axis, r }: { at: Tuple3; axis: Tuple3; r: number },
+  fur: number,
+  neck: Tuple3,
+): THREE.Group {
+  const g = new THREE.Group()
+  const radius = r + fur * COLLAR_ON_FUR
+  const strap = new THREE.Mesh(
+    new THREE.TorusGeometry(radius, 0.014, 10, 48),
+    new THREE.MeshStandardMaterial({ roughness: 0.55 }),
+  )
+  strap.scale.z = 1.6
+  strap.castShadow = true
+  const tag = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.02, 0.02, 0.006, 20).rotateX(Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: '#e6c25a', metalness: 0.7, roughness: 0.3 }),
+  )
+  // Hanging from the strap's lowest front point
+  tag.position.set(0, -radius - 0.016, 0)
+  g.add(strap, tag)
+  g.position.set(at[0] - neck[0], at[1] - neck[1], at[2] - neck[2])
+  g.quaternion.setFromUnitVectors(Z, new THREE.Vector3(...axis))
+  g.visible = false
+  return g
+}
+
+/** Puts `collar` on the puppy, or takes its collar off. */
+export function setCollar(view: Pick<PuppyView, 'collar'>, collar: CollarLook | null): void {
+  view.collar.visible = !!collar
+  if (!collar) return
+  const strap = view.collar.children[0] as THREE.Mesh<
+    THREE.BufferGeometry,
+    THREE.MeshStandardMaterial
+  >
+  strap.material.color.set(COLLAR_COLOUR[collar])
+}
+
 /** Builds the skinned, furred puppy with its eyes, nose and tongue and adds it to the room. */
 export function mountPuppyView(
   room: RoomScene,
@@ -416,6 +467,8 @@ export function mountPuppyView(
     }
     return { pivot, ball, lid, low }
   })
+  const collar = collarRig(A.collar, breed.fur.fur, bonePos('neck'))
+  bone('neck').add(collar)
   const noseMat = noseMaterial(breed.nose)
   const noseGeo = noseGeometry()
   const nose = new THREE.Mesh(noseGeo, noseMat)
@@ -469,6 +522,7 @@ export function mountPuppyView(
     rest,
     eyes,
     tongue,
+    collar,
     zones,
     legBones: LEG_BONES.map(([up, lo, end]) => ({ up: bone(up), lo: bone(lo), end: bone(end) })),
     legs,
@@ -503,6 +557,11 @@ export function mountPuppyView(
       for (const m of shells) m.material.dispose()
       disposeOwn(furGeometry, geometry)
       for (const m of [eyeMat, lidMat, noseMat, tongueMat]) m.dispose()
+      collar.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return
+        o.geometry.dispose()
+        ;(o.material as THREE.Material).dispose()
+      })
       for (const g of [eyeGeo, upperLid, lowerLid, noseGeo, tongue.geometry]) g.dispose()
       for (const g of glints) {
         g.geo.dispose()

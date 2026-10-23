@@ -6,6 +6,7 @@ import {
   owns,
   SHOP,
   type Aisle,
+  type CollarLook,
   type ItemId,
   type Keepsake,
 } from '@/domain/shop'
@@ -19,10 +20,15 @@ export default function Shop({
   wallet,
   onBuy,
   onUse,
+  wearer,
+  onWear,
 }: {
   wallet: Wallet
   onBuy(id: ItemId): void
   onUse(id: Keepsake): void
+  /** The puppy a collar bought goes on, and the one it wears; none with the room empty. */
+  wearer?: { name: string; collar: CollarLook | null; alone: boolean }
+  onWear(collar: CollarLook | null): void
 }) {
   const [aisle, setAisle] = useState<Aisle>(AISLES[0]!.id)
   return (
@@ -41,13 +47,43 @@ export default function Shop({
           </button>
         ))}
       </div>
+      {aisle === 'collar' && wearer && (
+        <p className="room-shop-for">
+          {wearer.alone
+            ? `Para ${wearer.name}.`
+            : `Para ${wearer.name}: toca al otro cachorro para elegirlo.`}
+        </p>
+      )}
       <ul className="room-shop-items">
         {SHOP.filter((item) => item.aisle === aisle).map((item) => {
           const short = item.price - wallet.coins
           const keep = isKeepsake(item.id) ? item.id : null
           const left = keep ? 0 : (wallet.stock[item.id as Exclude<ItemId, Keepsake>] ?? 0)
+          const collar = item.use?.slot === 'collar' ? (item.use.look as CollarLook) : null
           let action
-          if (keep && inUse(wallet, keep))
+          if (keep && collar && owns(wallet, keep))
+            action = !wearer ? (
+              <button type="button" disabled aria-label={`${item.name}: no hay nadie en la sala`}>
+                Ponérselo
+              </button>
+            ) : wearer.collar === collar ? (
+              <button
+                type="button"
+                aria-label={`Quitar ${item.name} a ${wearer.name}`}
+                onClick={() => onWear(null)}
+              >
+                Quitárselo
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label={`Poner ${item.name} a ${wearer.name}`}
+                onClick={() => onWear(collar)}
+              >
+                Ponérselo
+              </button>
+            )
+          else if (keep && inUse(wallet, keep))
             action = (
               <button type="button" aria-pressed="true" aria-label={`${item.name}, en uso`}>
                 En uso
