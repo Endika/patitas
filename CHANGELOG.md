@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/Endika/patitas/compare/v0.15.1...v0.16.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** earn coins for caring and playing, up to a daily cap ([eb48e8a](https://github.com/Endika/patitas/commit/eb48e8a6a7b26c3093af4e6c1be1353972586f55))
+
 ## [0.15.1](https://github.com/Endika/patitas/compare/v0.15.0...v0.15.1) (2026-10-23)
 
 
