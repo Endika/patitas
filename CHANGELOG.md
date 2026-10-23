@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/Endika/patitas/compare/v0.10.0...v0.11.0) (2026-10-23)
+
+
+### Features
+
+* **puppy:** left alone for a while by day, a puppy naps in its bed or on the floor ([39616e2](https://github.com/Endika/patitas/commit/39616e23e5b1a982ec1bfdf3e5f4456b8f647f10))
+
 ## [0.10.0](https://github.com/Endika/patitas/compare/v0.9.2...v0.10.0) (2026-10-23)
 
 
