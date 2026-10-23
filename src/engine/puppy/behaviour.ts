@@ -351,7 +351,8 @@ export function stepBehaviour(
     sw = M.sleepW
   const eating = input.routine === 'eating',
     begging = input.routine === 'begging',
-    splashing = input.routine === 'splashing'
+    splashing = input.routine === 'splashing',
+    greeting = input.routine === 'greeting' || input.routine === 'greeted'
   const bath = input.bath && input.bath.phase !== 'off' ? input.bath : null
   const dislikesBath = P.bath < BATH_DISLIKE,
     hatesBath = P.bath < BATH_HATE
@@ -372,6 +373,9 @@ export function stepBehaviour(
   const target = new THREE.Vector3()
   if (eating || splashing)
     target.set(M.pos.x + Math.sin(M.heading) * 0.45, 0.05, M.pos.z + Math.cos(M.heading) * 0.45)
+  // Nose to the other's nose, ahead at its own height
+  else if (greeting)
+    target.set(M.pos.x + Math.sin(M.heading) * 1.2, 0.3, M.pos.z + Math.cos(M.heading) * 1.2)
   else if (begging || bath || input.brush) target.copy(input.camera)
   else if (task === 'wait' || task === 'chase' || fetch.watch) target.copy(ball.pos)
   else if (task === 'present' || (petting && petHead)) target.copy(input.camera)

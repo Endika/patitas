@@ -1,7 +1,7 @@
 // @vitest-environment node
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { BREEDS } from '@/domain/breeds'
+import { BREEDS, type Persona } from '@/domain/breeds'
 import {
   addMess,
   createCare,
@@ -14,6 +14,7 @@ import { legRigs } from '@/engine/motion/ik'
 import {
   createLegStates,
   createMotionState,
+  goTo,
   stepLocomotion,
   type LegState,
   type MotionState,
@@ -109,6 +110,10 @@ interface Pup {
   left: { kind: MessKind; x: number; z: number }[]
   /** Times it stepped onto the scale. */
   weighed: number
+  /** Times it sniffed noses with the other. */
+  greeted: number
+  /** Its character, as the other sees it and as it greets. */
+  persona: Persona
 }
 
 function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
@@ -125,6 +130,8 @@ function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
     fed: 0,
     left: [],
     weighed: 0,
+    greeted: 0,
+    persona: BREEDS.shiba.defaultPersona,
   }
 }
 
@@ -145,8 +152,7 @@ function run(
   const peers = pups.map(() => createPeer(BREEDS.shiba.defaultPersona))
   for (let n = 0; n < secs / DT; n++) {
     // As the room does: each of two sees the other as it stood before either moves
-    if (pups.length === 2)
-      pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, BREEDS.shiba.defaultPersona, false))
+    if (pups.length === 2) pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, p.persona, false))
     for (const [i, p] of pups.entries()) {
       const ctx: RoutineCtx = {
         ...base,
@@ -156,6 +162,7 @@ function run(
         place: places?.[i] ?? i,
         bowl: p.bowl,
         random,
+        social: p.persona.social,
         ...(pups.length === 2 && { peer: peers[1 - i] }),
         ...more,
       }
@@ -164,6 +171,7 @@ function run(
       p.bowl = ev.bowl
       if (ev.fed) p.fed++
       if (ev.weighed) p.weighed++
+      if (ev.greeted) p.greeted++
       if (ev.mess) {
         p.left.push({ ...ev.mess })
         p.care = addMess(p.care, { ...ev.mess, createdAt: ctx.now })
@@ -974,6 +982,178 @@ describe('the other puppy', () => {
     letGo(a.r)
     expect(seePeer(seen, a.r, a.m, persona, true).busy).toBe(true)
     expect(seePeer(seen, a.r, a.m, persona, false).busy).toBe(false)
+  })
+})
+
+describe('greeting', () => {
+  const SOCIABLE = { ...BREEDS.dorado.defaultPersona, social: 0.9 },
+    LONER = { ...BREEDS.shiba.defaultPersona, social: 0.1 }
+  /** Two side by side, both long since a greeting, the second just back from its bath. */
+  const backFromBath = (a: Persona, b: Persona) => {
+    const [l, r] = STARTS2
+    const one = pup(l!.x, l!.z),
+      two = pup(r!.x, r!.z)
+    one.persona = a
+    two.persona = b
+    one.r.greetAgo = two.r.greetAgo = 60
+    holdStill(two.r, two.m, 'bathing')
+    run([one, two], DT, at(12), SPOTS2)
+    letGo(two.r)
+    return [one, two] as const
+  }
+  /** How far from head to head two are turned: 0 facing each other square on. */
+  const facing = (a: Pup, b: Pup) => {
+    const d = a.m.heading - b.m.heading - Math.PI
+    return Math.abs(Math.atan2(Math.sin(d), Math.cos(d)))
+  }
+  /** The gap between their heads' spheres: the noses meet near 0. */
+  const noses = (a: Pup, b: Pup) => {
+    const ha = bodyOf(a.m.pos, a.m.heading, a.m.pose, SHAPE, createBody()).head,
+      hb = bodyOf(b.m.pos, b.m.heading, b.m.pose, SHAPE, createBody()).head
+    return Math.hypot(ha.x - hb.x, ha.z - hb.z) - ha.r - hb.r
+  }
+
+  it('the other back from its bath, they sniff noses head to head within ten seconds', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    let closest = Infinity,
+      started = NaN,
+      gap = NaN,
+      turned = NaN,
+      t = 0
+    run([one, two], 15, at(12), SPOTS2, () => {
+      t += DT
+      closest = Math.min(closest, Math.hypot(one.m.pos.x - two.m.pos.x, one.m.pos.z - two.m.pos.z))
+      if (one.r.routine !== 'greeting' || one.r.sniffT < 0) return
+      if (isNaN(started)) started = t
+      gap = noses(one, two)
+      turned = facing(one, two)
+    })
+    expect(one.seen).toContain('greeting')
+    expect(two.seen).toContain('greeted')
+    expect([one.greeted, two.greeted]).toEqual([1, 1])
+    expect(started).toBeLessThan(10)
+    expect(Math.abs(gap)).toBeLessThan(0.35)
+    expect(turned).toBeLessThan(0.5)
+    expect(closest).toBeGreaterThan(0.33)
+    expect([one.r.routine, two.r.routine]).toEqual(['none', 'none'])
+  })
+
+  it('back together, it is the more sociable that goes up to the other', () => {
+    const [one, two] = backFromBath(LONER, SOCIABLE)
+    run([one, two], 15, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    expect(two.seen).toContain('greeting')
+    expect(one.seen).toContain('greeted')
+    expect(one.seen).not.toContain('greeting')
+  })
+
+  it('both back at once, only one goes up to the other, and they do greet', () => {
+    const [l, r] = STARTS2
+    const one = pup(l!.x, l!.z),
+      two = pup(r!.x, r!.z)
+    one.persona = two.persona = SOCIABLE
+    one.r.greetAgo = two.r.greetAgo = 60
+    holdStill(one.r, one.m, 'brushing')
+    holdStill(two.r, two.m, 'bathing')
+    run([one, two], DT, at(12), SPOTS2)
+    letGo(one.r)
+    letGo(two.r)
+    run([one, two], 15, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    expect([one.greeted, two.greeted]).toEqual([1, 1])
+    expect([one.seen.includes('greeting'), two.seen.includes('greeting')]).toEqual([true, false])
+  })
+
+  it('one already in the room welcomes one new to it', () => {
+    const [l, r] = STARTS2
+    const there = pup(l!.x, l!.z),
+      fresh = pup(r!.x, r!.z)
+    there.persona = LONER
+    fresh.persona = SOCIABLE
+    run([there], DT, at(12), SPOTS2)
+    run([there, fresh], 15, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    expect(there.seen).toContain('greeting')
+    expect([there.greeted, fresh.greeted]).toEqual([1, 1])
+  })
+
+  it('a touch only puts a greeting off a moment', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    touch(one.r)
+    run([one, two], 4, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    expect(one.seen).not.toContain('greeting')
+    run([one, two], 8, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    expect([one.greeted, two.greeted]).toEqual([1, 1])
+  })
+
+  it('one greeted that never turns to it is not glad of a greeting that never was', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    const away = () => {
+      if (two.r.routine === 'greeted')
+        two.m.heading = Math.atan2(two.m.pos.x - one.m.pos.x, two.m.pos.z - one.m.pos.z)
+    }
+    run([one, two], 15, at(12), SPOTS2, away, undefined, { random: () => 0 })
+    expect(one.seen).toContain('greeting')
+    expect([one.greeted, two.greeted]).toEqual([0, 0])
+  })
+
+  it('at most one greeting a minute, and none once the moment has passed', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    one.r.greetAgo = 30
+    run([one, two], 20, at(12), SPOTS2)
+    expect(one.seen).not.toContain('greeting')
+    // Past the minute, the return is old news
+    run([one, two], 15, at(12), SPOTS2)
+    expect(one.seen).not.toContain('greeting')
+  })
+
+  it('two sociable ones greet nearly always; with a loner, now and then', () => {
+    const greets = (b: Persona) =>
+      Array.from({ length: 20 }, (_, seed) => {
+        const [one, two] = backFromBath(SOCIABLE, b)
+        run([one, two], 2, at(12), SPOTS2, undefined, undefined, { random: seeded(seed + 1) })
+        return one.seen.includes('greeting')
+      }).filter(Boolean).length
+    expect(greets(SOCIABLE)).toBeGreaterThanOrEqual(16)
+    const lonely = greets(LONER)
+    expect(lonely).toBeGreaterThan(2)
+    expect(lonely).toBeLessThan(14)
+  })
+
+  it('called away, the one greeted goes, the greeting is off and neither is glad of it', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    run([one, two], 1, at(12), SPOTS2)
+    expect([one.r.routine, two.r.routine]).toEqual(['greeting', 'greeted'])
+    expect(staysPut(two.r)).toBe(true)
+    const [x, z] = clamp(0, 0)
+    const far = Math.hypot(two.m.pos.x - x, two.m.pos.z - z)
+    touch(two.r)
+    goTo(two.m, x, z, { happy: 0.5, energy: 0.5, clamp })
+    run([one, two], 3, at(12), SPOTS2)
+    expect([one.r.routine, two.r.routine]).toEqual(['none', 'none'])
+    expect(two.seen.filter((r) => r === 'greeted')).toHaveLength(1)
+    expect(Math.hypot(two.m.pos.x - x, two.m.pos.z - z)).toBeLessThan(far - 0.3)
+    expect([one.greeted, two.greeted]).toEqual([0, 0])
+  })
+
+  it('called away, the one going up to greet goes where it is called instead', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    touch(one.r)
+    goTo(one.m, 0, 0, { happy: 0.5, energy: 0.5, clamp })
+    run([one, two], 3, at(12), SPOTS2)
+    expect(one.seen).not.toContain('greeting')
+  })
+
+  it('the other taken for its brush or the ball calls it off', () => {
+    const [one, two] = backFromBath(SOCIABLE, SOCIABLE)
+    run([one, two], 1, at(12), SPOTS2)
+    expect(one.r.routine).toBe('greeting')
+    holdStill(two.r, two.m, 'brushing')
+    run([one, two], 2 * DT, at(12), SPOTS2)
+    expect(one.r.routine).toBe('none')
+    expect([one.greeted, two.greeted]).toEqual([0, 0])
+    const [three, four] = backFromBath(SOCIABLE, SOCIABLE)
+    run([three, four], 1, at(12), SPOTS2)
+    run([three, four], DT, at(12), SPOTS2, undefined, undefined, { busy: true })
+    run([three, four], DT, at(12), SPOTS2)
+    expect([three.r.routine, four.r.routine]).toEqual(['none', 'none'])
   })
 })
 
