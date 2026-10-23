@@ -11,7 +11,13 @@ import { createCare, health } from '@/domain/care'
 import { knows, TREAT_LESSON } from '@/domain/puppy'
 import type { GameStorage } from '@/infrastructure/storage'
 import { fakeHistory, type FakeHistory } from './fakeHistory'
-import { createFakePreview, createFakeStage, needs, savingStorage } from './fakeStage'
+import {
+  createFakeMic,
+  createFakePreview,
+  createFakeStage,
+  needs,
+  savingStorage,
+} from './fakeStage'
 
 async function adopted(names: string[]): Promise<GameStorage> {
   const storage = savingStorage()
@@ -31,10 +37,12 @@ const start = (
     stage = createFakeStage(),
     now = Date.now,
     history,
+    mic = createFakeMic(),
   }: {
     stage?: ReturnType<typeof createFakeStage>
     now?: () => number
     history?: FakeHistory
+    mic?: ReturnType<typeof createFakeMic>
   } = {},
 ) => {
   render(
@@ -44,6 +52,7 @@ const start = (
       createPreview={createFakePreview().create}
       now={now}
       history={history}
+      openMic={mic.open}
     />,
   )
   return stage
@@ -570,6 +579,86 @@ describe('RoomScreen', () => {
     await user.click(shop.getByRole('button', { name: 'Quitar Collar azul a Kira' }))
     await waitFor(() => expect(stage.collars.get(kira)).toBeNull())
     expect((await saved(kira))?.collar).toBeUndefined()
+  })
+
+  it('explains «Escuchar» first, then hears claps and calls until switched off', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    const mic = createFakeMic()
+    const stage = start(storage, { mic })
+    await roster()
+    expect(mic.opened).toHaveLength(0)
+
+    const listen = screen.getByRole('button', { name: 'Escuchar' })
+    await user.click(listen)
+    const ask = screen.getByRole('dialog', { name: 'Escuchar' })
+    expect(ask).toHaveTextContent('no se guarda ni se envía')
+    // Not yet: the microphone is asked for only once the player agrees
+    expect(mic.opened).toHaveLength(0)
+    await user.click(within(ask).getByRole('button', { name: 'Activar' }))
+    expect(listen).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(mic.live()).toBeTruthy())
+
+    const knock = () => {
+      for (let i = 0; i < 5; i++) mic.live()!.level(-25)
+      for (let i = 0; i < 30; i++) mic.live()!.level(-60)
+    }
+    act(() => {
+      for (let i = 0; i < 10; i++) mic.live()!.level(-60)
+      knock()
+      knock()
+      knock()
+    })
+    expect(stage.calls.filter((c) => c.startsWith('hear:'))).toEqual([
+      'hear:noise',
+      'hear:noise',
+      'hear:call',
+    ])
+    await waitFor(async () =>
+      expect(await storage.loadSettings()).toEqual({ listen: true, explained: true }),
+    )
+
+    await user.click(listen)
+    expect(listen).toHaveAttribute('aria-pressed', 'false')
+    expect(mic.live()).toBeUndefined()
+    // Explained once: on again at once
+    await user.click(listen)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(mic.live()).toBeTruthy())
+  })
+
+  it('lets go of the microphone while the app is hidden, and takes it again on return', async () => {
+    const storage = await adopted(['Kuma'])
+    await storage.saveSettings({ listen: true, explained: true })
+    const mic = createFakeMic()
+    start(storage, { mic })
+    await roster()
+    await waitFor(() => expect(mic.live()).toBeTruthy())
+    hide('hidden')
+    expect(mic.live()).toBeUndefined()
+    hide('visible')
+    await waitFor(() => expect(mic.live()).toBeTruthy())
+    expect(mic.opened).toHaveLength(2)
+  })
+
+  it('switches «Escuchar» off and says so when the microphone is refused', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    const mic = createFakeMic()
+    mic.refuse()
+    start(storage, { mic })
+    await roster()
+    await user.click(screen.getByRole('button', { name: 'Escuchar' }))
+    await user.click(screen.getByRole('button', { name: 'Activar' }))
+    expect(
+      await screen.findByText(
+        'No se ha podido usar el micrófono. Revisa el permiso en el navegador.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Escuchar' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
   })
 
   it('lets «+5» go after a while', async () => {

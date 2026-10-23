@@ -2,18 +2,20 @@ import { openDB, type DBSchema } from 'idb'
 import { withCareDefaults, type Care } from '../domain/care'
 import { withPersonaDefaults, type Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
+import type { Settings } from '../domain/settings'
 import type { Wallet } from '../domain/wallet'
 import { createMemoryStorage } from './memoryStorage'
 import type { GameStorage } from './storage'
 
 interface PatitasDb extends DBSchema {
   puppies: { key: string; value: Puppy }
-  meta: { key: string; value: Room | Wallet }
+  meta: { key: string; value: Room | Wallet | Settings }
   care: { key: string; value: Care }
 }
 
 const ROOM_KEY = 'room',
-  WALLET_KEY = 'wallet'
+  WALLET_KEY = 'wallet',
+  SETTINGS_KEY = 'settings'
 
 /** What the storage needs from the page when another tab holds a different version open. */
 export interface StorageHooks {
@@ -82,6 +84,10 @@ export async function openGameStorage(hooks: StorageHooks = NO_HOOKS): Promise<G
       loadWallet: async () => (await db.get('meta', WALLET_KEY)) as Wallet | undefined,
       saveWallet: async (wallet) => {
         await db.put('meta', wallet, WALLET_KEY)
+      },
+      loadSettings: async () => (await db.get('meta', SETTINGS_KEY)) as Settings | undefined,
+      saveSettings: async (settings) => {
+        await db.put('meta', settings, SETTINGS_KEY)
       },
     }
   } catch {

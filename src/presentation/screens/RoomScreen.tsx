@@ -21,7 +21,9 @@ import {
   type Keepsake,
   type ToyId,
 } from '@/domain/shop'
+import type { Settings } from '@/domain/settings'
 import type { Deed, Wallet } from '@/domain/wallet'
+import { openMicrophone, type OpenMicrophone } from '@/infrastructure/microphone'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
 import Hud from '../components/Hud'
@@ -34,6 +36,7 @@ import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
 import { TRICKS } from '../tricks'
 import { useFleeting } from '../useFleeting'
+import { useListening } from '../useListening'
 import { useRoomStage } from '../useRoomStage'
 import '../room.css'
 
@@ -80,6 +83,9 @@ export default function RoomScreen({
   onTeach,
   onUse,
   onWear,
+  settings,
+  onSettle,
+  openMic = openMicrophone,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -108,6 +114,11 @@ export default function RoomScreen({
   onUse(id: Keepsake): void
   /** Puts a collar on a puppy, or takes its collar off. */
   onWear(id: string, collar: CollarLook | null): Promise<void>
+  /** The player's choices about the app: «Escuchar» among them. */
+  settings: Settings
+  onSettle(change: Partial<Settings>): void
+  /** Where the sound comes from: the phone's microphone unless a test brings its own. */
+  openMic?: OpenMicrophone
   /** A treat taught a puppy a little more of a trick. */
   onTeach(id: string, trick: Trick): Promise<void>
   now?: () => number
@@ -171,6 +182,24 @@ export default function RoomScreen({
     setShopOpen(false)
   }, [])
   useDismiss(shop, shopOpen, closeShop)
+  // «Escuchar» explained before the browser asks for the microphone, the first time
+  const [asking, setAsking] = useState(false)
+  const earButton = useRef<HTMLButtonElement>(null)
+  const ear = useRef<HTMLDivElement>(null)
+  const askId = useId()
+  const closeAsk = useCallback((how: Dismissal) => {
+    if (how === 'escape') earButton.current?.focus()
+    setAsking(false)
+  }, [])
+  useDismiss(ear, asking, closeAsk)
+  const toggleListen = () => {
+    if (settings.listen) onSettle({ listen: false })
+    else if (settings.explained) onSettle({ listen: true })
+    else setAsking((a) => !a)
+  }
+  // Counts the failures, so each one says so again
+  const [deaf, setDeaf] = useState(0)
+  const micLost = useFleeting(deaf || null, NOTICE_MS)
   const [chosen, setChosen] = useState<{ id: string; after: number } | null>(null)
   const [unloaded, setUnloaded] = useState<ReadonlySet<string>>(() => new Set())
   const inRoom = useMemo(
@@ -270,6 +299,15 @@ export default function RoomScreen({
     status.needs.findIndex((n) => n.id === picked),
   )
 
+  useListening(
+    settings.listen && inRoom.length > 0,
+    openMic,
+    (kind) => stageRef.current?.hear(kind),
+    () => {
+      onSettle({ listen: false })
+      setDeaf((n) => n + 1)
+    },
+  )
   useEffect(() => {
     stageRef.current?.setToy(wallet.toy)
   }, [createStage, wallet.toy, stageRef])
@@ -339,14 +377,18 @@ export default function RoomScreen({
       closeShop('escape')
       return true
     }
+    if (asking) {
+      closeAsk('escape')
+      return true
+    }
     if (busy === 'bath') stageRef.current?.finishBath()
     else if (busy === 'brush') stageRef.current?.endBrush()
     return Boolean(busy)
   }
   useImperativeHandle(ref, () => ({ close: closeTop }))
   useEffect(() => {
-    if (castOpen || shopOpen || busy) onOpen?.()
-  }, [castOpen, shopOpen, busy, onOpen])
+    if (castOpen || shopOpen || asking || busy) onOpen?.()
+  }, [castOpen, shopOpen, asking, busy, onOpen])
 
   return (
     <div className="room">
@@ -366,72 +408,131 @@ export default function RoomScreen({
             traitsOf={traitsOf}
             onOpen={onOpen}
           />
-          <div ref={shop} className="room-wallet">
-            <button
-              type="button"
-              className="room-coins"
-              ref={shopButton}
-              aria-expanded={shopOpen}
-              aria-controls={shopOpen ? shopId : undefined}
-              onClick={() => setShopOpen((o) => !o)}
-            >
-              <span className="room-coin" aria-hidden="true" />
-              {wallet.coins}
-              <span className="sr-only"> {wallet.coins === 1 ? 'moneda' : 'monedas'} · Tienda</span>
-              {gained && (
-                <span key={gained.n} className="room-gain" aria-hidden="true">
-                  +{gained.coins}
-                </span>
-              )}
-            </button>
-            <span role="status" className="sr-only">
-              {gained && `+${gained.coins} monedas`}
-            </span>
-            {shopOpen && (
-              <div id={shopId} className="room-sheet">
-                <Shop
-                  wallet={wallet}
-                  onBuy={onBuy}
-                  onUse={onUse}
-                  wearer={
-                    wearer && {
-                      name: wearer.name,
-                      collar: wearer.collar ?? null,
-                      alone: inRoom.length < 2,
-                    }
-                  }
-                  onWear={(collar) => {
-                    if (wearer) onWear(wearer.id, collar).catch(() => {})
-                  }}
-                />
-              </div>
-            )}
-          </div>
-          {/* With nobody in the room, who to bring in is the only thing to do */}
-          <div ref={cast} className="room-cast">
-            {!empty && (
+          <div className="room-side">
+            <div ref={ear} className="room-ear">
               <button
                 type="button"
-                className="room-cast-toggle"
-                ref={castButton}
-                aria-expanded={castOpen}
-                aria-controls={castOpen ? castId : undefined}
-                onClick={() => setCastOpen((o) => !o)}
+                className="room-listen"
+                ref={earButton}
+                aria-pressed={settings.listen}
+                aria-expanded={asking}
+                aria-controls={asking ? askId : undefined}
+                onClick={toggleListen}
               >
-                Cachorros
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                  <path
+                    d="M7.5 9.5a4.5 4.5 0 1 1 9 0c0 3.2-3.2 4-3.2 7.2a2.6 2.6 0 0 1-5.1.6M10.2 9.6a1.8 1.8 0 0 1 3.6 0c0 1.2-1 1.6-1.6 2.3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className="room-listen-label">Escuchar</span>
               </button>
-            )}
-            {(castOpen || empty) && (
-              <div id={castId} className="room-sheet">
-                <Roster puppies={puppies} inRoom={room.inRoom} onToggle={toggle} />
-                <div className="room-sheet-foot">
-                  <button type="button" onClick={onAdoptAnother}>
-                    Adoptar otro
-                  </button>
-                  <FullscreenButton />
+              {asking && (
+                <div
+                  id={askId}
+                  role="dialog"
+                  aria-labelledby={`${askId}-t`}
+                  className="room-sheet room-ask"
+                >
+                  <h2 id={`${askId}-t`} className="room-shop-title">
+                    Escuchar
+                  </h2>
+                  <p>
+                    Patitas escucha para que tus cachorros reaccionen a palmadas y voces. El sonido
+                    se analiza en el móvil y no se guarda ni se envía.
+                  </p>
+                  <div className="room-sheet-foot">
+                    <button
+                      type="button"
+                      className="room-ask-yes"
+                      onClick={() => {
+                        setAsking(false)
+                        onSettle({ listen: true, explained: true })
+                      }}
+                    >
+                      Activar
+                    </button>
+                    <button type="button" onClick={() => closeAsk('escape')}>
+                      Ahora no
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+            <div ref={shop} className="room-wallet">
+              <button
+                type="button"
+                className="room-coins"
+                ref={shopButton}
+                aria-expanded={shopOpen}
+                aria-controls={shopOpen ? shopId : undefined}
+                onClick={() => setShopOpen((o) => !o)}
+              >
+                <span className="room-coin" aria-hidden="true" />
+                {wallet.coins}
+                <span className="sr-only">
+                  {' '}
+                  {wallet.coins === 1 ? 'moneda' : 'monedas'} · Tienda
+                </span>
+                {gained && (
+                  <span key={gained.n} className="room-gain" aria-hidden="true">
+                    +{gained.coins}
+                  </span>
+                )}
+              </button>
+              <span role="status" className="sr-only">
+                {gained && `+${gained.coins} monedas`}
+              </span>
+              {shopOpen && (
+                <div id={shopId} className="room-sheet">
+                  <Shop
+                    wallet={wallet}
+                    onBuy={onBuy}
+                    onUse={onUse}
+                    wearer={
+                      wearer && {
+                        name: wearer.name,
+                        collar: wearer.collar ?? null,
+                        alone: inRoom.length < 2,
+                      }
+                    }
+                    onWear={(collar) => {
+                      if (wearer) onWear(wearer.id, collar).catch(() => {})
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+            {/* With nobody in the room, who to bring in is the only thing to do */}
+            <div ref={cast} className="room-cast">
+              {!empty && (
+                <button
+                  type="button"
+                  className="room-cast-toggle"
+                  ref={castButton}
+                  aria-expanded={castOpen}
+                  aria-controls={castOpen ? castId : undefined}
+                  onClick={() => setCastOpen((o) => !o)}
+                >
+                  Cachorros
+                </button>
+              )}
+              {(castOpen || empty) && (
+                <div id={castId} className="room-sheet">
+                  <Roster puppies={puppies} inRoom={room.inRoom} onToggle={toggle} />
+                  <div className="room-sheet-foot">
+                    <button type="button" onClick={onAdoptAnother}>
+                      Adoptar otro
+                    </button>
+                    <FullscreenButton />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {full && (
@@ -447,6 +548,11 @@ export default function RoomScreen({
         {exitAsked && (
           <p role="status" className="room-note">
             Pulsa atrás otra vez para salir
+          </p>
+        )}
+        {micLost && (
+          <p role="alert" className="room-note">
+            No se ha podido usar el micrófono. Revisa el permiso en el navegador.
           </p>
         )}
         {unsaved && <UnsavedNotice className="room-note" />}

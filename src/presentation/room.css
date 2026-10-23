@@ -304,10 +304,49 @@
 .room-cast {
   flex: none;
 }
-/* The coins, which open the shop, sit just before «Cachorros», at the right of the bar */
-.room-wallet {
-  flex: none;
+/* «Escuchar», the coins, which open the shop, and «Cachorros», together at the right of the bar */
+.room-side {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
   margin-left: auto;
+}
+.room-wallet,
+.room-ear {
+  flex: none;
+}
+.room .room-listen {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  padding: 0;
+}
+.room .room-listen[aria-pressed='true'] {
+  color: var(--on-ink);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+/* Only the ear on a phone held upright; the word too in the rail of a wide screen */
+.room-listen-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.room-ask {
+  width: min(300px, 100%);
+}
+.room-ask p {
+  margin: 0 8px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.room .room-ask-yes {
+  color: var(--on-ink);
+  background: var(--ink);
+  border-color: var(--ink);
 }
 .room .room-coins {
   position: relative;
@@ -745,8 +784,28 @@
   .room-cast-toggle {
     width: 100%;
   }
-  .room-wallet {
+  .room-side {
+    flex-direction: column;
+    align-items: stretch;
     margin-left: 0;
+  }
+  .room .room-listen {
+    display: inline-flex;
+    gap: 8px;
+    justify-content: center;
+    width: 100%;
+  }
+  .room-listen-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+  .room-ask {
+    width: auto;
+  }
+  .room-ask .room-sheet-foot {
+    flex-direction: column;
   }
   .room-shop {
     width: auto;
