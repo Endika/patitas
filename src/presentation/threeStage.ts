@@ -1,6 +1,7 @@
 import { BREEDS } from '@/domain/breeds'
 import { cleanMess, createCare, health, isNight, type Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { Deed } from '@/domain/wallet'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
 import { endPet, movePet, pickHint, puzzle, startPet, type HintKey } from '@/engine/puppy/behaviour'
@@ -72,6 +73,8 @@ import {
 const ASLEEP_AWAY = 10 * 60_000
 /** Seconds «¡Limpio!» stays up after a mess is cleaned. */
 const CLEANED_TIME = 1.2
+/** Shine a brushing must add to earn coins. */
+const BRUSHED_SHINE = 0.2
 
 const hundredths = (x: number) => Math.round(x * 100) / 100
 
@@ -185,6 +188,7 @@ export function createThreeStage(
       endBrush() {},
       weigh() {},
       onChange: hub.onChange,
+      onDeed: () => () => {},
       dispose: hub.clear,
     }
   }
@@ -210,6 +214,12 @@ export function createThreeStage(
   let cleanT = 0
   let touches = 0
   let disposed = false
+  const deedListeners = new Set<(deed: Deed) => void>()
+  const did = (deed: Deed) => {
+    for (const l of deedListeners) l(deed)
+  }
+  /** The shine of the puppy being brushed when the brush came out. */
+  let shineWas = 0
   const now = () => performance.now() / 1000
   const free = () => views.every((v) => v.fetch.task === 'free')
   /** The puppy in its bath, if any: one at a time. */
@@ -351,6 +361,7 @@ export function createThreeStage(
       if (!mess) return false
       for (const v of views) v.care = cleanMess(v.care, mess)
       cleanT = CLEANED_TIME
+      did('clean')
       return true
     },
     tapsAt: (x, y, w, h) => !!messes.hit(room.camera, x, y, w, h),
@@ -375,7 +386,9 @@ export function createThreeStage(
       dt,
       t,
     ).forEach((ev, i) => {
+      if (ev.fed) did('meal')
       if (!ev.dropped) return
+      did('fetch')
       const at = headWorld(views[i]!)
       for (let n = 0; n < 3; n++) room.emitHeart(at)
     })
@@ -496,7 +509,7 @@ export function createThreeStage(
     },
     trick(index, pose) {
       const v = views[index]
-      if (v) askTrick(v, pose)
+      if (v && askTrick(v, pose)) did('trick')
     },
     select(index) {
       chosen = index
@@ -521,15 +534,22 @@ export function createThreeStage(
     },
     finishBath() {
       const v = inBath()
-      if (v) finishBath(v)
+      if (!v) return
+      // Only a bath taken as far as the rinse counts
+      if (v.bath.phase !== 'scrub') did('bath')
+      finishBath(v)
     },
     brush(index) {
       const v = views[index]
-      if (v && !inBath() && !brushed()) brushPuppy(v)
+      if (!v || inBath() || brushed()) return
+      shineWas = v.care.shine
+      brushPuppy(v)
     },
     endBrush() {
       const v = brushed()
-      if (v) stopBrushing(v)
+      if (!v) return
+      if (v.care.shine - shineWas >= BRUSHED_SHINE) did('brush')
+      stopBrushing(v)
     },
     weigh(index) {
       const v = views[index]
@@ -547,9 +567,14 @@ export function createThreeStage(
       relieveNow(v.routine, v.motion, kind)
     },
     onChange: hub.onChange,
+    onDeed(listener) {
+      deedListeners.add(listener)
+      return () => void deedListeners.delete(listener)
+    },
     dispose() {
       disposed = true
       hub.clear()
+      deedListeners.clear()
       detach()
       offResize()
       messes.dispose()

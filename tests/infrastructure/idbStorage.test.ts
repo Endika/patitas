@@ -6,6 +6,7 @@ import { BREEDS } from '../../src/domain/breeds'
 import { addMess, cleanMess, createCare } from '../../src/domain/care'
 import { createPuppy } from '../../src/domain/puppy'
 import { openGameStorage } from '../../src/infrastructure/idbStorage'
+import { createWallet } from '../../src/domain/wallet'
 
 const realIndexedDb = globalThis.indexedDB
 const pee = { kind: 'pee', x: -0.4, z: 0.3, createdAt: 10 } as const
@@ -86,6 +87,18 @@ describe('idbStorage', () => {
     const puppy = puppyAt('Luna', 1)
     await storage.savePuppy(puppy)
     expect(await storage.listPuppies()).toEqual([puppy])
+  })
+
+  it('has no wallet until one is saved, then keeps it across reopening, apart from the room', async () => {
+    const first = await openGameStorage()
+    expect(await first.loadWallet()).toBeUndefined()
+    const wallet = { ...createWallet(10), coins: 73 }
+    await first.saveWallet(wallet)
+    await first.saveRoom({ inRoom: ['a'] })
+
+    const reopened = await openGameStorage()
+    expect(await reopened.loadWallet()).toEqual(wallet)
+    expect(await reopened.loadRoom()).toEqual({ inRoom: ['a'] })
   })
 
   it('keeps care across reopening', async () => {

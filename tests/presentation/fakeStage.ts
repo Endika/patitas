@@ -1,5 +1,6 @@
 import type { Care, PlaceAccident } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { Deed } from '@/domain/wallet'
 import type { PuppyNeeds, RoomStage, StageStatus } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
 import { createMemoryStorage } from '@/infrastructure/memoryStorage'
@@ -41,6 +42,7 @@ export function createFakeStage(place?: PlaceAccident) {
   const arrived: { id: string; care: Care }[] = []
   const held = new Map<string, Care>()
   const listeners = new Set<(s: StageStatus) => void>()
+  const deedListeners = new Set<(d: Deed) => void>()
   let status: StageStatus = {
     hint: 'Toca el suelo y irá hacia allí.',
     ball: { inHand: false, disabled: false },
@@ -83,6 +85,10 @@ export function createFakeStage(place?: PlaceAccident) {
       listener(status)
       return () => listeners.delete(listener)
     },
+    onDeed(listener) {
+      deedListeners.add(listener)
+      return () => deedListeners.delete(listener)
+    },
     dispose: () => void calls.push('dispose'),
   }
   return {
@@ -98,6 +104,10 @@ export function createFakeStage(place?: PlaceAccident) {
     emit(next: Partial<StageStatus>) {
       status = { ...status, ...next }
       for (const l of listeners) l(status)
+    },
+    /** The player does something in the room that earns coins. */
+    deed: (d: Deed) => {
+      for (const l of deedListeners) l(d)
     },
     create: (canvas: HTMLCanvasElement) => {
       canvases.push(canvas)

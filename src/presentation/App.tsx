@@ -44,7 +44,7 @@ export default function App({
     () => openStorage({ blocked: () => setBlocked(true), reload }),
     [openStorage, reload],
   )
-  const game = useGame(open)
+  const game = useGame(open, now)
   const [adopting, setAdopting] = useState(false)
   // A puppy adopted into a full room, until the player moves someone
   const [outside, setOutside] = useState<string | null>(null)
@@ -69,7 +69,7 @@ export default function App({
   }, [adopting, rearm])
 
   if (!game.state) return <Blank blocked={blocked} />
-  const { puppies, room, persistent } = game.state
+  const { puppies, room, persistent, wallet } = game.state
 
   if (adopting || !puppies.length)
     return (
@@ -106,6 +106,8 @@ export default function App({
         onOpen={rearm}
         loadCare={game.loadCare}
         saveCare={game.saveCare}
+        coins={wallet.coins}
+        onDeed={game.earn}
         now={now}
         createStage={createStage}
       />
