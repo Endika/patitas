@@ -35,6 +35,8 @@ import {
   brushPuppy,
   callOver,
   cheerUp,
+  comeHopping,
+  hearNoise,
   dropFetch,
   putToBed,
   rebed,
@@ -175,6 +177,61 @@ describe('callOver', () => {
     held.routine.held = 'brushing'
     callOver([held, pup()], 0, 0.6, -0.4, opts)
     expect(held.motion.goal).toBeNull()
+  })
+})
+
+describe('hearing the player', () => {
+  const pup = () => ({
+    motion: createMotionState(),
+    behaviour: createBehaviourState(),
+    routine: createRoutineState(),
+    care: createCare(BREEDS.shiba, 0),
+    fetch: createFetchState(),
+  })
+  const opts = {
+    happy: 0.5,
+    energy: 0.5,
+    clamp: (x: number, z: number) => [x, z] as [number, number],
+  }
+  const camera = new THREE.Vector3(0, 1.2, 3)
+
+  it('looks at the player at a loud sound, ears up, unless asleep, held or playing ball', () => {
+    const awake = pup()
+    expect(hearNoise(awake, camera, 10)).toBe(true)
+    expect(awake.behaviour.pointerLook.toArray()).toEqual(camera.toArray())
+    expect(awake.behaviour.perk).toBe(1)
+    // For about a second and a half of the time a pointer holds its gaze
+    expect(10 - awake.behaviour.pointerAt).toBeCloseTo(0.1)
+
+    const asleep = pup()
+    asleep.routine.routine = 'sleeping'
+    const fetching = pup()
+    fetching.fetch.task = 'chase'
+    const held = pup()
+    held.routine.held = 'bathing'
+    for (const p of [asleep, fetching, held]) expect(hearNoise(p, camera, 10)).toBe(false)
+  })
+
+  it('comes hopping when called by sounds, gladder than it was', () => {
+    const p = pup()
+    expect(comeHopping(p, 0.4, -0.2, opts)).toBe(true)
+    expect(p.motion.goal?.toArray()).toEqual([0.4, 0, -0.2])
+    expect(p.motion.next).toBe('hop')
+    expect(p.behaviour.happy).toBeGreaterThan(createBehaviourState().happy)
+  })
+
+  it('wakes from a nap by day to come, but sleeps on at night', () => {
+    const napping = pup()
+    napping.routine.routine = 'sleeping'
+    napping.routine.nap = 'floor'
+    expect(comeHopping(napping, 0.4, -0.2, opts)).toBe(true)
+    expect(napping.routine.routine).toBe('stretch')
+
+    const night = pup()
+    night.routine.routine = 'sleeping'
+    expect(comeHopping(night, 0.4, -0.2, opts)).toBe(false)
+    expect(night.routine.routine).toBe('sleeping')
+    expect(night.motion.goal).toBeNull()
   })
 })
 

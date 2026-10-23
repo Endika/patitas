@@ -17,7 +17,7 @@ export const LID_OPEN = -0.62,
 /** Seconds a caress keeps counting after the last stroke. */
 const PET_GRACE = 0.35
 /** Seconds the pointer keeps the puppy's attention after it last moved. */
-const POINTER_ATTENTION = 1.6
+export const POINTER_ATTENTION = 1.6
 const SCRATCH_AFTER = 0.7
 const BLINK = 0.14
 const YAWN = 1.8
