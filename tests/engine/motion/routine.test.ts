@@ -23,6 +23,7 @@ import {
   approach,
   bedSlots,
   BEG_EVERY,
+  createPeer,
   createRoutineState,
   followBed,
   forgetMovedRoute,
@@ -37,6 +38,7 @@ import {
   RELIEF_TIME,
   letGo,
   routePlaces,
+  seePeer,
   relieveNow,
   SPLASH_TIME,
   stepAside,
@@ -140,7 +142,11 @@ function run(
   more: Partial<RoutineCtx> = {},
 ) {
   const random = seeded(1)
+  const peers = pups.map(() => createPeer(BREEDS.shiba.defaultPersona))
   for (let n = 0; n < secs / DT; n++) {
+    // As the room does: each of two sees the other as it stood before either moves
+    if (pups.length === 2)
+      pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, BREEDS.shiba.defaultPersona, false))
     for (const [i, p] of pups.entries()) {
       const ctx: RoutineCtx = {
         ...base,
@@ -150,6 +156,7 @@ function run(
         place: places?.[i] ?? i,
         bowl: p.bowl,
         random,
+        ...(pups.length === 2 && { peer: peers[1 - i] }),
         ...more,
       }
       const ev = stepRoutine(p.r, p.m, ctx, DT)
@@ -946,6 +953,27 @@ describe('the room laid out anew', () => {
     expect(at0).toBe('toBowl')
     expect(p.fed).toBe(1)
     expect(Math.hypot(p.m.pos.x - meal.x, p.m.pos.z - meal.z)).toBeLessThan(0.3)
+  })
+})
+
+describe('the other puppy', () => {
+  it('each sees where the other stands, what it does and its character, as a copy', () => {
+    const a = pup(0.1, 0.2)
+    holdStill(a.r, a.m, 'bathing')
+    const persona = { ...BREEDS.shiba.defaultPersona, social: 0.9 }
+    const seen = seePeer(createPeer(BREEDS.dorado.defaultPersona), a.r, a.m, persona, false)
+    expect([seen.pos.x, seen.pos.z]).toEqual([0.1, 0.2])
+    expect([seen.routine, seen.pose, seen.persona.social, seen.busy]).toEqual([
+      'bathing',
+      'stand',
+      0.9,
+      true,
+    ])
+    a.m.pos.x = 0.5
+    expect(seen.pos.x).toBe(0.1)
+    letGo(a.r)
+    expect(seePeer(seen, a.r, a.m, persona, true).busy).toBe(true)
+    expect(seePeer(seen, a.r, a.m, persona, false).busy).toBe(false)
   })
 })
 

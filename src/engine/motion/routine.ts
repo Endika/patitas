@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { Breed } from '@/domain/breeds'
+import type { Breed, Persona } from '@/domain/breeds'
 import {
   exercise,
   feed,
@@ -23,7 +23,7 @@ import { inOval, walkingRound, type Circle, type Spot, type Spots } from '@/engi
 import { SLEEP_TURN } from '@/engine/room/layout'
 import { reachOf, type ClampTo } from '@/engine/room/apart'
 import { goTo, type GoToOpts, type MotionState } from './locomotion'
-import { POSES, setPose } from './poses'
+import { POSES, setPose, type PoseId } from './poses'
 
 /** What the puppy is doing on its own: going somewhere and doing something there. */
 export type Routine =
@@ -144,6 +144,45 @@ export interface RoutineState {
   there: boolean
 }
 
+/** The other puppy in the room as it stood at the start of the frame, for what they do together. */
+export interface Peer {
+  pos: Vec3
+  heading: number
+  routine: Routine
+  pose: PoseId
+  persona: Persona
+  /** Playing ball, or held still for the bath or the brush. */
+  busy: boolean
+}
+
+export function createPeer(persona: Persona): Peer {
+  return {
+    pos: new THREE.Vector3(),
+    heading: 0,
+    routine: 'none',
+    pose: 'stand',
+    persona,
+    busy: false,
+  }
+}
+
+/** Fills `out` with how this puppy stands now, for the other to see. */
+export function seePeer(
+  out: Peer,
+  r: RoutineState,
+  m: MotionState,
+  persona: Persona,
+  busy: boolean,
+): Peer {
+  out.pos.copy(m.pos)
+  out.heading = m.heading
+  out.routine = r.routine
+  out.pose = m.pose
+  out.persona = persona
+  out.busy = busy || !!r.held
+  return out
+}
+
 export interface RoutineCtx {
   /** Wall-clock milliseconds: the hour decides bedtime. */
   now: number
@@ -168,6 +207,8 @@ export interface RoutineCtx {
   /** Its persona's cuddliness, 0 to 1: cuddly, it naps in its bed rather than where it stands. */
   cuddly?: number
   random?: () => number
+  /** The other puppy in the room, if there is one. */
+  peer?: Readonly<Peer>
 }
 
 export interface RoutineEvents {
