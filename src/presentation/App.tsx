@@ -106,8 +106,10 @@ export default function App({
         onOpen={rearm}
         loadCare={game.loadCare}
         saveCare={game.saveCare}
-        coins={wallet.coins}
+        wallet={wallet}
         onDeed={game.earn}
+        onBuy={game.buy}
+        onSpend={game.spend}
         now={now}
         createStage={createStage}
       />

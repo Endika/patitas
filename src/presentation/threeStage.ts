@@ -179,7 +179,7 @@ export function createThreeStage(
       stowBall() {},
       trick() {},
       select() {},
-      feed() {},
+      feed: () => false,
       bath() {},
       rinse() {},
       dryer() {},
@@ -514,8 +514,15 @@ export function createThreeStage(
     select(index) {
       chosen = index
     },
-    feed(index) {
-      for (const [i, v] of views.entries()) if (index === undefined || i === index) v.bowl = 1
+    feed(index, food) {
+      let fed = false
+      for (const [i, v] of views.entries())
+        if (index === undefined || i === index) {
+          v.bowl = 1
+          v.food = food ?? null
+          fed = true
+        }
+      return fed
     },
     bath(index) {
       const v = views[index]

@@ -1,3 +1,4 @@
+import type { FoodId } from '@/domain/shop'
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
 import { playLocal, playWorld, type FixedCamera } from './camera'
@@ -343,7 +344,8 @@ export interface Furniture {
   /** Places every piece for the camera's current framing, or as `spots` (laid out for it) say. */
   layout(cam: FixedCamera, spots?: Spots): void
   /** Shows the bowl at `place` this full, 0 to 1. */
-  bowlFill(place: number, level: number): void
+  /** How full the bowl at `place` is, and with which special food, if any. */
+  bowlFill(place: number, level: number, food: FoodId | null): void
   scaleReading(kg: number | null): void
   /** Shows the scale `t` of the way out, 0 put away to 1 out. */
   scaleOut(t: number): void
@@ -354,7 +356,7 @@ export interface Furniture {
 /** Shows each puppy's bowl as full as the puppy left it: every frame, and so on new furniture too. */
 export function showBowls(
   furniture: Pick<Furniture, 'bowlFill'>,
-  puppies: readonly { place: number; bowl: number }[],
+  puppies: readonly { place: number; bowl: number; food: FoodId | null }[],
 ): void {
-  for (const p of puppies) furniture.bowlFill(p.place, p.bowl)
+  for (const p of puppies) furniture.bowlFill(p.place, p.bowl, p.food)
 }

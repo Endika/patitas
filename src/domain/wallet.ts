@@ -1,3 +1,5 @@
+import type { Consumable } from './shop'
+
 /** Something done for the puppies that earns coins. */
 export type Deed = 'meal' | 'bath' | 'brush' | 'clean' | 'fetch' | 'trick'
 
@@ -23,6 +25,8 @@ export interface Wallet {
   earned: number
   /** Times each deed has paid that day. */
   paid: Partial<Record<Deed, number>>
+  /** How many of each thing bought to use up are left. */
+  stock: Partial<Record<Consumable, number>>
 }
 
 export function dayOf(now: number): string {
@@ -36,6 +40,13 @@ export const createWallet = (now: number): Wallet => ({
   day: dayOf(now),
   earned: 0,
   paid: {},
+  stock: {},
+})
+
+/** A wallet saved before the shop: nothing bought yet. */
+export const withWalletDefaults = (stored: Omit<Wallet, 'stock'> & Partial<Wallet>): Wallet => ({
+  stock: {},
+  ...stored,
 })
 
 /** The deed's pay, within its times a day and what is left of the day's cap; a new day starts afresh. */

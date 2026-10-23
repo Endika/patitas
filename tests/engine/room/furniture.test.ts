@@ -1,3 +1,4 @@
+import type { FoodId } from '@/domain/shop'
 // @vitest-environment node
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
@@ -733,11 +734,23 @@ describe('scaleReadout', () => {
 })
 
 describe('showBowls', () => {
+  it('tells each bowl which special food is in it', () => {
+    const foods: (FoodId | null)[] = []
+    showBowls({ bowlFill: (place, _level, food) => void (foods[place] = food) }, [
+      { place: 0, bowl: 1, food: 'premium' },
+      { place: 1, bowl: 0.5, food: null },
+    ])
+    expect(foods).toEqual(['premium', null])
+  })
+
   it('puts back every bowl as full as its puppy left it on furniture laid out anew', () => {
     const shown = (puppies: 1 | 2, views: { place: number; bowl: number }[]) => {
       // Fresh furniture shows its bowls empty
       const levels = Array<number>(puppies).fill(0)
-      showBowls({ bowlFill: (place, level) => void (levels[place] = level) }, views)
+      showBowls(
+        { bowlFill: (place, level) => void (levels[place] = level) },
+        views.map((v) => ({ ...v, food: null })),
+      )
       return levels
     }
     expect(

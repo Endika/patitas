@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import type { FoodId } from '@/domain/shop'
 import { clamp, rng } from '@/engine/math'
 import { playLocal, playWorld, type FixedCamera } from './camera'
 import {
@@ -117,6 +118,13 @@ function bed(shade: THREE.Texture, { radius }: Spot): THREE.Group {
 }
 
 export const KIBBLE = 110
+/** Over the brown pellets: reddish premium, pale light food, dark energy food. */
+const KIBBLE_TINT: Record<FoodId | 'plain', THREE.Color> = {
+  plain: new THREE.Color(1, 1, 1),
+  premium: new THREE.Color(1.15, 0.7, 0.62),
+  light: new THREE.Color(1.6, 1.5, 1.3),
+  energy: new THREE.Color(0.62, 0.62, 0.55),
+}
 
 export function bowl(shade: THREE.Texture): { group: THREE.Group; kibble: THREE.InstancedMesh } {
   const g = new THREE.Group()
@@ -524,9 +532,13 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
       })
       puddleG.scale.set(spots.mud.radius, 1, spots.mud.depth)
     },
-    bowlFill(place, level) {
+    bowlFill(place, level, food) {
       const parts = bowls[place]
-      if (parts) parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
+      if (!parts) return
+      parts.kibble.count = Math.round(clamp(level, 0, 1) * KIBBLE)
+      ;(parts.kibble.material as THREE.MeshStandardMaterial).color.copy(
+        KIBBLE_TINT[food ?? 'plain'],
+      )
     },
     scaleReading: (kg) => scaleParts.readout.show(kg),
     scaleOut(t) {
@@ -551,7 +563,7 @@ export function addFurniture(scene: THREE.Scene, cam: FixedCamera, puppies: 1 | 
   // Laid out once: `spots` is already this layout
   furniture.layout(cam, spots)
   // Empty until someone fills them
-  bowls.forEach((_, i) => furniture.bowlFill(i, 0))
+  bowls.forEach((_, i) => furniture.bowlFill(i, 0, null))
   furniture.scaleReading(null)
   // Put away until a puppy is weighed
   furniture.scaleOut(0)

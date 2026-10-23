@@ -3,7 +3,8 @@ import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
-import { createWallet, earn, type Deed, type Wallet } from '@/domain/wallet'
+import { buy, spendOne, type Consumable, type ItemId } from '@/domain/shop'
+import { createWallet, earn, withWalletDefaults, type Deed, type Wallet } from '@/domain/wallet'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
 import type { GameStorage } from '@/infrastructure/storage'
 
@@ -27,6 +28,10 @@ export interface Game {
   saveCare(id: string, care: Care): Promise<void>
   /** Pays for a deed, within the day's limits: the coins gained, 0 when none. */
   earn(deed: Deed): number
+  /** False when the coins do not reach. */
+  buy(id: ItemId): boolean
+  /** Uses one up; false when there is none left. */
+  spend(id: Consumable): boolean
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
@@ -50,7 +55,7 @@ export function useGame(
       ])
       if (!live) return
       storage.current = opened
-      wallet.current = saved ?? createWallet(now())
+      wallet.current = saved ? withWalletDefaults(saved) : createWallet(now())
       setState({ puppies, room, persistent: opened.persistent, wallet: wallet.current })
     })()
     return () => {
@@ -91,20 +96,31 @@ export function useGame(
   const loadCare = useCallback((id: string) => storage.current!.loadCare(id), [])
   const saveCare = useCallback((id: string, care: Care) => storage.current!.saveCare(id, care), [])
 
+  /** Changes the wallet as `change` says, unless it says no; saved in the background. */
+  const change = useCallback((next: (w: Wallet) => Wallet | null) => {
+    const s = storage.current
+    const changed = s && wallet.current && next(wallet.current)
+    if (!changed) return false
+    wallet.current = changed
+    setState((prev) => prev && { ...prev, wallet: changed })
+    s.saveWallet(changed).catch(() => {})
+    return true
+  }, [])
+  const buyItem = useCallback((id: ItemId) => change((w) => buy(w, id)), [change])
+  const spend = useCallback((id: Consumable) => change((w) => spendOne(w, id)), [change])
+
   const earnFor = useCallback(
     (deed: Deed) => {
-      const s = storage.current
-      if (!s || !wallet.current) return 0
-      const paid = earn(wallet.current, deed, now())
-      wallet.current = paid.wallet
-      if (paid.gained) {
-        setState((prev) => prev && { ...prev, wallet: paid.wallet })
-        s.saveWallet(paid.wallet).catch(() => {})
-      }
-      return paid.gained
+      let gained = 0
+      change((w) => {
+        const paid = earn(w, deed, now())
+        gained = paid.gained
+        return gained ? paid.wallet : null
+      })
+      return gained
     },
-    [now],
+    [change, now],
   )
 
-  return { state, adopt, enter, leave, loadCare, saveCare, earn: earnFor }
+  return { state, adopt, enter, leave, loadCare, saveCare, earn: earnFor, buy: buyItem, spend }
 }

@@ -1,5 +1,6 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { FoodId } from '@/domain/shop'
 import type { Deed } from '@/domain/wallet'
 
 /** Shown instead of a stage when the browser has no WebGL. */
@@ -79,8 +80,11 @@ export interface RoomStage {
    * two are in the room and neither is in its bath or being brushed.
    */
   select(index: number | null): void
-  /** Fills the bowl of the puppy at `index`, or every bowl in the room. */
-  feed(index?: number): void
+  /**
+   * Fills the bowl of the puppy at `index`, or every bowl in the room, with plain food or with
+   * `food`. Says whether there was a bowl to fill.
+   */
+  feed(index?: number, food?: FoodId): boolean
   /**
    * Starts the bath of the puppy at `index` where it stands: rubbing it lathers and scrubs it.
    * One bath at a time, and not while it plays ball. A ball in hand is put away.
