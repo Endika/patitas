@@ -419,6 +419,11 @@
   background: var(--ink);
   border-color: var(--ink);
 }
+.room-shop-for {
+  margin: 0 8px;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
 .room-shop-items {
   display: flex;
   flex-direction: column;

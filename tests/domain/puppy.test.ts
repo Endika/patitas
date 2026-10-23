@@ -7,6 +7,7 @@ import {
   teach,
   traits,
   TREAT_LESSON,
+  wear,
   withPersonaDefaults,
 } from '@/domain/puppy'
 
@@ -131,5 +132,16 @@ describe('teach', () => {
     let p = puppy
     for (let i = 0; i < 6; i++) p = teach(p, 'belly')
     expect(knows(p, 'belly')).toBe(1)
+  })
+})
+
+describe('wear', () => {
+  const puppy = createPuppy({ name: 'Kuma', breedId: 'shiba', now: 1, random: () => 0.5 })
+
+  it('puts a collar on and takes it off again', () => {
+    const red = wear(puppy, 'red')
+    expect(red.collar).toBe('red')
+    expect(wear(red, 'gold').collar).toBe('gold')
+    expect('collar' in wear(red, null)).toBe(false)
   })
 })

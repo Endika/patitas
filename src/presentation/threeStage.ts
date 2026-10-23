@@ -1,7 +1,7 @@
 import { BREEDS } from '@/domain/breeds'
 import { cleanMess, createCare, eatTreat, health, isNight, type Care } from '@/domain/care'
 import { knows, teach, type Puppy, type Trick } from '@/domain/puppy'
-import { STANDARD_DECOR } from '@/domain/shop'
+import { STANDARD_DECOR, type CollarLook } from '@/domain/shop'
 import type { Deed } from '@/domain/wallet'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
@@ -23,6 +23,7 @@ import {
   putToBed,
   rebed,
   rubCoat,
+  setCollar,
   showCare,
   stopBrushing,
   throwBall,
@@ -185,6 +186,7 @@ export function createThreeStage(
       takeBall() {},
       setToy() {},
       setDecor() {},
+      setCollar() {},
       stowBall() {},
       trick() {},
       treat: () => null,
@@ -206,6 +208,8 @@ export function createThreeStage(
   const ball = createBall()
   /** The toy the player chose, swapped in once the one in play is back. */
   let toy = ball.toy
+  /** The collar each puppy wears, kept for those still loading. */
+  const collars = new Map<string, CollarLook | null>()
   /** The colours chosen for the room: furniture laid out anew is painted in them too. */
   let decor = STANDARD_DECOR
   const messes = createMessLayer(room.scene)
@@ -313,6 +317,7 @@ export function createThreeStage(
       const care = incoming.get(p.id) ?? createCare(BREEDS[p.breedId], clock())
       incoming.delete(p.id)
       const view = mountPuppyView(room, p, built, room.quality, places[i], care)
+      setCollar(view, collars.get(p.id) ?? null)
       const bed = beds?.[i]
       if (bed) tuckIn(view.routine, view.motion, bed.side)
       mounted.set(p.id, view)
@@ -539,6 +544,11 @@ export function createThreeStage(
     },
     setToy(next) {
       toy = next
+    },
+    setCollar(id, collar) {
+      collars.set(id, collar)
+      const v = mounted.get(id)
+      if (v) setCollar(v, collar)
     },
     setDecor(next) {
       decor = next

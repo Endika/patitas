@@ -58,4 +58,11 @@ describe('shop', () => {
     expect(inUse(sage, 'bed-coral')).toBe(false)
     expect(choose(sage, 'bed-coral')!.decor.bed).toBe('coral')
   })
+
+  it('sells a collar for the house, which a puppy wears rather than the house using it', () => {
+    const bought = buy(wallet(30), 'collar-red')!
+    expect(bought.owned).toEqual(['collar-red'])
+    expect(choose(bought, 'collar-red')).toBeNull()
+    expect(inUse(bought, 'collar-red')).toBe(false)
+  })
 })

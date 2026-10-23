@@ -52,6 +52,8 @@ export interface Anatomy {
   eyeBalls: EyeBall[]
   eyeR: number
   nose: { c: Tuple3; rad: Tuple3 }
+  /** Where a collar goes round the neck: its middle, the way the neck runs there and its radius. */
+  collar: { at: Tuple3; axis: Tuple3; r: number }
   mouthInfo: MouthInfo
   tongue: Tuple3
   zones: Zone[]
@@ -67,6 +69,9 @@ interface PrimOpts {
   tag?: PartTag
   sub?: boolean
 }
+
+/** How far up the neck, from the shoulders to the head, the collar sits. */
+const COLLAR_AT = 0.4
 
 export function anatomy(breed: Breed): Anatomy {
   const B = breed.shape
@@ -177,11 +182,15 @@ export function anatomy(breed: Breed): Anatomy {
     tag: 'body',
     k: 0.08,
   })
-  R([0, sy + 0.08, 0.17], [0, hY - 0.08, hZ - 0.06], 0.13, 0.12, {
-    b: 'neck',
-    tag: 'neck',
-    k: 0.06,
-  })
+  const neckA: Tuple3 = [0, sy + 0.08, 0.17],
+    neckB: Tuple3 = [0, hY - 0.08, hZ - 0.06]
+  R(neckA, neckB, 0.13, 0.12, { b: 'neck', tag: 'neck', k: 0.06 })
+  const along = new THREE.Vector3(...neckB).sub(new THREE.Vector3(...neckA))
+  const collar = {
+    at: neckA.map((a, i) => a + COLLAR_AT * (neckB[i]! - a)) as Tuple3,
+    axis: along.normalize().toArray() as Tuple3,
+    r: 0.13 + COLLAR_AT * (0.12 - 0.13),
+  }
   E([0, hY, hZ], rH, [0, 0, 0], { b: 'head', tag: 'head', k: 0.05 })
   for (const s of [1, -1])
     S([s * 0.075 * hd, hY - 0.06 * hd, hZ + 0.06 * hd], 0.095 * hd, {
@@ -363,6 +372,7 @@ export function anatomy(breed: Breed): Anatomy {
     eyeBalls,
     eyeR,
     nose,
+    collar,
     mouthInfo,
     tongue,
     zones,

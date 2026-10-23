@@ -1,5 +1,5 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
-import type { Decor, FoodId, ToyId } from '@/domain/shop'
+import type { CollarLook, Decor, FoodId, ToyId } from '@/domain/shop'
 import type { Puppy, Trick } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
 
@@ -76,6 +76,8 @@ export interface RoomStage {
   setToy(toy: ToyId): void
   /** The colours of the beds, the bowls and the rug. */
   setDecor(decor: Decor): void
+  /** The collar the puppy `id` wears, or none; one still loading puts it on once it comes in. */
+  setCollar(id: string, collar: CollarLook | null): void
   stowBall(): void
   /**
    * The puppy at `index` does the trick, if it is free to: at once if it knows it well, else

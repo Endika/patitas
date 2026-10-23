@@ -112,6 +112,7 @@ export default function App({
         onSpend={game.spend}
         onTeach={game.teach}
         onUse={game.use}
+        onWear={game.wear}
         now={now}
         createStage={createStage}
       />

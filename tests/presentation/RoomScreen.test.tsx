@@ -545,6 +545,33 @@ describe('RoomScreen', () => {
     await waitFor(async () => expect((await storage.loadWallet())?.decor.bowl).toBe('cherry'))
   })
 
+  it('puts a collar bought on the puppy picked, and takes it off again', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Luna', 'Kira'])
+    const byName = await ids(storage)
+    const [luna, kira] = [byName.get('Luna')!, byName.get('Kira')!]
+    await storage.saveWallet({ ...createWallet(0), coins: 25 })
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ needs: [needs(luna, 'Luna'), needs(kira, 'Kira')] }))
+    act(() => stage.emit({ touched: { id: kira, count: 1 } }))
+
+    await user.click(screen.getByRole('button', { name: /Tienda/ }))
+    const shop = within(screen.getByRole('region', { name: 'Tienda' }))
+    await user.click(shop.getByRole('tab', { name: 'Collares' }))
+    expect(shop.getByText('Para Kira: toca al otro cachorro para elegirlo.')).toBeInTheDocument()
+    await user.click(shop.getByRole('button', { name: 'Comprar Collar azul por 25 monedas' }))
+    await user.click(shop.getByRole('button', { name: 'Poner Collar azul a Kira' }))
+    await waitFor(() => expect(stage.collars.get(kira)).toBe('blue'))
+    expect(stage.collars.get(luna)).toBeNull()
+    const saved = async (id: string) => (await storage.listPuppies()).find((p) => p.id === id)
+    expect((await saved(kira))?.collar).toBe('blue')
+
+    await user.click(shop.getByRole('button', { name: 'Quitar Collar azul a Kira' }))
+    await waitFor(() => expect(stage.collars.get(kira)).toBeNull())
+    expect((await saved(kira))?.collar).toBeUndefined()
+  })
+
   it('lets «+5» go after a while', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const storage = await adopted(['Kuma'])

@@ -14,6 +14,7 @@ import { knows, traits, TREAT_LESSON, type Puppy, type Trick } from '@/domain/pu
 import type { Room } from '@/domain/room'
 import {
   SHOP,
+  type CollarLook,
   type Consumable,
   type FoodId,
   type ItemId,
@@ -78,6 +79,7 @@ export default function RoomScreen({
   onSpend,
   onTeach,
   onUse,
+  onWear,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -104,6 +106,8 @@ export default function RoomScreen({
   onSpend(id: Consumable): boolean
   /** Puts a keepsake to use: the toy the ball button throws, or a colour for the room. */
   onUse(id: Keepsake): void
+  /** Puts a collar on a puppy, or takes its collar off. */
+  onWear(id: string, collar: CollarLook | null): Promise<void>
   /** A treat taught a puppy a little more of a trick. */
   onTeach(id: string, trick: Trick): Promise<void>
   now?: () => number
@@ -272,6 +276,9 @@ export default function RoomScreen({
   useEffect(() => {
     stageRef.current?.setDecor(wallet.decor)
   }, [createStage, wallet.decor, stageRef])
+  useEffect(() => {
+    for (const p of inRoom) stageRef.current?.setCollar(p.id, p.collar ?? null)
+  }, [createStage, inRoom, stageRef])
 
   const ringed = status.needs.length > 1 ? selected : null
   useEffect(() => {
@@ -296,6 +303,8 @@ export default function RoomScreen({
     return puppy ? traits(puppy.persona) : []
   }
   const stage = () => stageRef.current
+  /** The puppy a collar goes on: the one the buttons are for. */
+  const wearer = inRoom.find((p) => p.id === status.needs[selected]?.id) ?? inRoom[0]
   const treats = wallet.stock.treat ?? 0
   const giveTreat = () => {
     const given = stageRef.current?.treat(selected)
@@ -380,7 +389,21 @@ export default function RoomScreen({
             </span>
             {shopOpen && (
               <div id={shopId} className="room-sheet">
-                <Shop wallet={wallet} onBuy={onBuy} onUse={onUse} />
+                <Shop
+                  wallet={wallet}
+                  onBuy={onBuy}
+                  onUse={onUse}
+                  wearer={
+                    wearer && {
+                      name: wearer.name,
+                      collar: wearer.collar ?? null,
+                      alone: inRoom.length < 2,
+                    }
+                  }
+                  onWear={(collar) => {
+                    if (wearer) onWear(wearer.id, collar).catch(() => {})
+                  }}
+                />
               </div>
             )}
           </div>

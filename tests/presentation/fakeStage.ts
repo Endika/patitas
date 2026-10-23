@@ -1,6 +1,6 @@
 import type { Care, PlaceAccident } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
-import type { Decor, ToyId } from '@/domain/shop'
+import type { CollarLook, Decor, ToyId } from '@/domain/shop'
 import type { Deed } from '@/domain/wallet'
 import type { PuppyNeeds, RoomStage, StageStatus, TrickPose } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
@@ -43,6 +43,8 @@ export function createFakeStage(place?: PlaceAccident) {
   const toys: ToyId[] = []
   /** Each set of colours the screen gave the room, in order. */
   const decors: Decor[] = []
+  /** The collar the screen last gave each puppy. */
+  const collars = new Map<string, CollarLook | null>()
   /** The care each puppy came in with, in order of arrival. */
   const arrived: { id: string; care: Care }[] = []
   const held = new Map<string, Care>()
@@ -78,6 +80,7 @@ export function createFakeStage(place?: PlaceAccident) {
     takeBall: () => void calls.push('takeBall'),
     setToy: (toy) => void toys.push(toy),
     setDecor: (decor) => void decors.push(decor),
+    setCollar: (id, collar) => void collars.set(id, collar),
     stowBall: () => void calls.push('stowBall'),
     trick: (index, pose) => void calls.push(`trick:${index}:${pose}`),
     treat(index) {
@@ -112,6 +115,7 @@ export function createFakeStage(place?: PlaceAccident) {
     selected,
     toys,
     decors,
+    collars,
     arrived,
     /** Changes the care the room keeps for a puppy, as time in it would. */
     hold: (id: string, care: Care) => void held.set(id, care),

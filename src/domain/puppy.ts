@@ -1,4 +1,5 @@
 import { BREEDS, type BreedId, type Persona } from './breeds'
+import type { CollarLook } from './shop'
 
 export const MAX_NAME_GRAPHEMES = 20
 const PERSONA_VARIATION = 0.15
@@ -13,6 +14,14 @@ export interface Puppy {
   adoptedAt: number
   /** How well it knows each trick, 0 to 1; one missing it has yet to learn. */
   tricks?: Partial<Record<Trick, number>>
+  /** The collar it wears, if any. */
+  collar?: CollarLook
+}
+
+/** The puppy wearing `collar`, or none. */
+export function wear(puppy: Puppy, collar: CollarLook | null): Puppy {
+  const { collar: _was, ...rest } = puppy
+  return collar ? { ...rest, collar } : rest
 }
 
 /** What a treat just after a trick teaches of it. */
