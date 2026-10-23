@@ -30,6 +30,7 @@ import {
   forgetMovedRoute,
   forgetRoute,
   giveWay,
+  goToMud,
   goWeigh,
   holdStill,
   keepsEating,
@@ -1163,7 +1164,7 @@ describe('greeting', () => {
 describe('playing together', () => {
   const KEEN = { ...BREEDS.beagle.defaultPersona, energy: 1, social: 0.9 },
     DULL = { ...BREEDS.shiba.defaultPersona, energy: 0.2, social: 0.1 }
-  const PLAY = new Set(['sparring'])
+  const PLAY = new Set(['inviting', 'sparring'])
   const WIDE = fitCamera(createCamera(), 2.1)
   const WIDE_SPOTS = computeSpots(WIDE, 2),
     WIDE_STARTS = startPlaces(WIDE, WIDE_SPOTS, 2)
@@ -1224,6 +1225,28 @@ describe('playing together', () => {
     }
   })
 
+  it('two too close to play do not start a game', () => {
+    const [l] = STARTS2
+    const one = pup(l!.x, l!.z),
+      two = pup(l!.x + 0.6, l!.z)
+    for (const p of [one, two]) {
+      p.persona = KEEN
+      p.r.playAgo = 90
+      p.r.alone = 15
+    }
+    run([one, two], 3, at(12), SPOTS2, undefined, undefined, { random: () => 0 })
+    for (const p of [one, two]) expect(p.seen).not.toContain('inviting')
+  })
+
+  it('a game cut short by a touch puts off the next one', () => {
+    const pups = ready(false)
+    play(pups, 3, false)
+    expect(pups[0].r.routine).toBe('sparring')
+    touch(pups[0].r)
+    play(pups, DT, false)
+    expect(pups.map((p) => p.r.playAgo < 1)).toEqual([true, true])
+  })
+
   it('one with no energy nor liking for company says no', () => {
     const pups = ready(false, KEEN, DULL)
     play(pups, 5, false, { random: () => 0.99 })
@@ -1241,6 +1264,138 @@ describe('playing together', () => {
       expect(pups.map((p) => p.r.routine)).toEqual(['none', 'none'])
       expect(pups.map((p) => p.played)).toEqual([0, 0])
     }
+  })
+})
+
+describe('following the other', () => {
+  const NOSY = { ...BREEDS.shiba.defaultPersona, curious: 1, social: 1 },
+    INCURIOUS = { ...BREEDS.shiba.defaultPersona, curious: 0, social: 1 }
+  /** One standing by, the other (the nearer the mud) just off to it. */
+  const offToMud = (persona: Persona) => {
+    const mud = SPOTS2.mud.center
+    const [far, near] = [...STARTS2].sort(
+      (a, b) => Math.hypot(b.x - mud.x, b.z - mud.z) - Math.hypot(a.x - mud.x, a.z - mud.z),
+    )
+    const one = pup(far!.x, far!.z),
+      two = pup(near!.x, near!.z)
+    one.persona = persona
+    one.r.mudAgo = MUD_EVERY
+    goToMud(two.r, two.m, SPOTS2, clamp)
+    return [one, two] as const
+  }
+
+  it('a curious one goes after the other to the mud, watches from behind, then has its own roll', () => {
+    const [one, two] = offToMud(NOSY)
+    let together = false,
+      closest = Infinity
+    run(
+      [one, two],
+      70,
+      at(12),
+      SPOTS2,
+      () => {
+        if (
+          inMud(SPOTS2, one.m.pos.x, one.m.pos.z) > 0 &&
+          inMud(SPOTS2, two.m.pos.x, two.m.pos.z) > 0
+        )
+          together = true
+        closest = Math.min(
+          closest,
+          Math.hypot(one.m.pos.x - two.m.pos.x, one.m.pos.z - two.m.pos.z),
+        )
+      },
+      undefined,
+      { curious: 1, random: () => 0 },
+    )
+    expect(one.seen[0]).toBe('following')
+    expect(one.seen.slice(one.seen.indexOf('toMud'))).toContain('splashing')
+    expect(together).toBe(false)
+    // Bodies side by side only touch at 0.33
+    expect(closest).toBeGreaterThan(0.33)
+  })
+
+  it('it goes after the other to the garden too, and waits there', () => {
+    const garden = SPOTS2.garden.center
+    const [far, near] = [...STARTS2].sort(
+      (a, b) =>
+        Math.hypot(b.x - garden.x, b.z - garden.z) - Math.hypot(a.x - garden.x, a.z - garden.z),
+    )
+    const one = pup(far!.x, far!.z),
+      two = pup(near!.x, near!.z)
+    one.persona = NOSY
+    two.care = { ...two.care, bladder: 1 }
+    run([one, two], 10, at(12), SPOTS2, undefined, undefined, { curious: 1, random: () => 0 })
+    expect(two.seen).toContain('toGarden')
+    expect(one.seen).toContain('following')
+    expect(one.seen).not.toContain('toMud')
+  })
+
+  it('one with no curiosity stays where it is', () => {
+    const [one, two] = offToMud(INCURIOUS)
+    run([one, two], 10, at(12), SPOTS2, undefined, undefined, { curious: 0, random: () => 0 })
+    expect(one.seen).not.toContain('following')
+  })
+
+  it('it does not go after the other when it is the nearer of the two, in its way', () => {
+    const mud = SPOTS2.mud.center
+    const [far, near] = [...STARTS2].sort(
+      (a, b) => Math.hypot(b.x - mud.x, b.z - mud.z) - Math.hypot(a.x - mud.x, a.z - mud.z),
+    )
+    const one = pup(near!.x, near!.z),
+      two = pup(far!.x, far!.z)
+    one.persona = NOSY
+    one.r.mudAgo = MUD_EVERY
+    goToMud(two.r, two.m, SPOTS2, clamp)
+    run([one, two], 2, at(12), SPOTS2, undefined, undefined, { curious: 1, random: () => 0 })
+    expect(one.seen).not.toContain('following')
+  })
+
+  it('never into the puddle while the other is in it, nor both at once', () => {
+    const [one, two] = offToMud(NOSY)
+    run([one, two], 6, at(12), SPOTS2, undefined, undefined, { curious: 0, random: () => 0 })
+    expect(two.r.routine).toBe('splashing')
+    one.r.idle = 25
+    run([one, two], 1, at(12), SPOTS2, undefined, undefined, { curious: 1, random: () => 0.0001 })
+    expect(one.seen).not.toContain('toMud')
+    // Both due a roll and both choosing it in the same frame: only one goes
+    const [l, r] = STARTS2
+    const a = pup(l!.x, l!.z),
+      b = pup(r!.x, r!.z)
+    for (const p of [a, b]) {
+      p.r.mudAgo = MUD_EVERY
+      p.r.idle = 25
+    }
+    let together = 0
+    run(
+      [a, b],
+      20,
+      at(12),
+      SPOTS2,
+      () => {
+        if (inMud(SPOTS2, a.m.pos.x, a.m.pos.z) > 0 && inMud(SPOTS2, b.m.pos.x, b.m.pos.z) > 0)
+          together++
+      },
+      undefined,
+      { curious: 1, random: () => 0 },
+    )
+    expect([a.seen.includes('splashing'), b.seen.includes('splashing')]).toContain(true)
+    expect(together).toBe(0)
+    // Set off in the same frame: the one in the second place gives way
+    const c = pup(l!.x, l!.z),
+      d = pup(r!.x, r!.z)
+    goToMud(c.r, c.m, SPOTS2, clamp)
+    goToMud(d.r, d.m, SPOTS2, clamp)
+    run([c, d], 2 * DT, at(12), SPOTS2)
+    expect([c.r.routine, d.r.routine]).toEqual(['toMud', 'none'])
+  })
+
+  it('a touch stops it following', () => {
+    const [one, two] = offToMud(NOSY)
+    run([one, two], 1, at(12), SPOTS2, undefined, undefined, { curious: 1, random: () => 0 })
+    expect(one.r.routine).toBe('following')
+    touch(one.r)
+    run([one, two], DT, at(12), SPOTS2, undefined, undefined, { curious: 1, random: () => 0.99 })
+    expect(one.r.routine).toBe('none')
   })
 })
 

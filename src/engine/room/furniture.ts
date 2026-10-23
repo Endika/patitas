@@ -176,6 +176,40 @@ export function furnitureObstacles(spots: Spots): Circle[] {
   }))
 }
 
+/** How far a standing puppy keeps from a piece's edge or the puddle: about a body's half width. */
+const OPEN_CLEAR = 0.22
+/** A point the clamp moves further than this is off the play area. */
+const OFF_PLAY = 1e-3
+const AROUND = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [
+  Math.sin((i * Math.PI) / 4),
+  Math.cos((i * Math.PI) / 4),
+])
+
+/** Whether a puppy has room to stand at (x, z): in play, clear of every piece and the puddle. */
+export function openAt(
+  spots: Spots,
+  clamp: (x: number, z: number) => [number, number],
+  x: number,
+  z: number,
+): boolean {
+  const [cx, cz] = clamp(x, z)
+  if (Math.abs(cx - x) > OFF_PLAY || Math.abs(cz - z) > OFF_PLAY) return false
+  for (const bed of spots.beds) if (!clearOf(bed, x, z)) return false
+  for (const bowl of spots.bowls) if (!clearOf(bowl, x, z)) return false
+  return clearOf(spots.scale, x, z) && !nearMud(spots, x, z, OPEN_CLEAR)
+}
+
+const clearOf = ({ center, radius, depth }: Spot, x: number, z: number) =>
+  Math.hypot(x - center.x, z - center.z) >= Math.max(radius, depth) + OPEN_CLEAR
+
+/** Whether (x, z) lies in the puddle or within `margin` of its edge. */
+export function nearMud(spots: Spots, x: number, z: number, margin: number): boolean {
+  if (inMud(spots, x, z) > 0) return true
+  for (const [dx, dz] of AROUND)
+    if (inMud(spots, x + dx! * margin, z + dz! * margin) > 0) return true
+  return false
+}
+
 /** The beds, bowls and scale, in the order `Spots.walk` follows. */
 export const pieces = (spots: Spots): Spot[] => [...spots.beds, ...spots.bowls, spots.scale]
 

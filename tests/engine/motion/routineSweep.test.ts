@@ -20,6 +20,7 @@ import {
   goToMud,
   goWeigh,
   holdStill,
+  MUD_EVERY,
   letGo,
   seePeer,
   stepRoutine,
@@ -140,6 +141,7 @@ function run(
           energy: BREEDS[p.breed].defaultPersona.energy,
           cuddly: BREEDS[p.breed].defaultPersona.cuddly,
           social: BREEDS[p.breed].defaultPersona.social,
+          curious: BREEDS[p.breed].defaultPersona.curious,
           peer: peers[1 - i],
         },
         DT,
@@ -402,6 +404,48 @@ describe('two puppies from random starts', () => {
       expect(t).not.toBeNull()
       expect(near).toBeGreaterThan(0.85)
       expect(trod).toBe(0)
+    },
+  )
+
+  it.each(cases)(
+    'one follows the other to the mud, and only then rolls, at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 61 + aspect * 100))
+      const pups = [pup(0, a!.x, a!.z, 0.3, 0), pup(1, b!.x, b!.z, 0.3, 0)]
+      // The one nearer the puddle goes, the other may follow
+      const mud = spots.mud.center
+      const near = (p: Pup) => Math.hypot(p.m.pos.x - mud.x, p.m.pos.z - mud.z)
+      const [dorado, shiba] = (near(pups[0]!) < near(pups[1]!) ? pups : [...pups].reverse()) as [
+        Pup,
+        Pup,
+      ]
+      shiba.r.mudAgo = MUD_EVERY
+      goToMud(dorado.r, dorado.m, spots, (x, z) => clampPlay(cam, x, z))
+      let followed = false,
+        left = false,
+        both = 0
+      const t = run(
+        pups,
+        cam,
+        spots,
+        noon,
+        75,
+        // Done following, and out of the mud again if it went for a roll (it waits while the other
+        // stands in the puddle)
+        () => left && pups.every((p) => p.r.routine === 'none') && !wallowing(shiba.r, shiba.m),
+        () => {
+          followed ||= shiba.r.routine === 'following'
+          left ||= followed && shiba.r.routine !== 'following'
+          if (pups.every((p) => inMud(spots, p.m.pos.x, p.m.pos.z) > 0)) both++
+        },
+        // Every die rolls lowest: it always follows
+        () => 0,
+      )
+      if (t == null || both > 0)
+        failed.push(`follow ${aspect} ${seed} both=${both} ${pups.map((p) => p.r.routine)}`)
+      keptApart()
+      expect(t).not.toBeNull()
+      expect(both).toBe(0)
     },
   )
 

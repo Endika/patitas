@@ -19,7 +19,16 @@ import {
 import type { Vec3 } from '@/engine/math'
 import { sphereAt, SPHERES, type Body } from '@/engine/room/bodies'
 import { inTheWay } from '@/engine/room/crowd'
-import { inOval, walkingRound, type Circle, type Spot, type Spots } from '@/engine/room/furniture'
+import {
+  inMud,
+  inOval,
+  nearMud,
+  openAt,
+  walkingRound,
+  type Circle,
+  type Spot,
+  type Spots,
+} from '@/engine/room/furniture'
 import { SLEEP_TURN } from '@/engine/room/layout'
 import { reachOf, type ClampTo } from '@/engine/room/apart'
 import { goTo, type GoToOpts, type MotionState } from './locomotion'
@@ -47,6 +56,7 @@ export type Routine =
   | 'greeted'
   | 'inviting'
   | 'sparring'
+  | 'following'
 
 /**
  * The piece last walked round and the side taken, kept so the play area's edge is checked once
@@ -97,6 +107,10 @@ export interface RoutineState {
   playT: number
   /** Asked to play by the other and answered, until the asking is over. */
   answered: boolean
+  /** What the other was doing last frame, to see it set off for the mud or the garden. */
+  peerWas: Routine
+  /** Following the other to the mud (rather than the garden). */
+  toMudToo: boolean
   /** Where the current routine is headed, and the heading to end up at there. */
   target: Vec3
   /** The point it walks to next on the way there: the target, or a way round the furniture. */
@@ -302,6 +316,19 @@ const PLAY_IDLE = 15,
   SPAR_BEAT = 1.6,
   PLAY_TIME = 8,
   PLAY_SLACK = 0.5
+/**
+ * The other setting off for the mud or the garden, one free by day goes after it as likely as its
+ * curiosity times its liking for company, keeping FOLLOW_KEEP behind (stopping within
+ * FOLLOW_SLACK of that), and watches until the other is done and FOLLOW_CLEAR off the puddle, or
+ * FOLLOW_GIVE_UP has passed. Curious from FOLLOW_WALLOW, it is then ready for a roll of its own;
+ * not straight after one (MUD_EVERY).
+ */
+const FOLLOW_KEEP = 1.2,
+  FOLLOW_SLACK = 0.2,
+  FOLLOW_CLEAR = 0.3,
+  FOLLOW_GIVE_UP = 30
+/** What the other does at the mud or in the garden, there or on its way. */
+const OUT: ReadonlySet<Routine> = new Set(['toMud', 'splashing', 'toGarden', 'relieving'])
 /** The routines of a game, as the other sees them. */
 const PLAYING: ReadonlySet<Routine> = new Set(['inviting', 'sparring'])
 /** Away for a greeting on its return. */
@@ -414,6 +441,8 @@ export function createRoutineState(): RoutineState {
     playAgo: 0,
     playT: 0,
     answered: false,
+    peerWas: 'none',
+    toMudToo: false,
     target: new THREE.Vector3(),
     via: new THREE.Vector3(),
     heading: 0,
@@ -490,6 +519,7 @@ export function touch(r: RoutineState): boolean {
     r.routine === 'greeting' ||
     r.routine === 'greeted' ||
     PLAYING.has(r.routine) ||
+    r.routine === 'following' ||
     r.routine === 'toBed' ||
     r.routine === 'toGarden' ||
     r.routine === 'toMud' ||
@@ -628,7 +658,7 @@ export function forgetMovedRoute(
   now: RoutePlaces | null,
   place: number,
 ): void {
-  // A game's run or room to play in is gone with the old frame
+  // The two may no longer face each other across the new frame: the game ends
   if (PLAYING.has(r.routine)) return forgetRoute(r, m)
   const from = was && routeSpot(r, was, place),
     to = now && routeSpot(r, now, place)
@@ -1013,6 +1043,40 @@ const sparring: Step = (r, m, ctx, ev, dt) => {
   m.face = toOther + (Math.floor(at) % 2 ? SPAR_SWING : -SPAR_SWING)
 }
 
+/**
+ * Goes a few steps after the other on its way to the mud or the garden, never nearer than
+ * FOLLOW_KEEP and always behind it, and watches it there till it is done.
+ */
+const following: Step = (r, m, ctx, _ev, dt) => {
+  const peer = ctx.peer
+  // Done there and a body's width off the puddle, not to be pushed back into it
+  const done =
+    !!peer && !OUT.has(peer.routine) && !nearMud(ctx.spots, peer.pos.x, peer.pos.z, FOLLOW_CLEAR)
+  if (!peer || peer.busy || done || r.t > FOLLOW_GIVE_UP || hungryFor(ctx) || sleepy(r, ctx)) {
+    m.goal = null
+    m.face = null
+    m.bowGoal = 0
+    return enter(r, 'none')
+  }
+  // Behind it as it heads there
+  const there = r.toMudToo ? ctx.spots.mud.center : ctx.spots.garden.center
+  const hx = there.x - peer.pos.x,
+    hz = there.z - peer.pos.z,
+    h = Math.hypot(hx, hz) || 1
+  const x = peer.pos.x - (hx / h) * FOLLOW_KEEP,
+    z = peer.pos.z - (hz / h) * FOLLOW_KEEP
+  const d = Math.hypot(m.pos.x - peer.pos.x, m.pos.z - peer.pos.z)
+  if (d > FOLLOW_KEEP + FOLLOW_SLACK && openAt(ctx.spots, ctx.clamp, x, z)) {
+    r.target.set(x, 0, z)
+    r.there = false
+    approach(r, m, ctx, ctx.spots.garden, dt)
+    return
+  }
+  m.goal = null
+  faceOther(r, m, peer)
+  m.bowGoal = Math.sin(r.t * 1.7) > 0.6 ? SNIFF_BOW : 0
+}
+
 const sleeping: Step = (r, m, ctx) => {
   // Night falls on a nap: in its bed it sleeps on as at night, on the floor it gets up for its bed
   if (r.nap && isNight(ctx.now)) {
@@ -1100,7 +1164,9 @@ const begging: Step = (r, m, ctx) => {
 }
 
 const toMud: Step = (r, m, ctx, _ev, dt) => {
-  if (hungryFor(ctx) || sleepy(r, ctx)) {
+  // Both set off at once: the one in the second place lets the other have the puddle
+  const both = ctx.peer?.routine === 'toMud' && ctx.place === 1
+  if (hungryFor(ctx) || sleepy(r, ctx) || both) {
     m.goal = null
     return enter(r, 'none')
   }
@@ -1233,6 +1299,7 @@ const STEPS: { [K in Routine]?: Step } = {
   greeted,
   inviting,
   sparring,
+  following,
   toScale,
   onScale,
 }
@@ -1306,13 +1373,37 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
       }
     }
   }
+  // The other just set off for the mud or the garden: a curious, sociable one may go too
+  if (
+    peer &&
+    !peer.busy &&
+    (peer.routine === 'toGarden' || (peer.routine === 'toMud' && r.mudAgo >= MUD_EVERY)) &&
+    r.peerWas !== peer.routine &&
+    m.pose === 'stand' &&
+    !m.goal &&
+    !isNight(ctx.now) &&
+    (ctx.random ?? Math.random)() < (ctx.curious ?? 0) * (ctx.social ?? 0.5)
+  ) {
+    // Not when it is the nearer of the two, standing in the other's way
+    const toMud = peer.routine === 'toMud'
+    const there = toMud ? ctx.spots.mud.center : ctx.spots.garden.center
+    if (
+      Math.hypot(there.x - m.pos.x, there.z - m.pos.z) >
+      Math.hypot(there.x - peer.pos.x, there.z - peer.pos.z)
+    ) {
+      r.toMudToo = toMud
+      return enter(r, 'following')
+    }
+  }
   if (standingFree(peer) && m.pose === 'stand' && !m.goal && !isNight(ctx.now)) {
     const random = ctx.random ?? Math.random
     const keen = (ctx.energy ?? 0.5) * (ctx.social ?? 0.5)
+    const apart = Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z)
     // Asked to play: it answers once, by its energy and liking for company
     if (peer.routine === 'inviting' && !r.answered) {
       r.answered = true
       if (
+        apart >= PLAY_APART &&
         ctx.care.energy >= PLAY_ENERGY &&
         r.playAgo >= PLAY_EVERY &&
         random() < PLAY_CHANCE + (1 - PLAY_CHANCE) * keen
@@ -1323,7 +1414,7 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
     }
     if (
       peer.routine === 'none' &&
-      Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z) >= PLAY_APART &&
+      apart >= PLAY_APART &&
       ctx.care.energy >= PLAY_ENERGY &&
       r.playAgo >= PLAY_EVERY &&
       r.alone >= PLAY_IDLE &&
@@ -1353,8 +1444,15 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
     return
   }
   const curious = ctx.curious ?? 0
+  // One in the puddle at a time
+  const peerInMud =
+    !!peer &&
+    (peer.routine === 'toMud' ||
+      peer.routine === 'splashing' ||
+      inMud(ctx.spots, peer.pos.x, peer.pos.z) > 0)
   if (
     curious > 0 &&
+    !peerInMud &&
     r.mudAgo >= MUD_EVERY &&
     r.idle >= MUD_IDLE &&
     !sleepy(r, ctx) &&
@@ -1425,7 +1523,8 @@ export const staysPut = (r: RoutineState): boolean =>
   r.routine === 'settling' ||
   (r.routine === 'sleeping' && r.nap === 'floor') ||
   r.routine === 'greeted' ||
-  r.there ||
+  // Waiting on the other, it makes room as the other comes out past it
+  (r.there && r.routine !== 'following') ||
   r.waitT > 0
 
 /** How far a puppy in the way of a chase walks off, and the least that counts as making way. */
@@ -1489,6 +1588,7 @@ const WALKS: ReadonlySet<Routine> = new Set([
   'toGarden',
   'toScale',
   'greeting',
+  'following',
 ])
 
 /** On its way to a place and not there yet: turning round in its bed counts as there. */
@@ -1840,6 +1940,8 @@ export function stepRoutine(
     r.weigh = false
     // Up at once from a nap for the ball
     if (r.nap && m.pose !== 'stand') setPose(m, 'stand')
+    // Turned to the other, it turns to the ball instead
+    if (PLAYING.has(r.routine) || r.routine === 'following') m.face = null
     // The stamp's heading goes with it, or play would start with a stray turn, and it gets up
     if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null
     if (wallowing(r, m)) setPose(m, 'stand')
@@ -1857,5 +1959,6 @@ export function stepRoutine(
     r.eaten = 0
     r.fedAgo = 0
   }
+  r.peerWas = ctx.peer?.routine ?? 'none'
   return ev
 }
