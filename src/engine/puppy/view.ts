@@ -695,7 +695,8 @@ export function rebed(
   const slots = bedSlots(spots)
   for (const v of views) {
     const slot = slots[v.place]
-    if (slot && v.routine.routine === 'sleeping') putToBed(v, slot, ball)
+    if (slot && v.routine.routine === 'sleeping' && v.routine.nap !== 'floor')
+      putToBed(v, slot, ball)
   }
 }
 
@@ -842,6 +843,8 @@ export function tickPuppies(
           clampTo: clampToIn(room),
           busy: view.fetch.task !== 'free',
           curious: view.persona.curious,
+          energy: view.persona.energy,
+          cuddly: view.persona.cuddly,
           ...(ctx.random && { random: ctx.random }),
         },
         dt,
@@ -1124,9 +1127,14 @@ export function headWorld(view: PuppyView, out: Vec3 = new THREE.Vector3()): Vec
   return view.bones.head!.getWorldPosition(out)
 }
 
-/** Asleep, in the bath, or too hungry to leave its meal: the ball goes on without it. */
+/**
+ * Asleep (but for a nap by day, which the ball ends), in the bath, or too hungry to leave its
+ * meal: the ball goes on without it.
+ */
 const away = (v: Pick<PuppyView, 'routine' | 'care'>) =>
-  v.routine.routine === 'sleeping' || v.routine.held || keepsEating(v.routine, v.care)
+  (v.routine.routine === 'sleeping' && !v.routine.nap) ||
+  v.routine.held ||
+  keepsEating(v.routine, v.care)
 
 /**
  * The ball comes out: the puppies awake stand and wait for the throw; sleepers sleep on and a

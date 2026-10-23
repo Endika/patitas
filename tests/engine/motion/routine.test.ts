@@ -530,6 +530,8 @@ describe('mud', () => {
 
   it('a curious puppy wanders into the puddle, stamps about, rolls in it and comes out', () => {
     const p = pup(0.12, -0.12)
+    // Due a visit, so it is over long before it would nap for being left alone
+    p.r.mudAgo = MUD_EVERY
     let deepest = 0,
       out = Infinity,
       left = false
@@ -537,7 +539,7 @@ describe('mud', () => {
     let turned = NaN
     run(
       [p],
-      MUD_EVERY + 40,
+      40,
       at(12),
       SPOTS,
       () => {
@@ -553,7 +555,7 @@ describe('mud', () => {
       undefined,
       curious(0.9),
     )
-    expect(p.seen).toEqual(['none', 'toMud', 'splashing', 'none'])
+    expect(p.seen).toEqual(['toMud', 'splashing', 'none'])
     // Side on to the screen, its head towards the room, it stamps, rolls, gets up and goes
     expect(Math.sin(turned)).toBeGreaterThan(0.8)
     expect(poses).toEqual(['stand', 'roll', 'stand'])
@@ -944,6 +946,154 @@ describe('the room laid out anew', () => {
     expect(at0).toBe('toBowl')
     expect(p.fed).toBe(1)
     expect(Math.hypot(p.m.pos.x - meal.x, p.m.pos.z - meal.z)).toBeLessThan(0.3)
+  })
+})
+
+describe('left alone by day', () => {
+  /** Run untouched at noon, one second at a time, until `done` or `secs` are up. */
+  const alone = (p: Pup, secs: number, more: Partial<RoutineCtx>, done?: () => boolean) => {
+    let n = 0
+    while (n < secs && !done?.()) {
+      run([p], 1, at(12) + n * 1000, SPOTS, undefined, undefined, more)
+      n++
+    }
+    return n
+  }
+  const CUDDLY = { cuddly: 0.9, energy: 0.5 },
+    LIVELY = { cuddly: 0.2, energy: 0.8 }
+
+  it('a cuddly puppy naps in its bed after about two minutes, not before', () => {
+    const p = pup(0.12, -0.12)
+    const secs = alone(p, 200, CUDDLY, () => p.r.routine === 'sleeping')
+    expect(secs).toBeGreaterThan(120)
+    expect(secs).toBeLessThan(160)
+    expect(p.r.nap).toBe('bed')
+    expect(inBed(p.m)).toBeLessThan(0.25)
+  })
+
+  it('a lively one lasts longer, then sits, lies down and sleeps where it stands', () => {
+    const p = pup(0.12, -0.12)
+    const secs = alone(p, 200, LIVELY, () => p.r.routine === 'settling')
+    // 120 s scaled by its energy: 138
+    expect(secs).toBeGreaterThanOrEqual(138)
+    expect(secs).toBeLessThan(141)
+    const where = p.m.pos.clone()
+    const poses: string[] = []
+    alone(p, 10, LIVELY, () => {
+      if (poses.at(-1) !== p.m.pose) poses.push(p.m.pose)
+      return p.r.routine === 'sleeping'
+    })
+    expect(poses).toEqual(['sit', 'lie', 'sleep'])
+    expect(p.r.nap).toBe('floor')
+    expect(p.m.pos.distanceTo(where)).toBeLessThan(0.05)
+  })
+
+  it('a touch wakes it with a stretch, and it stays up a while before the next nap', () => {
+    const p = pup(0.12, -0.12)
+    alone(p, 200, LIVELY, () => p.r.routine === 'sleeping')
+    expect(touch(p.r)).toBe(true)
+    alone(p, 5, LIVELY)
+    expect([p.r.routine, p.m.pose, p.r.nap]).toEqual(['none', 'stand', null])
+    expect(alone(p, 200, LIVELY, () => p.r.routine === 'settling')).toBeGreaterThan(130)
+  })
+
+  it('it wakes by itself after three minutes', () => {
+    const p = pup(0.12, -0.12)
+    alone(p, 200, LIVELY, () => p.r.routine === 'sleeping')
+    expect(alone(p, 200, LIVELY, () => p.r.routine === 'stretch')).toBe(180)
+    alone(p, 3, LIVELY)
+    expect([p.r.routine, p.m.pose, p.r.nap]).toEqual(['none', 'stand', null])
+  })
+
+  it('the ball gets it up at once, from settling or asleep on the floor', () => {
+    for (const asleep of [false, true]) {
+      const p = pup(0.12, -0.12)
+      alone(p, 200, LIVELY, () => p.r.routine === (asleep ? 'sleeping' : 'settling'))
+      run([p], DT, at(12), SPOTS, undefined, undefined, { ...LIVELY, busy: true })
+      expect([p.r.routine, p.r.nap]).toEqual(['none', null])
+      run([p], 1, at(12), SPOTS, undefined, undefined, { ...LIVELY, busy: true })
+      expect(p.m.pose).toBe('stand')
+    }
+  })
+
+  it('a hungry one eats first, and at night it is the bed as ever', () => {
+    const hungry = pup(0.12, -0.12, 0.8, 0.8, 1)
+    hungry.r.alone = 200
+    run([hungry], DT, at(12), SPOTS, undefined, undefined, CUDDLY)
+    expect(hungry.r.routine).toBe('toBowl')
+    const night = pup(0.12, -0.12)
+    night.r.alone = 200
+    run([night], DT, at(22), SPOTS, undefined, undefined, LIVELY)
+    expect([night.r.routine, night.r.nap]).toEqual(['toBed', null])
+  })
+
+  it('bathed, brushed or weighed while settling or on its way, the nap is over', () => {
+    const settle = () => {
+      const p = pup(0.12, -0.12)
+      alone(p, 200, LIVELY, () => p.r.routine === 'settling')
+      return p
+    }
+    const bathed = settle()
+    holdStill(bathed.r, bathed.m, 'bathing')
+    expect(bathed.r.nap).toBeNull()
+    letGo(bathed.r)
+    expect(bathed.r.nap).toBeNull()
+    const weighed = settle()
+    goWeigh(weighed.r, weighed.m)
+    expect(weighed.r.nap).toBeNull()
+    const toBed = pup(0.12, -0.12)
+    alone(toBed, 200, CUDDLY, () => toBed.r.routine === 'toBed')
+    holdStill(toBed.r, toBed.m, 'brushing')
+    expect(toBed.r.nap).toBeNull()
+  })
+
+  it('night falls on a nap: on the floor it gets up and goes to bed; in its bed it sleeps on', () => {
+    const floor = pup(0.12, -0.12)
+    alone(floor, 200, LIVELY, () => floor.r.routine === 'sleeping')
+    run([floor], 30, at(20), SPOTS, undefined, undefined, LIVELY)
+    expect([floor.r.routine, floor.r.nap]).toEqual(['sleeping', null])
+    expect(inBed(floor.m)).toBeLessThan(0.25)
+    const settling = pup(0.12, -0.12)
+    alone(settling, 200, LIVELY, () => settling.r.routine === 'settling')
+    run([settling], 30, at(20), SPOTS, undefined, undefined, LIVELY)
+    expect(inBed(settling.m)).toBeLessThan(0.25)
+    const bed = pup(0.12, -0.12)
+    alone(bed, 200, CUDDLY, () => bed.r.routine === 'sleeping')
+    run([bed], DT, at(20), SPOTS, undefined, undefined, CUDDLY)
+    expect([bed.r.routine, bed.r.nap]).toEqual(['sleeping', null])
+  })
+
+  it('hungry with its bowl empty, it asks for food rather than nap', () => {
+    const p = pup(0.12, -0.12, 0.8, 0.8, 0)
+    p.r.alone = 200
+    p.r.begAgo = BEG_EVERY
+    run([p], DT, at(12), SPOTS, undefined, undefined, LIVELY)
+    expect(p.r.routine).toBe('toBowl')
+    // Just asked, so not again yet: it waits awake all the same
+    const asked = pup(0.12, -0.12, 0.8, 0.8, 0)
+    asked.r.alone = 200
+    asked.r.begAgo = 0
+    run([asked], DT, at(12), SPOTS, undefined, undefined, LIVELY)
+    expect([asked.r.routine, asked.r.nap]).toEqual(['none', null])
+  })
+
+  it('settling and asleep on the floor it is not pushed about; asleep in its bed it is as ever', () => {
+    const floor = pup(0.12, -0.12)
+    alone(floor, 200, LIVELY, () => floor.r.routine === 'settling')
+    expect(staysPut(floor.r)).toBe(true)
+    alone(floor, 10, LIVELY, () => floor.r.routine === 'sleeping')
+    expect(staysPut(floor.r)).toBe(true)
+    const bed = pup(0.12, -0.12)
+    alone(bed, 200, CUDDLY, () => bed.r.routine === 'sleeping')
+    expect(staysPut(bed.r)).toBe(staysPut({ ...bed.r, nap: null }))
+  })
+
+  it('asleep on the floor, its bed moving does not carry it', () => {
+    const p = pup(0.12, -0.12)
+    alone(p, 200, LIVELY, () => p.r.routine === 'sleeping')
+    const where = p.m.pos.clone()
+    followBed(p.r, [p.m.pos], 0.3, 0.3)
+    expect(p.m.pos.distanceTo(where)).toBe(0)
   })
 })
 
