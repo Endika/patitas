@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/Endika/patitas/compare/v0.20.0...v0.21.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** a coloured collar for each puppy ([3d273b4](https://github.com/Endika/patitas/commit/3d273b4f47cb24202b824e3fcd8000acbc09d72a))
+
 ## [0.20.0](https://github.com/Endika/patitas/compare/v0.19.0...v0.20.0) (2026-10-23)
 
 
