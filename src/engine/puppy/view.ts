@@ -32,12 +32,14 @@ import {
 import { setPose, stepPoses, type PoseId } from '@/engine/motion/poses'
 import {
   bedSlots,
+  createPeer,
   createRoutineState,
   giveWay,
   goWeigh,
   holdStill,
   keepsEating,
   letGo,
+  seePeer,
   stepAside,
   stepRoutine,
   staysPut,
@@ -796,6 +798,9 @@ const EAT_REACH = 0.7
 /** A full tummy: a burst of wagging. */
 const FED_HAPPY = 0.35
 
+/** What each of two puppies in the room sees of the other, kept to fill every frame. */
+const PEERS = [0, 1].map(() => createPeer(BREEDS.dorado.defaultPersona))
+
 /**
  * One frame of the puppies in the room: fetch, routine, poses and steps for each, then they are
  * kept apart and a loose ball bounces off them, then character and bones. A ball in a mouth is
@@ -810,7 +815,13 @@ export function tickPuppies(
 ): FetchEvents[] {
   const { ball, room } = ctx
   const spots = room.furniture?.spots
-  const moved = views.map((view) => {
+  // Each of two sees the other as it stood before either moves this frame
+  const two = views.length === 2
+  if (two)
+    views.forEach((v, i) =>
+      seePeer(PEERS[i]!, v.routine, v.motion, v.persona, v.fetch.task !== 'free'),
+    )
+  const moved = views.map((view, i) => {
     const M = view.motion
     const ev = stepFetch(
       view.fetch,
@@ -846,6 +857,7 @@ export function tickPuppies(
           energy: view.persona.energy,
           cuddly: view.persona.cuddly,
           ...(ctx.random && { random: ctx.random }),
+          ...(two && { peer: PEERS[1 - i] }),
         },
         dt,
       )
