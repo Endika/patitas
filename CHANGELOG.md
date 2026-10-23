@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/Endika/patitas/compare/v0.19.0...v0.20.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** colours for the beds, the bowls and the rug ([30a6f08](https://github.com/Endika/patitas/commit/30a6f08960ee70116b7a17bcce4c53a50b88f0ee))
+
 ## [0.19.0](https://github.com/Endika/patitas/compare/v0.18.0...v0.19.0) (2026-10-23)
 
 
