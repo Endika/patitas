@@ -1,5 +1,6 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { Deed } from '@/domain/wallet'
 
 /** Shown instead of a stage when the browser has no WebGL. */
 export const NO_3D = 'Este navegador no puede mostrar gráficos 3D.'
@@ -109,5 +110,7 @@ export interface RoomStage {
   relieve?(kind: MessKind): void
   /** Called at once with the current status and again whenever it changes. */
   onChange(listener: (s: StageStatus) => void): () => void
+  /** Called whenever the player does something for a puppy that earns coins. */
+  onDeed(listener: (deed: Deed) => void): () => void
   dispose(): void
 }

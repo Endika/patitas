@@ -768,6 +768,9 @@ export function pointLook(view: PuppyView, ray: THREE.Ray, camera: THREE.Camera,
   if (ray.intersectPlane(plane, view.behaviour.pointerLook)) view.behaviour.pointerAt = now
 }
 
+/** What happened to a puppy in a frame: its fetch events, and whether it finished a meal. */
+export type PuppyEvents = FetchEvents & { fed?: true }
+
 export interface PuppyTickCtx {
   room: RoomScene
   ball: BallState
@@ -808,14 +811,14 @@ const PEERS = [0, 1].map(() => createPeer(BREEDS.dorado.defaultPersona))
  * One frame of the puppies in the room: fetch, routine, poses and steps for each, then they are
  * kept apart and a loose ball bounces off them, then character and bones. A ball in a mouth is
  * placed again after the bones move so it does not trail the jaw by a frame. Returns each puppy's
- * fetch events, in order.
+ * events, in order.
  */
 export function tickPuppies(
   views: PuppyView[],
   ctx: PuppyTickCtx,
   dt: number,
   t: number,
-): FetchEvents[] {
+): PuppyEvents[] {
   const { ball, room } = ctx
   const spots = room.furniture?.spots
   // Each of two sees the other as it stood before either moves this frame
@@ -826,7 +829,7 @@ export function tickPuppies(
     )
   const moved = views.map((view, i) => {
     const M = view.motion
-    const ev = stepFetch(
+    const ev: PuppyEvents = stepFetch(
       view.fetch,
       M,
       ball,
@@ -873,6 +876,7 @@ export function tickPuppies(
           ...messLocal(room.cam, r.mess.x, r.mess.z),
           createdAt: ctx.clock,
         })
+      if (r.fed) ev.fed = true
       if (r.fed || r.greeted || r.played) {
         const gain = r.fed ? FED_HAPPY : r.played ? PLAY_HAPPY : GREET_HAPPY
         view.behaviour.happy = Math.min(1, view.behaviour.happy + gain)

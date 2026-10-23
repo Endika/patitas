@@ -3,6 +3,7 @@ import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import { createWallet, earn, type Deed, type Wallet } from '@/domain/wallet'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
 import type { GameStorage } from '@/infrastructure/storage'
 
@@ -10,6 +11,7 @@ export interface GameState {
   puppies: Puppy[]
   room: Room
   persistent: boolean
+  wallet: Wallet
 }
 
 export interface Game {
@@ -23,32 +25,44 @@ export interface Game {
   /** The care saved for a puppy, as it was when last seen. */
   loadCare(id: string): Promise<Care | undefined>
   saveCare(id: string, care: Care): Promise<void>
+  /** Pays for a deed, within the day's limits: the coins gained, 0 when none. */
+  earn(deed: Deed): number
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
-export function useGame(openStorage: () => Promise<GameStorage>): Game {
+export function useGame(
+  openStorage: () => Promise<GameStorage>,
+  now: () => number = Date.now,
+): Game {
   const [state, setState] = useState<GameState | null>(null)
   const storage = useRef<GameStorage | null>(null)
+  /** The wallet as last changed, ahead of the render that shows it. */
+  const wallet = useRef<Wallet | null>(null)
 
   useEffect(() => {
     let live = true
     void (async () => {
       const opened = await openStorage()
-      const [puppies, room] = await Promise.all([opened.listPuppies(), opened.loadRoom()])
+      const [puppies, room, saved] = await Promise.all([
+        opened.listPuppies(),
+        opened.loadRoom(),
+        opened.loadWallet(),
+      ])
       if (!live) return
       storage.current = opened
-      setState({ puppies, room, persistent: opened.persistent })
+      wallet.current = saved ?? createWallet(now())
+      setState({ puppies, room, persistent: opened.persistent, wallet: wallet.current })
     })()
     return () => {
       live = false
     }
-  }, [openStorage])
+  }, [openStorage, now])
 
   const adopt = useCallback(async (input: { name: string; breedId: BreedId }) => {
     const s = storage.current!
     const adoption = await adoptPuppy(s, input, { now: Date.now, random: Math.random })
     const [puppies, room] = await Promise.all([s.listPuppies(), s.loadRoom()])
-    setState({ puppies, room, persistent: s.persistent })
+    setState((prev) => prev && { ...prev, puppies, room })
     return adoption
   }, [])
 
@@ -77,5 +91,20 @@ export function useGame(openStorage: () => Promise<GameStorage>): Game {
   const loadCare = useCallback((id: string) => storage.current!.loadCare(id), [])
   const saveCare = useCallback((id: string, care: Care) => storage.current!.saveCare(id, care), [])
 
-  return { state, adopt, enter, leave, loadCare, saveCare }
+  const earnFor = useCallback(
+    (deed: Deed) => {
+      const s = storage.current
+      if (!s || !wallet.current) return 0
+      const paid = earn(wallet.current, deed, now())
+      wallet.current = paid.wallet
+      if (paid.gained) {
+        setState((prev) => prev && { ...prev, wallet: paid.wallet })
+        s.saveWallet(paid.wallet).catch(() => {})
+      }
+      return paid.gained
+    },
+    [now],
+  )
+
+  return { state, adopt, enter, leave, loadCare, saveCare, earn: earnFor }
 }

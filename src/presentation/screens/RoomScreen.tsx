@@ -12,6 +12,7 @@ import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import { traits, type Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
+import type { Deed } from '@/domain/wallet'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
 import Hud from '../components/Hud'
@@ -37,6 +38,9 @@ const WAITING: StageStatus = {
 /** How long a notice about who can come in stays up, in milliseconds. */
 export const NOTICE_MS = 8000
 
+/** How long «+5» stays up after coins are earned, in milliseconds. */
+export const GAIN_MS = 1500
+
 /** How often the care in the room is saved while it is open, in milliseconds. */
 const SAVE_EVERY = 30_000
 
@@ -51,6 +55,8 @@ export default function RoomScreen({
   onAdoptAnother,
   loadCare,
   saveCare,
+  coins,
+  onDeed,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -68,6 +74,9 @@ export default function RoomScreen({
   onAdoptAnother(): void
   loadCare(id: string): Promise<Care | undefined>
   saveCare(id: string, care: Care): Promise<void>
+  coins: number
+  /** Pays for a deed done in the room: the coins gained, 0 when none. */
+  onDeed(deed: Deed): number
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   /** A back with nothing open: one more leaves. */
@@ -92,7 +101,17 @@ export default function RoomScreen({
     },
     [now, saveCare],
   )
-  const { hostRef, stageRef, status: reported } = useRoomStage(createStage, keep)
+  // Counts the gains, so the same amount twice shows again
+  const [gain, setGain] = useState<{ coins: number; n: number } | null>(null)
+  const deed = useCallback(
+    (d: Deed) => {
+      const coins = onDeed(d)
+      if (coins) setGain((g) => ({ coins, n: (g?.n ?? 0) + 1 }))
+    },
+    [onDeed],
+  )
+  const gained = useFleeting(gain, GAIN_MS)
+  const { hostRef, stageRef, status: reported } = useRoomStage(createStage, keep, deed)
   const status = reported ?? WAITING
   // Counts the refusals, so each one says so again
   const [refused, setRefused] = useState(0)
@@ -266,6 +285,16 @@ export default function RoomScreen({
             traitsOf={traitsOf}
             onOpen={onOpen}
           />
+          <p className="room-coins">
+            <span className="room-coin" aria-hidden="true" />
+            {coins}
+            <span className="sr-only"> {coins === 1 ? 'moneda' : 'monedas'}</span>
+            {gained && (
+              <span key={gained.n} role="status" className="room-gain">
+                +{gained.coins}
+              </span>
+            )}
+          </p>
           {/* With nobody in the room, who to bring in is the only thing to do */}
           <div ref={cast} className="room-cast">
             {!empty && (

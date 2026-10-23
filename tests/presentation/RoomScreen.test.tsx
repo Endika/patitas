@@ -2,7 +2,8 @@ import { StrictMode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
-import { NOTICE_MS } from '@/presentation/screens/RoomScreen'
+import { GAIN_MS, NOTICE_MS } from '@/presentation/screens/RoomScreen'
+import { PAY, START_COINS } from '@/domain/wallet'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
 import { createCare, health } from '@/domain/care'
@@ -56,6 +57,14 @@ const hide = (state: 'hidden' | 'visible') => {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
   act(() => void document.dispatchEvent(new Event('visibilitychange')))
 }
+
+/** The coins shown in the room, as a screen reader reads them. */
+const coins = (n: number) =>
+  screen.getByText(
+    (_, el) =>
+      el?.classList.contains('room-coins') === true &&
+      el.textContent?.startsWith(`${n} monedas`) === true,
+  )
 
 afterEach(() => {
   vi.useRealTimers()
@@ -418,6 +427,33 @@ describe('RoomScreen', () => {
     expect(screen.getByText('¡Limpio!')).toBeInTheDocument()
     act(() => stage.emit({ cleaned: false }))
     expect(screen.queryByText('¡Limpio!')).not.toBeInTheDocument()
+  })
+
+  it("pays coins for what is done in the room, up to each deed's times a day, and keeps them", async () => {
+    const storage = await adopted(['Kuma'])
+    const stage = start(storage, { now: () => at(24, 10) })
+    await roster()
+    expect(coins(START_COINS)).toBeInTheDocument()
+
+    act(() => stage.deed('bath'))
+    expect(coins(START_COINS + PAY.bath.coins)).toBeInTheDocument()
+    expect(screen.getByText(`+${PAY.bath.coins}`)).toBeInTheDocument()
+    act(() => stage.deed('bath'))
+    act(() => stage.deed('bath'))
+    const most = START_COINS + PAY.bath.coins * PAY.bath.times
+    expect(coins(most)).toBeInTheDocument()
+    await waitFor(async () => expect((await storage.loadWallet())?.coins).toBe(most))
+  })
+
+  it('lets «+5» go after a while', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const storage = await adopted(['Kuma'])
+    const stage = start(storage)
+    await roster()
+    act(() => stage.deed('meal'))
+    expect(screen.getByText(`+${PAY.meal.coins}`)).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(GAIN_MS))
+    expect(screen.queryByText(`+${PAY.meal.coins}`)).not.toBeInTheDocument()
   })
 
   it('brings each puppy in with the time it was away, and keeps its care when it leaves', async () => {
