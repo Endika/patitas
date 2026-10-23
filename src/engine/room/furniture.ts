@@ -1,4 +1,4 @@
-import type { FoodId } from '@/domain/shop'
+import type { Decor, FoodId } from '@/domain/shop'
 import * as THREE from 'three'
 import { clamp, type Vec3 } from '@/engine/math'
 import { playLocal, playWorld, type FixedCamera } from './camera'
@@ -343,9 +343,10 @@ export interface Furniture {
   spots: Spots
   /** Places every piece for the camera's current framing, or as `spots` (laid out for it) say. */
   layout(cam: FixedCamera, spots?: Spots): void
-  /** Shows the bowl at `place` this full, 0 to 1. */
-  /** How full the bowl at `place` is, and with which special food, if any. */
+  /** How full the bowl at `place` is, 0 to 1, and with which special food, if any. */
   bowlFill(place: number, level: number, food: FoodId | null): void
+  /** Paints the beds, the bowls and the rug in the colours chosen in the shop. */
+  setDecor(decor: Decor): void
   scaleReading(kg: number | null): void
   /** Shows the scale `t` of the way out, 0 put away to 1 out. */
   scaleOut(t: number): void

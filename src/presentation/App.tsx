@@ -111,7 +111,7 @@ export default function App({
         onBuy={game.buy}
         onSpend={game.spend}
         onTeach={game.teach}
-        onToy={game.toy}
+        onUse={game.use}
         now={now}
         createStage={createStage}
       />

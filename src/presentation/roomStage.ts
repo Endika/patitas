@@ -1,5 +1,5 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
-import type { FoodId, ToyId } from '@/domain/shop'
+import type { Decor, FoodId, ToyId } from '@/domain/shop'
 import type { Puppy, Trick } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
 
@@ -74,6 +74,8 @@ export interface RoomStage {
   takeBall(): void
   /** What the ball button throws from now on; one in the air or in a mouth is swapped once back. */
   setToy(toy: ToyId): void
+  /** The colours of the beds, the bowls and the rug. */
+  setDecor(decor: Decor): void
   stowBall(): void
   /**
    * The puppy at `index` does the trick, if it is free to: at once if it knows it well, else

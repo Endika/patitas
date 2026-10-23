@@ -3,18 +3,38 @@ import type { Wallet } from './wallet'
 /** A special food for the bowl: on top of the meal, its own effect. */
 export type FoodId = 'premium' | 'light' | 'energy'
 
-/** What can be thrown for them: the ball everyone has, or a toy bought. */
-export type ToyId = 'ball' | 'bone' | 'plush'
-
 /** What goes once used. */
 export type Consumable = FoodId | 'treat'
 
-/** What is kept once bought. */
-export type Keepsake = Exclude<ToyId, 'ball'>
+/** Each kind of thing kept and chosen to use, and the looks it comes in, the standard one first. */
+export const LOOKS = {
+  toy: ['ball', 'bone', 'plush'],
+  bed: ['coral', 'sage', 'sky'],
+  bowl: ['ink', 'cherry', 'teal'],
+  rug: ['rose', 'sky', 'sand'],
+} as const
+
+export type Slot = keyof typeof LOOKS
+export type Look<S extends Slot> = (typeof LOOKS)[S][number]
+
+/** What can be thrown for them: the ball everyone has, or a toy bought. */
+export type ToyId = Look<'toy'>
+
+/** The colours the room's things are in. */
+export interface Decor {
+  bed: Look<'bed'>
+  bowl: Look<'bowl'>
+  rug: Look<'rug'>
+}
+
+export const STANDARD_DECOR: Decor = { bed: 'coral', bowl: 'ink', rug: 'rose' }
+
+/** What is kept once bought, or comes with the house, and is chosen to use. */
+export type Keepsake = ToyId | `bed-${Look<'bed'>}` | `bowl-${Look<'bowl'>}` | `rug-${Look<'rug'>}`
 
 export type ItemId = Consumable | Keepsake
 
-export type Aisle = 'food' | 'treat' | 'toy'
+export type Aisle = 'food' | 'treat' | 'toy' | 'room'
 
 export interface Item {
   id: ItemId
@@ -22,16 +42,37 @@ export interface Item {
   name: string
   /** The name on a button with no room for the whole of it. */
   short: string
+  /** 0 for what comes with the house. */
   price: number
   /** What it does, in a few words. */
   blurb: string
+  /** A keepsake: the slot it fills when chosen, and as which look. */
+  use?: { slot: Slot; look: string }
 }
 
 export const AISLES: { id: Aisle; name: string }[] = [
   { id: 'food', name: 'Comida' },
   { id: 'treat', name: 'Chuches' },
   { id: 'toy', name: 'Juguetes' },
+  { id: 'room', name: 'Sala' },
 ]
+
+const keepsake = (
+  slot: Slot,
+  look: string,
+  name: string,
+  price: number,
+  blurb: string,
+  aisle: Aisle = slot === 'toy' ? 'toy' : 'room',
+): Item => ({
+  id: (slot === 'toy' ? look : `${slot}-${look}`) as Keepsake,
+  aisle,
+  name,
+  short: name,
+  price,
+  blurb,
+  use: { slot, look },
+})
 
 export const SHOP: Item[] = [
   {
@@ -66,38 +107,44 @@ export const SHOP: Item[] = [
     price: 4,
     blurb: 'Dásela justo después de un truco y lo aprenderá antes.',
   },
-  {
-    id: 'bone',
-    aisle: 'toy',
-    name: 'Hueso',
-    short: 'Hueso',
-    price: 40,
-    blurb: 'Bota poco y se lo lleva atravesado en la boca.',
-  },
-  {
-    id: 'plush',
-    aisle: 'toy',
-    name: 'Peluche',
-    short: 'Peluche',
-    price: 60,
-    blurb: 'Blandito: cae y apenas rueda.',
-  },
+  keepsake('toy', 'ball', 'Pelota', 0, 'La de siempre: bota y rueda.'),
+  keepsake('toy', 'bone', 'Hueso', 40, 'Bota poco y se lo lleva atravesado en la boca.'),
+  keepsake('toy', 'plush', 'Peluche', 60, 'Blandito: cae y apenas rueda.'),
+  keepsake('bed', 'coral', 'Camas coral', 0, 'Las de siempre.'),
+  keepsake('bed', 'sage', 'Camas salvia', 30, 'Verde suave, con cojín claro.'),
+  keepsake('bed', 'sky', 'Camas cielo', 30, 'Azul tranquilo, con cojín claro.'),
+  keepsake('bowl', 'ink', 'Cuencos oscuros', 0, 'Los de siempre.'),
+  keepsake('bowl', 'cherry', 'Cuencos cereza', 20, 'Rojo brillante.'),
+  keepsake('bowl', 'teal', 'Cuencos turquesa', 20, 'Verde azulado brillante.'),
+  keepsake('rug', 'rose', 'Alfombra rosa', 0, 'La de siempre.'),
+  keepsake('rug', 'sky', 'Alfombra azul', 25, 'Azul empolvado.'),
+  keepsake('rug', 'sand', 'Alfombra arena', 25, 'Color miel.'),
 ]
-
-/** Whether `id` is kept once bought rather than used up. */
-export const isKeepsake = (id: ItemId): id is Keepsake => id === 'bone' || id === 'plush'
 
 export const itemOf = (id: ItemId): Item => SHOP.find((i) => i.id === id)!
 
+/** Whether `id` is kept once bought, or comes with the house, rather than used up. */
+export const isKeepsake = (id: ItemId): id is Keepsake => !!itemOf(id).use
+
+/** Whether the house has `id` to use: it came with it or was bought. */
+export const owns = (wallet: Wallet, id: Keepsake): boolean =>
+  itemOf(id).price === 0 || wallet.owned.includes(id)
+
+/** Whether `id` is the one in use in its slot. */
+export function inUse(wallet: Wallet, id: Keepsake): boolean {
+  const { slot, look } = itemOf(id).use!
+  return (slot === 'toy' ? wallet.toy : wallet.decor[slot]) === look
+}
+
 /**
- * The wallet with `id` bought, or null when the coins do not reach or it is a keepsake already
- * owned.
+ * The wallet with `id` bought, or null when the coins do not reach or it is a keepsake the house
+ * already has.
  */
 export function buy(wallet: Wallet, id: ItemId): Wallet | null {
   const { price } = itemOf(id)
   if (wallet.coins < price) return null
   if (isKeepsake(id)) {
-    if (wallet.owned.includes(id)) return null
+    if (owns(wallet, id)) return null
     return { ...wallet, coins: wallet.coins - price, owned: [...wallet.owned, id] }
   }
   return {
@@ -107,10 +154,12 @@ export function buy(wallet: Wallet, id: ItemId): Wallet | null {
   }
 }
 
-/** The toy the ball button throws, if it is the ball or one owned. */
-export function chooseToy(wallet: Wallet, toy: ToyId): Wallet | null {
-  if (toy !== 'ball' && !wallet.owned.includes(toy)) return null
-  return { ...wallet, toy }
+/** The wallet with `id` in use in its slot, or null when the house does not have it. */
+export function choose(wallet: Wallet, id: Keepsake): Wallet | null {
+  if (!owns(wallet, id)) return null
+  const { slot, look } = itemOf(id).use!
+  if (slot === 'toy') return { ...wallet, toy: look as ToyId }
+  return { ...wallet, decor: { ...wallet.decor, [slot]: look } }
 }
 
 /** The wallet with one `id` used up, or null when there is none left. */

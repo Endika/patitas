@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '@/presentation/App'
 import { GAIN_MS, NOTICE_MS } from '@/presentation/screens/RoomScreen'
+import { STANDARD_DECOR } from '@/domain/shop'
 import { createWallet, PAY, START_COINS } from '@/domain/wallet'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
@@ -523,6 +524,25 @@ describe('RoomScreen', () => {
     await waitFor(async () =>
       expect(await storage.loadWallet()).toMatchObject({ owned: ['bone'], toy: 'bone', coins: 5 }),
     )
+  })
+
+  it('paints the room in a colour bought and chosen in the shop', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    await storage.saveWallet({ ...createWallet(0), coins: 30 })
+    const stage = start(storage)
+    await roster()
+    expect(stage.decors).toEqual([STANDARD_DECOR])
+
+    await user.click(screen.getByRole('button', { name: /Tienda/ }))
+    const shop = within(screen.getByRole('region', { name: 'Tienda' }))
+    await user.click(shop.getByRole('tab', { name: 'Sala' }))
+    expect(shop.getByRole('button', { name: 'Camas coral, en uso' })).toBeInTheDocument()
+    await user.click(shop.getByRole('button', { name: 'Comprar Cuencos cereza por 20 monedas' }))
+    await user.click(shop.getByRole('button', { name: 'Usar Cuencos cereza' }))
+    expect(stage.decors.at(-1)).toEqual({ ...STANDARD_DECOR, bowl: 'cherry' })
+    expect(shop.getByRole('button', { name: 'Usar Cuencos oscuros' })).toBeInTheDocument()
+    await waitFor(async () => expect((await storage.loadWallet())?.decor.bowl).toBe('cherry'))
   })
 
   it('lets «+5» go after a while', async () => {
