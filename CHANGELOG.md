@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/Endika/patitas/compare/v0.11.0...v0.12.0) (2026-10-23)
+
+
+### Features
+
+* **room:** let each puppy see the other ([d869bf6](https://github.com/Endika/patitas/commit/d869bf63f22a7435beae7b67cf0c79b8d28c29d2))
+
 ## [0.11.0](https://github.com/Endika/patitas/compare/v0.10.0...v0.11.0) (2026-10-23)
 
 
