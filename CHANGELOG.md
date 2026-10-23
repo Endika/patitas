@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/Endika/patitas/compare/v0.14.0...v0.15.0) (2026-10-23)
+
+
+### Features
+
+* **puppy:** a curious puppy follows the other to the mud or the garden ([01d3d86](https://github.com/Endika/patitas/commit/01d3d864ab923b960dfefdde024147a7d0c5a4e2))
+* **puppy:** a playful puppy steals the ball, and one about to nap keeps off the other lying there ([6b106a5](https://github.com/Endika/patitas/commit/6b106a5fac551ad09205acfe82f82cc4ee06ccb5))
+
 ## [0.14.0](https://github.com/Endika/patitas/compare/v0.13.0...v0.14.0) (2026-10-23)
 
 
