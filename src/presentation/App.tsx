@@ -1,3 +1,4 @@
+import type { OpenMicrophone } from '@/infrastructure/microphone'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { openGameStorage, type StorageHooks } from '@/infrastructure/idbStorage'
 import type { GameStorage } from '@/infrastructure/storage'
@@ -25,6 +26,7 @@ export default function App({
   openStorage = openGameStorage,
   createStage,
   createPreview,
+  openMic,
   now,
   reload = reloadPage,
   history,
@@ -36,6 +38,8 @@ export default function App({
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   createPreview?: CreatePreview
+  /** Where «Escuchar» hears from; the phone's microphone unless a test brings its own. */
+  openMic?: OpenMicrophone
   /** Where the system back arrives; the page's own history unless a test brings its own. */
   history?: BackGuardHistory
 }) {
@@ -113,6 +117,9 @@ export default function App({
         onTeach={game.teach}
         onUse={game.use}
         onWear={game.wear}
+        settings={game.state.settings}
+        onSettle={game.settle}
+        openMic={openMic}
         now={now}
         createStage={createStage}
       />

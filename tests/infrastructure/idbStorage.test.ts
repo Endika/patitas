@@ -101,6 +101,16 @@ describe('idbStorage', () => {
     expect(await reopened.loadRoom()).toEqual({ inRoom: ['a'] })
   })
 
+  it('has no settings until saved, then keeps them across reopening', async () => {
+    const first = await openGameStorage()
+    expect(await first.loadSettings()).toBeUndefined()
+    await first.saveSettings({ listen: true, explained: true })
+    expect(await (await openGameStorage()).loadSettings()).toEqual({
+      listen: true,
+      explained: true,
+    })
+  })
+
   it('keeps care across reopening', async () => {
     const first = await openGameStorage()
     expect(await first.loadCare('x')).toBeUndefined()

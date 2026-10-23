@@ -1,6 +1,7 @@
 import type { Care } from '../domain/care'
 import type { Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
+import type { Settings } from '../domain/settings'
 import type { Wallet } from '../domain/wallet'
 
 export interface GameStorage {
@@ -14,5 +15,8 @@ export interface GameStorage {
   /** The house's coins, if it has ever had any. */
   loadWallet(): Promise<Wallet | undefined>
   saveWallet(wallet: Wallet): Promise<void>
+  /** The player's choices about the app, if ever saved. */
+  loadSettings(): Promise<Settings | undefined>
+  saveSettings(settings: Settings): Promise<void>
   readonly persistent: boolean
 }

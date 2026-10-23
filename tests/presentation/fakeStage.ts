@@ -5,6 +5,7 @@ import type { Deed } from '@/domain/wallet'
 import type { PuppyNeeds, RoomStage, StageStatus, TrickPose } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
 import { createMemoryStorage } from '@/infrastructure/memoryStorage'
+import type { OpenMicrophone } from '@/infrastructure/microphone'
 import type { GameStorage } from '@/infrastructure/storage'
 
 /** A puppy's needs as a room would report them, `id` and `name` first. */
@@ -138,6 +139,32 @@ export function createFakeStage(place?: PlaceAccident) {
       canvases.push(canvas)
       return stage
     },
+  }
+}
+
+/**
+ * A microphone a test plays levels into, in dBFS, 20 ms apart; `refuse` makes the next opening
+ * fail, as when the player says no.
+ */
+export function createFakeMic() {
+  const opened: { level(db: number): void; stopped: boolean }[] = []
+  let refusing = false
+  const open: OpenMicrophone = async (onLevel) => {
+    if (refusing) throw new DOMException('denied', 'NotAllowedError')
+    const mic = {
+      stopped: false,
+      level: (db: number) => onLevel(db, 0.02),
+      stop: () => void (mic.stopped = true),
+    }
+    opened.push(mic)
+    return mic
+  }
+  return {
+    open,
+    opened,
+    /** The microphone open now, if any. */
+    live: () => opened.find((m) => !m.stopped),
+    refuse: () => void (refusing = true),
   }
 }
 

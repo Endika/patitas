@@ -1,6 +1,7 @@
 import type { Care } from '../domain/care'
 import type { Puppy } from '../domain/puppy'
 import type { Room } from '../domain/room'
+import type { Settings } from '../domain/settings'
 import type { Wallet } from '../domain/wallet'
 import type { GameStorage } from './storage'
 
@@ -9,6 +10,7 @@ export function createMemoryStorage(): GameStorage {
   const cares = new Map<string, Care>()
   let room: Room = { inRoom: [] }
   let wallet: Wallet | undefined
+  let settings: Settings | undefined
   return {
     persistent: false,
     listPuppies: async () => [...puppies.values()].sort((a, b) => a.adoptedAt - b.adoptedAt),
@@ -33,6 +35,10 @@ export function createMemoryStorage(): GameStorage {
     loadWallet: async () => wallet && structuredClone(wallet),
     saveWallet: async (next) => {
       wallet = structuredClone(next)
+    },
+    loadSettings: async () => settings && { ...settings },
+    saveSettings: async (next) => {
+      settings = { ...next }
     },
   }
 }

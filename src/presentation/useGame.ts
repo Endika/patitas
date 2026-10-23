@@ -3,6 +3,7 @@ import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
 import { teach, wear, type Puppy, type Trick } from '@/domain/puppy'
+import { DEFAULT_SETTINGS, type Settings } from '@/domain/settings'
 import {
   buy,
   choose,
@@ -21,6 +22,7 @@ export interface GameState {
   room: Room
   persistent: boolean
   wallet: Wallet
+  settings: Settings
 }
 
 export interface Game {
@@ -46,6 +48,8 @@ export interface Game {
   teach(id: string, trick: Trick): Promise<void>
   /** Puts a collar on the puppy, or takes its collar off. */
   wear(id: string, collar: CollarLook | null): Promise<void>
+  /** Changes the player's choices about the app, saved in the background. */
+  settle(change: Partial<Settings>): void
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
@@ -57,20 +61,30 @@ export function useGame(
   const storage = useRef<GameStorage | null>(null)
   /** The wallet as last changed, ahead of the render that shows it. */
   const wallet = useRef<Wallet | null>(null)
+  /** The settings as last changed, likewise. */
+  const settings = useRef<Settings | null>(null)
 
   useEffect(() => {
     let live = true
     void (async () => {
       const opened = await openStorage()
-      const [puppies, room, saved] = await Promise.all([
+      const [puppies, room, saved, chosen] = await Promise.all([
         opened.listPuppies(),
         opened.loadRoom(),
         opened.loadWallet(),
+        opened.loadSettings(),
       ])
       if (!live) return
       storage.current = opened
       wallet.current = saved ? withWalletDefaults(saved) : createWallet(now())
-      setState({ puppies, room, persistent: opened.persistent, wallet: wallet.current })
+      settings.current = { ...DEFAULT_SETTINGS, ...chosen }
+      setState({
+        puppies,
+        room,
+        persistent: opened.persistent,
+        wallet: wallet.current,
+        settings: settings.current,
+      })
     })()
     return () => {
       live = false
@@ -157,7 +171,17 @@ export function useGame(
     [changePuppy],
   )
 
+  const settle = useCallback((change: Partial<Settings>) => {
+    const s = storage.current
+    if (!s || !settings.current) return
+    const next = { ...settings.current, ...change }
+    settings.current = next
+    setState((prev) => prev && { ...prev, settings: next })
+    s.saveSettings(next).catch(() => {})
+  }, [])
+
   return {
+    settle,
     state,
     adopt,
     enter,
