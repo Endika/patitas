@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/Endika/patitas/compare/v0.9.2...v0.10.0) (2026-10-23)
+
+
+### Features
+
+* **puppy:** give each puppy a liking for the bath and for company, shown on its card ([a78837e](https://github.com/Endika/patitas/commit/a78837ebd014e7b6977a6255b6056581ac2d7605))
+
 ## [0.9.2](https://github.com/Endika/patitas/compare/v0.9.1...v0.9.2) (2026-10-23)
 
 
