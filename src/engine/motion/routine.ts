@@ -29,6 +29,7 @@ import { POSES, setPose } from './poses'
 export type Routine =
   | 'none'
   | 'toBed'
+  | 'settling'
   | 'sleeping'
   | 'stretch'
   | 'toBowl'
@@ -64,10 +65,14 @@ export interface RoutineState {
   routine: Routine
   /** Seconds in the current routine. */
   t: number
-  /** Seconds since the last touch or game. */
+  /** Seconds since the last touch or game; NIGHT_IDLE in a new room, so it goes to bed at once. */
   idle: number
+  /** The same from nothing, so a new room by day is not straight away one left alone. */
+  alone: number
   /** Went to bed by day for want of energy: sleeps on until rested. */
   tired: boolean
+  /** Napping by day for being left alone, in its bed or where it stood; null otherwise. */
+  nap: 'bed' | 'floor' | null
   /** Where the current routine is headed, and the heading to end up at there. */
   target: Vec3
   /** The point it walks to next on the way there: the target, or a way round the furniture. */
@@ -158,6 +163,10 @@ export interface RoutineCtx {
   busy?: boolean
   /** Its persona's curiosity, 0 to 1: how readily it wanders into the mud. None, never. */
   curious?: number
+  /** Its persona's energy, 0 to 1: the more, the longer it lasts left alone before a nap. */
+  energy?: number
+  /** Its persona's cuddliness, 0 to 1: cuddly, it naps in its bed rather than where it stands. */
+  cuddly?: number
   random?: () => number
 }
 
@@ -179,6 +188,17 @@ export interface RoutineEvents {
 
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
 const NIGHT_IDLE = 90
+/**
+ * Left alone by day this many seconds, scaled from 0.75 to 1.25 by its energy, it naps: in its
+ * bed if cuddly from NAP_CUDDLY or tired below NAP_TIRED, else where it stands, after sitting
+ * SETTLE_SIT and lying SETTLE_LIE seconds. It wakes after NAP_TIME, or at a touch or the ball.
+ */
+const NAP_IDLE = 120,
+  NAP_CUDDLY = 0.6,
+  NAP_TIRED = 0.4,
+  SETTLE_SIT = 2,
+  SETTLE_LIE = 3,
+  NAP_TIME = 180
 /** By day it goes to bed below this energy, and once there sleeps on until WAKE_ENERGY. */
 const TIRED_ENERGY = 0.2
 const WAKE_ENERGY = 0.9
@@ -260,7 +280,9 @@ export function createRoutineState(): RoutineState {
     routine: 'none',
     t: 0,
     idle: NIGHT_IDLE,
+    alone: 0,
     tired: false,
+    nap: null,
     target: new THREE.Vector3(),
     via: new THREE.Vector3(),
     heading: 0,
@@ -302,7 +324,11 @@ export function createRoutineState(): RoutineState {
 
 const angle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
+/** The routines a nap goes through: anything else and it is over. */
+const NAPPING: ReadonlySet<Routine> = new Set(['toBed', 'settling', 'sleeping', 'stretch'])
+
 function enter(r: RoutineState, next: Routine) {
+  if (!NAPPING.has(next)) r.nap = null
   r.routine = next
   r.t = 0
   r.turnLeft = null
@@ -319,13 +345,15 @@ function enter(r: RoutineState, next: Routine) {
 
 /**
  * A touch or a call: the idle count starts again, a walk to the bed, the garden, the mud or the
- * scale is dropped (and a weighing it is stretching for), and a sleeping puppy wakes with a
- * stretch. Returns true when it was asleep, so the touch does nothing else.
+ * scale is dropped (and a weighing it is stretching for, or a nap it is settling into), and a
+ * sleeping puppy wakes with a stretch. Returns true when it was asleep, so the touch does nothing
+ * else.
  */
 export function touch(r: RoutineState): boolean {
-  r.idle = 0
+  r.idle = r.alone = 0
   r.weigh = false
   if (
+    r.routine === 'settling' ||
     r.routine === 'toBed' ||
     r.routine === 'toGarden' ||
     r.routine === 'toMud' ||
@@ -403,7 +431,7 @@ function lieDown(r: RoutineState, m: MotionState) {
  * there, it heads for the new place.
  */
 export function followBed(r: RoutineState, body: readonly Vec3[], dx: number, dz: number): void {
-  if (r.routine !== 'toBed' && r.routine !== 'sleeping') return
+  if ((r.routine !== 'toBed' && r.routine !== 'sleeping') || r.nap === 'floor') return
   r.target.x += dx
   r.target.z += dz
   if (r.routine !== 'sleeping') return
@@ -480,6 +508,7 @@ export function forgetRoute(r: RoutineState, m: MotionState): void {
   if (
     r.routine === 'none' ||
     r.routine === 'sleeping' ||
+    r.routine === 'settling' ||
     r.routine === 'stretch' ||
     r.routine === 'bathing' ||
     r.routine === 'brushing' ||
@@ -659,7 +688,9 @@ type Step = (
 ) => void
 
 const sleepy = (r: RoutineState, ctx: RoutineCtx) =>
-  isNight(ctx.now) || ctx.care.energy < (r.tired ? WAKE_ENERGY : TIRED_ENERGY)
+  isNight(ctx.now) ||
+  ctx.care.energy < (r.tired ? WAKE_ENERGY : TIRED_ENERGY) ||
+  (r.nap !== null && !(r.routine === 'sleeping' && r.t >= NAP_TIME))
 
 const hungryFor = (ctx: RoutineCtx) => ctx.bowl > 0 && ctx.care.hunger >= MEAL_HUNGER
 
@@ -690,20 +721,44 @@ const toBed: Step = (r, m, ctx, _ev, dt) => {
   lieDown(r, m)
 }
 
+/** Left alone, it sits, lies down and falls asleep where it stands. */
+const settling: Step = (r, m, ctx) => {
+  if (hungryFor(ctx) || isNight(ctx.now)) {
+    if (m.pose !== 'stand') setPose(m, 'stand')
+    return enter(r, 'none')
+  }
+  if (r.t < SETTLE_SIT) {
+    if (m.pose !== 'sit') setPose(m, 'sit', SETTLE_SIT + 1)
+  } else if (r.t < SETTLE_SIT + SETTLE_LIE) {
+    if (m.pose !== 'lie') setPose(m, 'lie', SETTLE_LIE + 1)
+  } else lieDown(r, m)
+}
+
 const sleeping: Step = (r, m, ctx) => {
+  // Night falls on a nap: in its bed it sleeps on as at night, on the floor it gets up for its bed
+  if (r.nap && isNight(ctx.now)) {
+    if (r.nap === 'floor') return enter(r, 'stretch')
+    r.nap = null
+  }
   if (m.pose !== 'sleep') {
-    r.idle = 0
+    r.idle = r.alone = 0
     return enter(r, 'none')
   }
   if (!sleepy(r, ctx)) enter(r, 'stretch')
 }
 
-const stretch: Step = (r, m, _ctx, ev, dt) => {
+const stretch: Step = (r, m, ctx, ev, dt) => {
   if (m.pose !== 'stand') setPose(m, 'stand')
   m.bowGoal = r.t < STRETCH_BOW ? 1 : 0
   if (r.t >= STRETCH_YAWN && r.t - dt < STRETCH_YAWN) ev.yawn = true
   if (r.t < STRETCH) return
   r.tired = false
+  // Up from a nap, it stays awake a while before the next; night has fallen on one napping on the
+  // floor, it goes to bed
+  if (r.nap) {
+    r.alone = 0
+    if (!isNight(ctx.now)) r.idle = 0
+  }
   if (r.held) return enter(r, r.held)
   if (r.weigh) return enter(r, 'toScale')
   enter(r, 'none')
@@ -883,6 +938,7 @@ const holding: Step = (_r, m) => {
  */
 const STEPS: { [K in Routine]?: Step } = {
   toBed,
+  settling,
   sleeping,
   stretch,
   toBowl,
@@ -917,6 +973,8 @@ function goToBowl(r: RoutineState, ctx: RoutineCtx, beg: boolean): boolean {
  * 1. eat, with food in its bowl and hunger from MEAL_HUNGER, even at bedtime;
  * 2. bed, after NIGHT_IDLE untouched at night or tired by day;
  * 3. ask by its empty bowl, from BEG_HUNGER and at most every BEG_EVERY seconds;
+ * 3b. a nap by day, not hungry and left alone a while (see NAP_IDLE): in its bed, or where it
+ *     stands;
  * 4. wander into the mud, by day and left alone a while, at most every MUD_EVERY seconds and
  *    by chance, more often the more curious it is: it stamps about, then rolls or digs.
  */
@@ -938,6 +996,25 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
   }
   if (ctx.bowl <= 0 && ctx.care.hunger >= BEG_HUNGER && r.begAgo >= BEG_EVERY) {
     goToBowl(r, ctx, true)
+    return
+  }
+  if (
+    !isNight(ctx.now) &&
+    ctx.care.hunger < BEG_HUNGER &&
+    r.alone >= NAP_IDLE * (0.75 + 0.5 * (ctx.energy ?? 0.5))
+  ) {
+    if (slot && ((ctx.cuddly ?? 0) >= NAP_CUDDLY || ctx.care.energy < NAP_TIRED)) {
+      r.nap = 'bed'
+      r.target.set(slot.x, 0, slot.z)
+      r.heading = slot.heading
+      r.side = slot.side
+      enter(r, 'toBed')
+    } else {
+      r.nap = 'floor'
+      r.side = (ctx.random ?? Math.random)() < 0.5 ? -1 : 1
+      m.goal = null
+      enter(r, 'settling')
+    }
     return
   }
   const curious = ctx.curious ?? 0
@@ -989,7 +1066,7 @@ function stopHere(r: RoutineState, m: MotionState, next: Routine) {
 export function holdStill(r: RoutineState, m: MotionState, held: HeldRoutine): void {
   r.held = held
   r.weigh = false
-  r.idle = 0
+  r.idle = r.alone = 0
   if (r.routine === 'sleeping') return enter(r, 'stretch')
   if (r.routine !== 'stretch') stopHere(r, m, held)
 }
@@ -997,7 +1074,7 @@ export function holdStill(r: RoutineState, m: MotionState, held: HeldRoutine): v
 /** The bath or the brush is over: it is free to choose again, as if just touched. */
 export function letGo(r: RoutineState): void {
   r.held = null
-  r.idle = 0
+  r.idle = r.alone = 0
   if (r.routine === 'bathing' || r.routine === 'brushing') enter(r, 'none')
 }
 
@@ -1010,6 +1087,8 @@ export const staysPut = (r: RoutineState): boolean =>
   r.routine === 'eating' ||
   r.routine === 'onScale' ||
   r.routine === 'splashing' ||
+  r.routine === 'settling' ||
+  (r.routine === 'sleeping' && r.nap === 'floor') ||
   r.there ||
   r.waitT > 0
 
@@ -1311,7 +1390,7 @@ function makeWay(
  * stretches first. A call, a trick or the ball calls it off.
  */
 export function goWeigh(r: RoutineState, m: MotionState): void {
-  r.idle = 0
+  r.idle = r.alone = 0
   r.weigh = true
   if (r.routine === 'sleeping') return enter(r, 'stretch')
   if (r.routine !== 'stretch') stopHere(r, m, 'toScale')
@@ -1353,6 +1432,7 @@ export function stepRoutine(
 ): RoutineEvents {
   r.t += dt
   r.idle += dt
+  r.alone += dt
   // Pushed off its place while turning in there (the scale kept clear, a new layout): back first
   if (r.there && Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z) > ARRIVED) {
     r.there = false
@@ -1392,8 +1472,10 @@ export function stepRoutine(
     r.moving = 0
   }
   if (ctx.busy && !keepsEating(r, ctx.care) && !r.held) {
-    r.idle = 0
+    r.idle = r.alone = 0
     r.weigh = false
+    // Up at once from a nap for the ball
+    if (r.nap && m.pose !== 'stand') setPose(m, 'stand')
     // The stamp's heading goes with it, or play would start with a stray turn, and it gets up
     if (r.routine === 'splashing' || r.routine === 'toMud') m.face = null
     if (wallowing(r, m)) setPose(m, 'stand')

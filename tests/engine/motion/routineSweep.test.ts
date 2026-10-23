@@ -120,6 +120,8 @@ function run(
           muzzle: p.muzzle,
           clamp,
           random,
+          energy: BREEDS[p.breed].defaultPersona.energy,
+          cuddly: BREEDS[p.breed].defaultPersona.cuddly,
         },
         DT,
       )
@@ -288,6 +290,23 @@ describe('two puppies from random starts', () => {
         )
       keptApart()
       expect(t).not.toBeNull()
+    },
+  )
+
+  it.each(cases)(
+    'left alone by day the dorado naps in its bed and the shiba on the floor at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 73 + aspect * 100))
+      const pups = [pup(0, a!.x, a!.z, 0.3, 0), pup(1, b!.x, b!.z, 0.3, 0)]
+      // Most of the way to a nap already, so the run is short
+      for (const p of pups) p.r.alone = 100
+      const t = run(pups, cam, spots, noon, 60, () => pups.every((p) => p.r.routine === 'sleeping'))
+      const naps = pups.map((p) => p.r.nap)
+      if (t == null || naps[0] !== 'bed' || naps[1] !== 'floor')
+        failed.push(`nap ${aspect} ${seed} t=${t} ${naps} ${pups.map((p) => p.r.routine)}`)
+      keptApart()
+      expect(t).not.toBeNull()
+      expect(naps).toEqual(['bed', 'floor'])
     },
   )
 
