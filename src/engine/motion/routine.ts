@@ -43,6 +43,8 @@ export type Routine =
   | 'relieving'
   | 'bathing'
   | 'brushing'
+  | 'greeting'
+  | 'greeted'
 
 /**
  * The piece last walked round and the side taken, kept so the play area's edge is checked once
@@ -73,6 +75,21 @@ export interface RoutineState {
   tired: boolean
   /** Napping by day for being left alone, in its bed or where it stood; null otherwise. */
   nap: 'bed' | 'floor' | null
+  /** Last frame: whether the other was there, and whether it or the other was away (asleep,
+   * waking or held for its coat). */
+  hadPeer: boolean
+  wasAway: boolean
+  peerAway: boolean
+  /** Seconds left to greet the other, back from away or new in the room; 0 when none is due. */
+  greetDue: number
+  /** Whether it is the one to go up to the other: the more sociable, or the one already there. */
+  greetLead: boolean
+  /** Seconds since it last greeted the other or was greeted. */
+  greetAgo: number
+  /** Seconds sniffing noses in a greeting; below 0 until they do. */
+  sniffT: number
+  /** Seconds since the player last touched or called it. */
+  touchedAgo: number
   /** Where the current routine is headed, and the heading to end up at there. */
   target: Vec3
   /** The point it walks to next on the way there: the target, or a way round the furniture. */
@@ -153,6 +170,8 @@ export interface Peer {
   persona: Persona
   /** Playing ball, or held still for the bath or the brush. */
   busy: boolean
+  /** Not just touched nor on its way where it was called: free to be greeted. */
+  free: boolean
 }
 
 export function createPeer(persona: Persona): Peer {
@@ -163,6 +182,7 @@ export function createPeer(persona: Persona): Peer {
     pose: 'stand',
     persona,
     busy: false,
+    free: true,
   }
 }
 
@@ -180,6 +200,7 @@ export function seePeer(
   out.pose = m.pose
   out.persona = persona
   out.busy = busy || !!r.held
+  out.free = r.touchedAgo >= GREET_SNUB && !m.goal
   return out
 }
 
@@ -206,6 +227,8 @@ export interface RoutineCtx {
   energy?: number
   /** Its persona's cuddliness, 0 to 1: cuddly, it naps in its bed rather than where it stands. */
   cuddly?: number
+  /** Its persona's liking for company, 0 to 1: the more, the readier it greets the other. */
+  social?: number
   random?: () => number
   /** The other puppy in the room, if there is one. */
   peer?: Readonly<Peer>
@@ -223,10 +246,35 @@ export interface RoutineEvents {
   fed?: true
   /** Just stepped onto the scale. */
   weighed?: true
+  /** Just sniffed noses with the other, greeting it or greeted. */
+  greeted?: true
   /** Just squatted outside the garden: what it left, and where, in world coordinates. */
   mess?: { kind: MessKind; x: number; z: number }
 }
 
+/**
+ * One back from asleep, waking or its bath or brush, or new in the room, the more sociable of the
+ * two (the one already there, for one new) goes up to the other within GREET_DUE seconds, at most
+ * every GREET_EVERY, neither just touched (GREET_SNUB) nor called somewhere: as likely as
+ * GREET_CHANCE, plus the rest by the less sociable of the two. If the other does not stand to be
+ * greeted within GREET_ANSWER, or it is not there by GREET_GIVE_UP, it gives up. It stops
+ * GREET_GAP from the other's middle, head to head, and once each faces the other within
+ * GREET_FACED they sniff noses GREET_TIME seconds; the one greeted counts it within GREET_NEAR and
+ * GREET_SLACK of that.
+ */
+const GREET_DUE = 15,
+  GREET_EVERY = 60,
+  GREET_SNUB = 5,
+  GREET_CHANCE = 0.3,
+  GREET_ANSWER = 1,
+  GREET_GIVE_UP = 10,
+  GREET_GAP = 1.15,
+  GREET_FACED = 0.4,
+  GREET_TIME = 3,
+  GREET_NEAR = 0.2,
+  GREET_SLACK = 0.25
+/** Away for a greeting on its return. */
+const AWAY: ReadonlySet<Routine> = new Set(['sleeping', 'stretch', 'bathing', 'brushing'])
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
 const NIGHT_IDLE = 90
 /**
@@ -324,6 +372,14 @@ export function createRoutineState(): RoutineState {
     alone: 0,
     tired: false,
     nap: null,
+    hadPeer: true,
+    wasAway: false,
+    peerAway: false,
+    greetDue: 0,
+    greetLead: false,
+    greetAgo: GREET_EVERY,
+    sniffT: -1,
+    touchedAgo: GREET_SNUB,
     target: new THREE.Vector3(),
     via: new THREE.Vector3(),
     heading: 0,
@@ -391,10 +447,12 @@ function enter(r: RoutineState, next: Routine) {
  * else.
  */
 export function touch(r: RoutineState): boolean {
-  r.idle = r.alone = 0
+  r.idle = r.alone = r.touchedAgo = 0
   r.weigh = false
   if (
     r.routine === 'settling' ||
+    r.routine === 'greeting' ||
+    r.routine === 'greeted' ||
     r.routine === 'toBed' ||
     r.routine === 'toGarden' ||
     r.routine === 'toMud' ||
@@ -775,6 +833,85 @@ const settling: Step = (r, m, ctx) => {
   } else lieDown(r, m)
 }
 
+/** Turns its head end to the other where it stands: true once facing it. */
+function faceOther(r: RoutineState, m: MotionState, other: Readonly<Peer>): boolean {
+  r.heading = Math.atan2(other.pos.x - m.pos.x, other.pos.z - m.pos.z)
+  return faceTarget(r, m)
+}
+
+/** The other standing free, as one to greet or to be greeted by. */
+const standingFree = (peer: Readonly<Peer> | undefined): peer is Readonly<Peer> =>
+  !!peer && !peer.busy && peer.pose === 'stand'
+
+/** Over, however it went: no more greetings for a while. */
+function endGreeting(r: RoutineState, m: MotionState) {
+  r.greetAgo = 0
+  r.greetDue = 0
+  m.face = null
+  m.bowGoal = 0
+  enter(r, 'none')
+}
+
+/** Whether `other` faces `m`, near enough head on to sniff noses. */
+const facesMe = (other: Readonly<Peer>, m: MotionState) =>
+  Math.abs(angle(Math.atan2(m.pos.x - other.pos.x, m.pos.z - other.pos.z) - other.heading)) <
+  GREET_FACED
+
+/**
+ * Walks up to the other, head to head, and once both face each other sniffs noses GREET_TIME
+ * seconds. The other must answer by standing to be greeted; called away, held, hungry or sleepy,
+ * either gives it up.
+ */
+const greeting: Step = (r, m, ctx, ev, dt) => {
+  const peer = ctx.peer
+  const answered = peer?.routine === 'greeted' || (peer?.routine === 'none' && r.t < GREET_ANSWER)
+  if (!standingFree(peer) || !answered || hungryFor(ctx) || sleepy(r, ctx)) {
+    m.goal = null
+    return endGreeting(r, m)
+  }
+  if (r.sniffT < 0) {
+    if (r.t > GREET_GIVE_UP) {
+      m.goal = null
+      return endGreeting(r, m)
+    }
+    // Head to head with it, from the side it comes from
+    const dx = m.pos.x - peer.pos.x,
+      dz = m.pos.z - peer.pos.z,
+      d = Math.hypot(dx, dz) || 1
+    const [x, z] = ctx.clamp(peer.pos.x + (dx / d) * GREET_GAP, peer.pos.z + (dz / d) * GREET_GAP)
+    if (Math.hypot(x - r.target.x, z - r.target.z) > ARRIVED) {
+      r.target.set(x, 0, z)
+      r.there = false
+    }
+    if (!approach(r, m, ctx, ctx.spots.garden, dt) || !faceOther(r, m, peer)) return
+    if (!facesMe(peer, m)) return
+    r.sniffT = 0
+  }
+  faceOther(r, m, peer)
+  r.sniffT += dt
+  m.bowGoal = Math.sin(r.sniffT * 5) > 0 ? SNIFF_BOW * 0.5 : 0
+  if (r.sniffT < GREET_TIME) return
+  ev.greeted = true
+  endGreeting(r, m)
+}
+
+/**
+ * Stands still, turned to the one greeting it, and sniffs back while it is near; glad of it only
+ * if they sniffed long enough. Called away, held, hungry or sleepy, it gives it up.
+ */
+const greeted: Step = (r, m, ctx, ev, dt) => {
+  const peer = ctx.peer
+  if (!peer || peer.routine !== 'greeting' || m.goal || hungryFor(ctx) || sleepy(r, ctx)) {
+    if (r.sniffT >= GREET_TIME - GREET_SLACK) ev.greeted = true
+    return endGreeting(r, m)
+  }
+  faceOther(r, m, peer)
+  const near = Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z) < GREET_GAP + GREET_NEAR
+  const facing = Math.abs(angle(r.heading - m.heading)) < GREET_FACED
+  if (near && facing && facesMe(peer, m)) r.sniffT = Math.max(0, r.sniffT) + dt
+  m.bowGoal = near && Math.sin(r.t * 5 + 1.5) > 0 ? SNIFF_BOW * 0.5 : 0
+}
+
 const sleeping: Step = (r, m, ctx) => {
   // Night falls on a nap: in its bed it sleeps on as at night, on the floor it gets up for its bed
   if (r.nap && isNight(ctx.now)) {
@@ -991,6 +1128,8 @@ const STEPS: { [K in Routine]?: Step } = {
   relieving,
   bathing: holding,
   brushing: holding,
+  greeting,
+  greeted,
   toScale,
   onScale,
 }
@@ -1038,6 +1177,31 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
   if (ctx.bowl <= 0 && ctx.care.hunger >= BEG_HUNGER && r.begAgo >= BEG_EVERY) {
     goToBowl(r, ctx, true)
     return
+  }
+  const peer = ctx.peer
+  // A trick or a call the player asked for comes first, and a touch puts greetings off a while
+  if (standingFree(peer) && m.pose === 'stand' && !m.goal && r.touchedAgo >= GREET_SNUB) {
+    // Greeted: it stands and turns to the one coming to sniff it
+    if (peer.routine === 'greeting') {
+      r.sniffT = -1
+      return enter(r, 'greeted')
+    }
+    if (
+      r.greetDue > 0 &&
+      r.greetLead &&
+      r.greetAgo >= GREET_EVERY &&
+      peer.routine === 'none' &&
+      peer.free
+    ) {
+      r.greetDue = 0
+      const random = ctx.random ?? Math.random
+      const company = Math.min(ctx.social ?? 0.5, peer.persona.social)
+      if (random() < GREET_CHANCE + (1 - GREET_CHANCE) * company) {
+        r.target.copy(m.pos)
+        r.sniffT = -1
+        return enter(r, 'greeting')
+      }
+    }
   }
   if (
     !isNight(ctx.now) &&
@@ -1130,6 +1294,7 @@ export const staysPut = (r: RoutineState): boolean =>
   r.routine === 'splashing' ||
   r.routine === 'settling' ||
   (r.routine === 'sleeping' && r.nap === 'floor') ||
+  r.routine === 'greeted' ||
   r.there ||
   r.waitT > 0
 
@@ -1187,7 +1352,14 @@ function keepAside(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number)
 }
 
 /** The routines that walk to a place with `approach`. */
-const WALKS: ReadonlySet<Routine> = new Set(['toBed', 'toBowl', 'toMud', 'toGarden', 'toScale'])
+const WALKS: ReadonlySet<Routine> = new Set([
+  'toBed',
+  'toBowl',
+  'toMud',
+  'toGarden',
+  'toScale',
+  'greeting',
+])
 
 /** On its way to a place and not there yet: turning round in its bed counts as there. */
 export const walking = (r: RoutineState): boolean => WALKS.has(r.routine) && !r.there
@@ -1474,6 +1646,25 @@ export function stepRoutine(
   r.t += dt
   r.idle += dt
   r.alone += dt
+  r.greetAgo += dt
+  r.touchedAgo += dt
+  r.greetDue = Math.max(0, r.greetDue - dt)
+  const peer = ctx.peer
+  const away = AWAY.has(r.routine),
+    peerAway = !!peer && AWAY.has(peer.routine)
+  if (peer && !r.hadPeer) {
+    // New in the room: the one already there welcomes it
+    r.greetDue = GREET_DUE
+    r.greetLead = true
+  } else if (peer && ((r.wasAway && !away) || (r.peerAway && !peerAway))) {
+    const social = ctx.social ?? 0.5
+    r.greetDue = GREET_DUE
+    r.greetLead =
+      social > peer.persona.social || (social === peer.persona.social && ctx.place === 0)
+  }
+  r.hadPeer = !!peer
+  r.wasAway = away
+  r.peerAway = peerAway
   // Pushed off its place while turning in there (the scale kept clear, a new layout): back first
   if (r.there && Math.hypot(r.target.x - m.pos.x, r.target.z - m.pos.z) > ARRIVED) {
     r.there = false

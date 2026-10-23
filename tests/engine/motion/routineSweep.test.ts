@@ -14,10 +14,14 @@ import {
 import { stepPoses } from '@/engine/motion/poses'
 import {
   bedSlots,
+  createPeer,
   createRoutineState,
   giveWay,
   goToMud,
   goWeigh,
+  holdStill,
+  letGo,
+  seePeer,
   stepRoutine,
   staysPut,
   wallowing,
@@ -98,14 +102,16 @@ function run(
   secs: number,
   done: () => boolean,
   each?: (t: number) => void,
+  random: () => number = seeded(7),
 ): number | null {
   const clamp = (x: number, z: number) => clampPlay(cam, x, z)
   const clampTo = (p: { x: number; z: number }) => {
     ;[p.x, p.z] = clamp(p.x, p.z)
   }
-  const random = seeded(7)
+  const peers = pups.map((p) => createPeer(BREEDS[p.breed].defaultPersona))
   nearest = Infinity
   for (let n = 0; n * DT < secs; n++) {
+    pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, BREEDS[p.breed].defaultPersona, false))
     pups.forEach((p, i) => {
       const ev = stepRoutine(
         p.r,
@@ -122,6 +128,8 @@ function run(
           random,
           energy: BREEDS[p.breed].defaultPersona.energy,
           cuddly: BREEDS[p.breed].defaultPersona.cuddly,
+          social: BREEDS[p.breed].defaultPersona.social,
+          peer: peers[1 - i],
         },
         DT,
       )
@@ -307,6 +315,35 @@ describe('two puppies from random starts', () => {
       keptApart()
       expect(t).not.toBeNull()
       expect(naps).toEqual(['bed', 'floor'])
+    },
+  )
+
+  it.each(cases)(
+    'the dorado greets the shiba back from its bath at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 71 + aspect * 100))
+      const pups = [pup(0, a!.x, a!.z, 0.3, 0), pup(1, b!.x, b!.z, 0.3, 0)]
+      const [dorado, shiba] = pups as [Pup, Pup]
+      dorado.r.greetAgo = shiba.r.greetAgo = 60
+      holdStill(shiba.r, shiba.m, 'bathing')
+      let greeted = false
+      const t = run(
+        pups,
+        cam,
+        spots,
+        noon,
+        20,
+        () => greeted && dorado.r.routine === 'none',
+        (at) => {
+          if (at > 0.5 && shiba.r.held) letGo(shiba.r)
+          greeted ||= dorado.r.routine === 'greeting' && dorado.r.sniffT >= 0
+        },
+        // Every die rolls low: the greeting is never left to chance
+        () => 0.01,
+      )
+      if (t == null) failed.push(`greet ${aspect} ${seed} ${pups.map((p) => p.r.routine)}`)
+      keptApart()
+      expect(t).not.toBeNull()
     },
   )
 
