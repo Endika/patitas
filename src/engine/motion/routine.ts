@@ -57,6 +57,7 @@ export type Routine =
   | 'inviting'
   | 'sparring'
   | 'following'
+  | 'makingRoom'
 
 /**
  * The piece last walked round and the side taken, kept so the play area's edge is checked once
@@ -336,6 +337,13 @@ const AWAY: ReadonlySet<Routine> = new Set(['sleeping', 'stretch', 'bathing', 'b
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
 const NIGHT_IDLE = 90
 /**
+ * The other lying within FLOOR_ROOM, one about to nap on the floor first walks off to that far,
+ * or stays up a while where there is no room or it cannot get there within ROOM_GIVE_UP.
+ */
+const FLOOR_ROOM = 0.7,
+  ROOM_AROUND = 8,
+  ROOM_GIVE_UP = 8
+/**
  * Left alone by day this many seconds, scaled from 0.75 to 1.25 by its energy, it naps: in its
  * bed if cuddly from NAP_CUDDLY or tired below NAP_TIRED, else where it stands, after sitting
  * SETTLE_SIT and lying SETTLE_LIE seconds. It wakes after NAP_TIME, or at a touch or the ball.
@@ -485,7 +493,13 @@ export function createRoutineState(): RoutineState {
 const angle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 /** The routines a nap goes through: anything else and it is over. */
-const NAPPING: ReadonlySet<Routine> = new Set(['toBed', 'settling', 'sleeping', 'stretch'])
+const NAPPING: ReadonlySet<Routine> = new Set([
+  'toBed',
+  'makingRoom',
+  'settling',
+  'sleeping',
+  'stretch',
+])
 
 function enter(r: RoutineState, next: Routine) {
   if (!NAPPING.has(next)) r.nap = null
@@ -516,6 +530,7 @@ export function touch(r: RoutineState): boolean {
   r.weigh = false
   if (
     r.routine === 'settling' ||
+    r.routine === 'makingRoom' ||
     r.routine === 'greeting' ||
     r.routine === 'greeted' ||
     PLAYING.has(r.routine) ||
@@ -887,6 +902,40 @@ const toBed: Step = (r, m, ctx, _ev, dt) => {
   }
   m.face = null
   lieDown(r, m)
+}
+
+/** Whether `m` stands within `d` of the other. */
+const near = (m: MotionState, peer: Readonly<Peer>, d: number) =>
+  Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z) < d
+
+/** The nearest open spot to nap FLOOR_ROOM from the other lying there, of ROOM_AROUND round it. */
+function roomFrom(r: RoutineState, m: MotionState, ctx: RoutineCtx, peer: Readonly<Peer>) {
+  let best = Infinity
+  for (let k = 0; k < ROOM_AROUND; k++) {
+    const a = (k / ROOM_AROUND) * Math.PI * 2
+    const x = peer.pos.x + Math.sin(a) * FLOOR_ROOM,
+      z = peer.pos.z + Math.cos(a) * FLOOR_ROOM
+    const d = Math.hypot(x - m.pos.x, z - m.pos.z)
+    if (d >= best || !openAt(ctx.spots, ctx.clamp, x, z)) continue
+    best = d
+    r.target.set(x, 0, z)
+  }
+  return best < Infinity
+}
+
+/** Walks off to its place for a nap, a body's length from the other lying there, and settles. */
+const makingRoom: Step = (r, m, ctx, _ev, dt) => {
+  if (hungryFor(ctx) || !sleepy(r, ctx)) {
+    m.goal = null
+    return enter(r, 'none')
+  }
+  if (r.t > ROOM_GIVE_UP) {
+    m.goal = null
+    r.alone = 0
+    return enter(r, 'none')
+  }
+  if (!approach(r, m, ctx, ctx.spots.garden, dt)) return
+  enter(r, 'settling')
 }
 
 /** Left alone, it sits, lies down and falls asleep where it stands. */
@@ -1283,6 +1332,7 @@ const holding: Step = (_r, m) => {
  */
 const STEPS: { [K in Routine]?: Step } = {
   toBed,
+  makingRoom,
   settling,
   sleeping,
   stretch,
@@ -1439,6 +1489,12 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
       r.nap = 'floor'
       r.side = (ctx.random ?? Math.random)() < 0.5 ? -1 : 1
       m.goal = null
+      // Not on top of the other lying there: it moves off a body's length first, or stays up
+      if (peer && peer.pose !== 'stand' && near(m, peer, FLOOR_ROOM)) {
+        if (roomFrom(r, m, ctx, peer)) return enter(r, 'makingRoom')
+        r.alone = 0
+        return enter(r, 'none')
+      }
       enter(r, 'settling')
     }
     return
@@ -1589,6 +1645,7 @@ const WALKS: ReadonlySet<Routine> = new Set([
   'toScale',
   'greeting',
   'following',
+  'makingRoom',
 ])
 
 /** On its way to a place and not there yet: turning round in its bed counts as there. */

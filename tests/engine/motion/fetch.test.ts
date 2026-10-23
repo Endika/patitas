@@ -4,17 +4,26 @@ import { BREEDS } from '@/domain/breeds'
 import type { Vec3 } from '@/engine/math'
 import {
   createFetchState,
+  pursueBall,
   stepFetch,
   type FetchCtx,
   type FetchState,
   type FetchTask,
 } from '@/engine/motion/fetch'
 import { legRigs } from '@/engine/motion/ik'
-import { createLegStates, createMotionState, stepLocomotion } from '@/engine/motion/locomotion'
+import {
+  createLegStates,
+  createMotionState,
+  goTo,
+  stepLocomotion,
+  type MotionState,
+} from '@/engine/motion/locomotion'
 import { stepPoses } from '@/engine/motion/poses'
 import { anatomy } from '@/engine/puppy/anatomy'
 import { BALL_R, createBall, stepBall, type BallState } from '@/engine/room/ball'
-import { clampPlay, createCamera, fitCamera, playLocal } from '@/engine/room/camera'
+import { clampPlay, createCamera, fitCamera, playLocal, playWorld } from '@/engine/room/camera'
+import { bodyOf, bodyShape, createBody } from '@/engine/room/bodies'
+import { separate } from '@/engine/room/crowd'
 import { computeSpots, inMud } from '@/engine/room/furniture'
 
 const A = anatomy(BREEDS.dorado)
@@ -339,5 +348,76 @@ describe('stepFetch when the chase is held up', () => {
       m.pos.z += 0.4 * DT
     }
     expect(f.task).toBe('chase')
+  })
+})
+
+describe('pursueBall', () => {
+  const SHAPE = bodyShape(A)
+  const cam = fitCamera(createCamera(), 0.46)
+  const clamp = (x: number, z: number) => clampPlay(cam, x, z)
+  /** One bringing the ball back from far off, the other left watching beside it. */
+  const setUp = () => {
+    const ms = [createMotionState(), createMotionState()]
+    const legs = ms.map((m) => createLegStates(legRigs(A), m))
+    const [x, z] = playWorld(cam, 1.4, -0.2)
+    ms[0]!.pos.set(x, 0, z)
+    ms[1]!.pos.set(x + 0.9, 0, z + 0.3)
+    const fs: FetchState[] = [
+      { ...createFetchState(), task: 'return', holding: true },
+      { ...createFetchState(), watch: true },
+    ]
+    const ball: BallState = { ...createBall(), state: 'mouth' }
+    fs[0]!.drop.set(cam.target.x, 0, cam.target.z)
+    goTo(ms[0]!, cam.target.x, cam.target.z, { happy: 0.5, energy: 0.5, gait: 'trot', clamp })
+    return { ms, legs, fs, ball }
+  }
+  const play = (
+    s: ReturnType<typeof setUp>,
+    energies: number[],
+    random: () => number,
+    secs = 5,
+  ) => {
+    let closest = Infinity
+    for (let n = 0; n < secs / DT; n++) {
+      for (const f of s.fs) f.taskT += DT
+      pursueBall(s.fs, s.ms, energies, s.ball, cam, random)
+      s.ms.forEach((m, i) => {
+        stepPoses(m, DT)
+        stepLocomotion(m, s.legs[i]!, DT)
+      })
+      // As the room does: the bodies kept apart
+      const bodies = s.ms.map((m) => bodyOf(m.pos, m.heading, m.pose, SHAPE, createBody()))
+      separate(s.ms, bodies, undefined, null, DT)
+      const [a, b] = s.ms as [MotionState, MotionState]
+      closest = Math.min(closest, Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z))
+    }
+    return closest
+  }
+
+  it('a playful one runs up beside the one bringing the ball and takes it, once a throw', () => {
+    const s = setUp()
+    // Beside it, not in it: bodies side by side only touch at 0.33
+    expect(play(s, [0.5, 1], () => 0)).toBeGreaterThan(0.33)
+    expect(s.ball.stolen).toBe(true)
+    expect([s.fs[0]!.holding, s.fs[1]!.holding]).toEqual([false, true])
+    expect([s.fs[0]!.task, s.fs[1]!.task]).toEqual(['free', 'return'])
+    expect(s.fs[0]!.watch).toBe(true)
+    // Not taken back: one theft a throw
+    play(s, [1, 0.5], () => 0, 2)
+    expect(s.fs[1]!.holding).toBe(true)
+  })
+
+  it('it tries once and, unlucky, lets it go', () => {
+    const s = setUp()
+    play(s, [0.5, 1], () => 0.99)
+    expect(s.ball.stolen).toBe(true)
+    expect([s.fs[0]!.holding, s.fs[1]!.task]).toEqual([true, 'free'])
+  })
+
+  it('one with little energy does not go after it', () => {
+    const s = setUp()
+    play(s, [0.5, 0.3], () => 0)
+    expect(s.fs[1]!.task).toBe('free')
+    expect(s.ball.stolen).toBe(false)
   })
 })

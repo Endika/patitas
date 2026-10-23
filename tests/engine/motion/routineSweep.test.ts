@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, describe, expect, it } from 'vitest'
-import { BREEDS, type BreedId } from '@/domain/breeds'
+import { BREEDS, type BreedId, type Persona } from '@/domain/breeds'
 import { addMess, createCare, type Care } from '@/domain/care'
 import { legRigs } from '@/engine/motion/ik'
 import {
@@ -63,6 +63,7 @@ interface Pup {
   care: Care
   bowl: number
   fed: number
+  persona: Persona
 }
 
 const kinds = (['dorado', 'shiba'] as const).map((breed) => {
@@ -84,6 +85,7 @@ function pup(i: number, x: number, z: number, hunger: number, bowl: number): Pup
     care: { ...createCare(BREEDS[k.breed], 0), energy: 0.8, hunger },
     bowl,
     fed: 0,
+    persona: BREEDS[k.breed].defaultPersona,
   }
 }
 
@@ -120,10 +122,10 @@ function run(
   const clampTo = (p: { x: number; z: number }) => {
     ;[p.x, p.z] = clamp(p.x, p.z)
   }
-  const peers = pups.map((p) => createPeer(BREEDS[p.breed].defaultPersona))
+  const peers = pups.map((p) => createPeer(p.persona))
   nearest = Infinity
   for (let n = 0; n * DT < secs; n++) {
-    pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, BREEDS[p.breed].defaultPersona, false))
+    pups.forEach((p, i) => seePeer(peers[i]!, p.r, p.m, p.persona, false))
     pups.forEach((p, i) => {
       const ev = stepRoutine(
         p.r,
@@ -138,10 +140,10 @@ function run(
           muzzle: p.muzzle,
           clamp,
           random,
-          energy: BREEDS[p.breed].defaultPersona.energy,
-          cuddly: BREEDS[p.breed].defaultPersona.cuddly,
-          social: BREEDS[p.breed].defaultPersona.social,
-          curious: BREEDS[p.breed].defaultPersona.curious,
+          energy: p.persona.energy,
+          cuddly: p.persona.cuddly,
+          social: p.persona.social,
+          curious: p.persona.curious,
           peer: peers[1 - i],
         },
         DT,
@@ -446,6 +448,39 @@ describe('two puppies from random starts', () => {
       keptApart()
       expect(t).not.toBeNull()
       expect(both).toBe(0)
+    },
+  )
+
+  it.each(cases)(
+    'left alone by day, two nap on the floor and never lie on each other at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 59 + aspect * 100))
+      const pups = [pup(0, a!.x, a!.z, 0.3, 0), pup(1, b!.x, b!.z, 0.3, 0)]
+      // Neither cuddly enough for its bed
+      for (const p of pups) p.persona = { ...p.persona, cuddly: 0.2 }
+      pups[0]!.r.alone = 200
+      pups[1]!.r.alone = 100
+      // Lying down, never within a body length of the other lying there, less the arrival slack
+      let lay = Infinity
+      const t = run(
+        pups,
+        cam,
+        spots,
+        noon,
+        30,
+        // Long enough for both to nap, or the second to stay up for want of room
+        () => false,
+        () => {
+          const [x, y] = pups as [Pup, Pup]
+          if (y.r.routine === 'settling' || y.r.routine === 'sleeping')
+            lay = Math.min(lay, Math.hypot(x.m.pos.x - y.m.pos.x, x.m.pos.z - y.m.pos.z))
+        },
+      )
+      if (lay < 0.6) failed.push(`naps ${aspect} ${seed} lay=${lay.toFixed(2)}`)
+      keptApart()
+      expect(t).toBeNull()
+      expect([pups[0]!.r.routine, pups[0]!.r.nap]).toEqual(['sleeping', 'floor'])
+      expect(lay).toBeGreaterThan(0.6)
     },
   )
 

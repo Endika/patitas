@@ -13,6 +13,8 @@ export interface BallState {
   state: 'none' | 'hand' | 'air' | 'mouth'
   /** Seconds it has lain still against or under a puppy. */
   hemmedT: number
+  /** Taken from one puppy's mouth by the other since it was last thrown. */
+  stolen: boolean
 }
 
 export function createBall(): BallState {
@@ -22,6 +24,7 @@ export function createBall(): BallState {
     rot: new THREE.Vector3(),
     state: 'none',
     hemmedT: 0,
+    stolen: false,
   }
 }
 
