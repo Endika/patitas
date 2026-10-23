@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/Endika/patitas/compare/v0.18.0...v0.19.0) (2026-10-23)
+
+
+### Features
+
+* **shop:** a bone and a plush toy to throw instead of the ball ([545cd1b](https://github.com/Endika/patitas/commit/545cd1b8264fdb59f3f7e89f094c79b3214d546b))
+
 ## [0.18.0](https://github.com/Endika/patitas/compare/v0.17.0...v0.18.0) (2026-10-23)
 
 
