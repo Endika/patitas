@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/Endika/patitas/compare/v0.13.0...v0.14.0) (2026-10-23)
+
+
+### Features
+
+* **puppy:** two puppies ask each other to play and play in place ([d70d279](https://github.com/Endika/patitas/commit/d70d279e1f9123c5b26c621effd694d8f2432b31))
+
 ## [0.13.0](https://github.com/Endika/patitas/compare/v0.12.0...v0.13.0) (2026-10-23)
 
 
