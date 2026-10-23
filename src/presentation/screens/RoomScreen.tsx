@@ -12,7 +12,7 @@ import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
 import { knows, traits, TREAT_LESSON, type Puppy, type Trick } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
-import { SHOP, type Consumable, type FoodId, type ItemId } from '@/domain/shop'
+import { SHOP, type Consumable, type FoodId, type ItemId, type ToyId } from '@/domain/shop'
 import type { Deed, Wallet } from '@/domain/wallet'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
@@ -41,6 +41,13 @@ const WAITING: StageStatus = {
 /** How long a notice about who can come in stays up, in milliseconds. */
 export const NOTICE_MS = 8000
 
+/** How the ball button names each toy. */
+const TOY_NAMES: Record<ToyId, string> = {
+  ball: 'la pelota',
+  bone: 'el hueso',
+  plush: 'el peluche',
+}
+
 /** How long «+5» stays up after coins are earned, in milliseconds. */
 export const GAIN_MS = 1500
 
@@ -63,6 +70,7 @@ export default function RoomScreen({
   onBuy,
   onSpend,
   onTeach,
+  onToy,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -87,6 +95,8 @@ export default function RoomScreen({
   onBuy(id: ItemId): boolean
   /** Uses one up. */
   onSpend(id: Consumable): boolean
+  /** The toy the ball button throws from now on. */
+  onToy(toy: ToyId): void
   /** A treat taught a puppy a little more of a trick. */
   onTeach(id: string, trick: Trick): Promise<void>
   now?: () => number
@@ -249,6 +259,10 @@ export default function RoomScreen({
     status.needs.findIndex((n) => n.id === picked),
   )
 
+  useEffect(() => {
+    stageRef.current?.setToy(wallet.toy)
+  }, [createStage, wallet.toy, stageRef])
+
   const ringed = status.needs.length > 1 ? selected : null
   useEffect(() => {
     stageRef.current?.select(ringed)
@@ -289,7 +303,7 @@ export default function RoomScreen({
     onTeach(puppy.id, given.taught).catch(() => {})
   }
   const foods = SHOP.flatMap((item) => {
-    const left = item.aisle === 'food' ? (wallet.stock[item.id] ?? 0) : 0
+    const left = item.aisle === 'food' ? (wallet.stock[item.id as FoodId] ?? 0) : 0
     return left ? [{ id: item.id as FoodId, left }] : []
   })
   const busy = status.needs.find((n) => n.mode === 'bath' || n.mode === 'brush')?.mode
@@ -356,7 +370,7 @@ export default function RoomScreen({
             </span>
             {shopOpen && (
               <div id={shopId} className="room-sheet">
-                <Shop wallet={wallet} onBuy={onBuy} />
+                <Shop wallet={wallet} onBuy={onBuy} onToy={onToy} />
               </div>
             )}
           </div>
@@ -425,6 +439,7 @@ export default function RoomScreen({
         idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
         onTrick={(pose) => stageRef.current?.trick(selected, pose)}
+        toy={TOY_NAMES[wallet.toy]}
         treats={
           treats > 0 && (
             <button type="button" aria-label={`Chuche, quedan ${treats}`} onClick={giveTreat}>

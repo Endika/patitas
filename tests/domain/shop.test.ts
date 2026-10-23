@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buy, itemOf, spendOne } from '../../src/domain/shop'
+import { buy, chooseToy, itemOf, spendOne } from '../../src/domain/shop'
 import { createWallet, withWalletDefaults } from '../../src/domain/wallet'
 
 const wallet = (coins: number) => ({ ...createWallet(0), coins })
@@ -24,8 +24,22 @@ describe('shop', () => {
     expect(spendOne(used, 'light')).toBeNull()
   })
 
-  it('reads a wallet saved before the shop as having bought nothing', () => {
-    const { stock: _stock, ...old } = createWallet(0)
-    expect(withWalletDefaults(old).stock).toEqual({})
+  it('keeps a toy once bought, and sells it only once', () => {
+    const bought = buy(wallet(100), 'bone')!
+    expect(bought.owned).toEqual(['bone'])
+    expect(bought.coins).toBe(100 - itemOf('bone').price)
+    expect(buy(bought, 'bone')).toBeNull()
+  })
+
+  it('throws the ball or a toy owned, never one not bought', () => {
+    expect(chooseToy(wallet(0), 'plush')).toBeNull()
+    const owned = buy(wallet(100), 'plush')!
+    expect(chooseToy(owned, 'plush')!.toy).toBe('plush')
+    expect(chooseToy(owned, 'ball')!.toy).toBe('ball')
+  })
+
+  it('reads a wallet saved before the shop as having bought nothing, and throwing the ball', () => {
+    const { stock: _stock, owned: _owned, toy: _toy, ...old } = createWallet(0)
+    expect(withWalletDefaults(old)).toMatchObject({ stock: {}, owned: [], toy: 'ball' })
   })
 })

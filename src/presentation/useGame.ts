@@ -3,7 +3,7 @@ import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
 import { teach, type Puppy, type Trick } from '@/domain/puppy'
-import { buy, spendOne, type Consumable, type ItemId } from '@/domain/shop'
+import { buy, chooseToy, spendOne, type Consumable, type ItemId, type ToyId } from '@/domain/shop'
 import { createWallet, earn, withWalletDefaults, type Deed, type Wallet } from '@/domain/wallet'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
 import type { GameStorage } from '@/infrastructure/storage'
@@ -32,6 +32,8 @@ export interface Game {
   buy(id: ItemId): boolean
   /** Uses one up; false when there is none left. */
   spend(id: Consumable): boolean
+  /** The toy the ball button throws, if owned. */
+  toy(toy: ToyId): void
   /** A treat taught the puppy a little more of `trick`. */
   teach(id: string, trick: Trick): Promise<void>
 }
@@ -110,6 +112,7 @@ export function useGame(
   }, [])
   const buyItem = useCallback((id: ItemId) => change((w) => buy(w, id)), [change])
   const spend = useCallback((id: Consumable) => change((w) => spendOne(w, id)), [change])
+  const pickToy = useCallback((toy: ToyId) => void change((w) => chooseToy(w, toy)), [change])
 
   const earnFor = useCallback(
     (deed: Deed) => {
@@ -145,6 +148,7 @@ export function useGame(
     earn: earnFor,
     buy: buyItem,
     spend,
+    toy: pickToy,
     teach: teachTrick,
   }
 }

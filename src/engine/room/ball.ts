@@ -1,9 +1,21 @@
 import * as THREE from 'three'
+import type { ToyId } from '@/domain/shop'
 import { clamp, MAX_DT, type Vec3 } from '@/engine/math'
 import { sphereAt, SPHERES, type Body, type Sphere } from './bodies'
 import { PLAY, playAxes, playLocal, playWorld, type FixedCamera } from './camera'
 
 export const BALL_R = 0.075
+
+/**
+ * How each toy moves once thrown, all of them caught and carried as the ball is: how much of its
+ * fall it bounces back, how fast the floor slows it per second and whether it rolls or slides
+ * and spins.
+ */
+export const TOYS: Record<ToyId, { bounce: number; friction: number; rolls: boolean }> = {
+  ball: { bounce: 0.55, friction: 2.6, rolls: true },
+  bone: { bounce: 0.3, friction: 4.5, rolls: false },
+  plush: { bounce: 0.12, friction: 7, rolls: false },
+}
 
 export interface BallState {
   pos: Vec3
@@ -15,6 +27,11 @@ export interface BallState {
   hemmedT: number
   /** Taken from one puppy's mouth by the other since it was last thrown. */
   stolen: boolean
+  /** What is thrown. */
+  toy: ToyId
+  /** A toy that does not roll lies turned this way about the vertical, and spins at `spin` rad/s. */
+  yaw: number
+  spin: number
 }
 
 export function createBall(): BallState {
@@ -25,6 +42,9 @@ export function createBall(): BallState {
     state: 'none',
     hemmedT: 0,
     stolen: false,
+    toy: 'ball',
+    yaw: 0,
+    spin: 0,
   }
 }
 
@@ -35,7 +55,7 @@ export function createBall(): BallState {
 const RETURN_ACC = 3,
   RETURN_V = 0.6
 /** How fast the floor slows a rolling ball, per second. */
-const FRICTION = 2.6
+const FRICTION = TOYS.ball.friction
 
 /** Gravity, bounces, floor friction and invisible walls at the frame edges. Only moves a loose ball. */
 export function stepBall(ball: BallState, cam: FixedCamera, dt: number): void {
@@ -67,15 +87,18 @@ export function stepBall(ball: BallState, cam: FixedCamera, dt: number): void {
     v.z += nz * push
   }
   p.addScaledVector(v, dt)
+  const toy = TOYS[ball.toy]
   if (p.y < BALL_R) {
     p.y = BALL_R
-    if (v.y < 0) v.y = -v.y * 0.55
+    if (v.y < 0) v.y = -v.y * toy.bounce
     if (v.y < 0.25) v.y = 0
-    const f = Math.exp(-FRICTION * dt)
+    const f = Math.exp(-toy.friction * dt)
     v.x *= f
     v.z *= f
+    ball.spin *= f
   }
-  if (p.y <= BALL_R + 1e-3) {
+  if (!toy.rolls) ball.yaw += ball.spin * dt
+  else if (p.y <= BALL_R + 1e-3) {
     ball.rot.x += (v.z / BALL_R) * dt
     ball.rot.z -= (v.x / BALL_R) * dt
   }

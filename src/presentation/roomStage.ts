@@ -1,5 +1,5 @@
 import type { Care, Health, MessKind, PlaceAccident, WeightStatus } from '@/domain/care'
-import type { FoodId } from '@/domain/shop'
+import type { FoodId, ToyId } from '@/domain/shop'
 import type { Puppy, Trick } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
 
@@ -72,6 +72,8 @@ export interface RoomStage {
    */
   resume(cares: ReadonlyMap<string, Care>, away: number): void
   takeBall(): void
+  /** What the ball button throws from now on; one in the air or in a mouth is swapped once back. */
+  setToy(toy: ToyId): void
   stowBall(): void
   /**
    * The puppy at `index` does the trick, if it is free to: at once if it knows it well, else

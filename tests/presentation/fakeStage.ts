@@ -1,5 +1,6 @@
 import type { Care, PlaceAccident } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
+import type { ToyId } from '@/domain/shop'
 import type { Deed } from '@/domain/wallet'
 import type { PuppyNeeds, RoomStage, StageStatus, TrickPose } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
@@ -38,6 +39,8 @@ export function createFakeStage(place?: PlaceAccident) {
   const shown: Puppy[][] = []
   /** Each puppy the screen pointed out to the room, in order. */
   const selected: (number | null)[] = []
+  /** Each toy the screen chose to throw, in order. */
+  const toys: ToyId[] = []
   /** The care each puppy came in with, in order of arrival. */
   const arrived: { id: string; care: Care }[] = []
   const held = new Map<string, Care>()
@@ -71,6 +74,7 @@ export function createFakeStage(place?: PlaceAccident) {
       for (const [id, care] of cares) if (held.has(id)) held.set(id, care)
     },
     takeBall: () => void calls.push('takeBall'),
+    setToy: (toy) => void toys.push(toy),
     stowBall: () => void calls.push('stowBall'),
     trick: (index, pose) => void calls.push(`trick:${index}:${pose}`),
     treat(index) {
@@ -103,6 +107,7 @@ export function createFakeStage(place?: PlaceAccident) {
   return {
     calls,
     selected,
+    toys,
     arrived,
     /** Changes the care the room keeps for a puppy, as time in it would. */
     hold: (id: string, care: Care) => void held.set(id, care),

@@ -501,6 +501,30 @@ describe('RoomScreen', () => {
     expect(screen.queryByRole('button', { name: /Chuche/ })).not.toBeInTheDocument()
   })
 
+  it('sells a toy once, and throws it instead of the ball once chosen', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    await storage.saveWallet({ ...createWallet(0), coins: 45 })
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ needs: [needs('k', 'Kuma')] }))
+    expect(stage.toys).toEqual(['ball'])
+
+    await user.click(screen.getByRole('button', { name: /Tienda/ }))
+    const shop = within(screen.getByRole('region', { name: 'Tienda' }))
+    await user.click(shop.getByRole('tab', { name: 'Juguetes' }))
+    expect(shop.getByRole('button', { name: 'Pelota, en uso' })).toBeInTheDocument()
+    expect(shop.getByRole('button', { name: 'Peluche: faltan 15 monedas' })).toBeDisabled()
+    await user.click(shop.getByRole('button', { name: 'Comprar Hueso por 40 monedas' }))
+    await user.click(shop.getByRole('button', { name: 'Usar Hueso' }))
+    expect(stage.toys.at(-1)).toBe('bone')
+    expect(shop.getByRole('button', { name: 'Hueso, en uso' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sacar el hueso' })).toBeInTheDocument()
+    await waitFor(async () =>
+      expect(await storage.loadWallet()).toMatchObject({ owned: ['bone'], toy: 'bone', coins: 5 }),
+    )
+  })
+
   it('lets «+5» go after a while', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const storage = await adopted(['Kuma'])
