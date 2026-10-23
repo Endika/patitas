@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/Endika/patitas/compare/v0.22.0...v0.23.0) (2026-10-23)
+
+
+### Features
+
+* **mic:** an «Escuchar» button that lets them hear you ([d53252e](https://github.com/Endika/patitas/commit/d53252e5407ac1a9eeb18aab1e4872fa206ddbab))
+
 ## [0.22.0](https://github.com/Endika/patitas/compare/v0.21.0...v0.22.0) (2026-10-23)
 
 
