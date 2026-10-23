@@ -25,6 +25,7 @@ import {
   BEG_EVERY,
   createRoutineState,
   followBed,
+  forgetMovedRoute,
   forgetRoute,
   giveWay,
   goWeigh,
@@ -35,6 +36,7 @@ import {
   MUD_EVERY,
   RELIEF_TIME,
   letGo,
+  routePlaces,
   relieveNow,
   SPLASH_TIME,
   stepAside,
@@ -942,6 +944,66 @@ describe('the room laid out anew', () => {
     expect(at0).toBe('toBowl')
     expect(p.fed).toBe(1)
     expect(Math.hypot(p.m.pos.x - meal.x, p.m.pos.z - meal.z)).toBeLessThan(0.3)
+  })
+})
+
+describe('the screen turned', () => {
+  /** A hungry puppy run until it is eating from a full bowl, in a room of its own. */
+  const eating = () => {
+    const spots = computeSpots(cam, 1)
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    for (let n = 0; n < 20 / DT && p.r.routine !== 'eating'; n++) run([p], DT, at(12), spots)
+    expect(p.r.routine).toBe('eating')
+    return { p, spots }
+  }
+
+  it('eating, it eats on when its bowl barely moves, and chooses again when it truly moves', () => {
+    for (const [by, after] of [
+      [0.01, 'eating'],
+      [0.3, 'none'],
+    ] as const) {
+      const { p, spots } = eating()
+      const was = routePlaces(spots)
+      spots.bowls[0]!.center.x += by
+      forgetMovedRoute(p.r, p.m, was, routePlaces(spots), 0)
+      expect(p.r.routine).toBe(after)
+    }
+  })
+
+  it('on its way to its bowl, only the mud moving does not stop it', () => {
+    const spots = computeSpots(cam, 1)
+    const p = pup(0.12, -0.12, 0.8, 0.8, 1)
+    run([p], DT, at(12), spots)
+    expect(p.r.routine).toBe('toBowl')
+    const was = routePlaces(spots)
+    spots.mud.center.x += 0.3
+    spots.garden.center.z += 0.3
+    forgetMovedRoute(p.r, p.m, was, routePlaces(spots), 0)
+    expect(p.r.routine).toBe('toBowl')
+  })
+
+  it('relieving itself where it stands, the garden moving does not stop it', () => {
+    const spots = computeSpots(cam, 1)
+    const p = pup(0.12, -0.12)
+    relieveNow(p.r, p.m, 'poop')
+    const was = routePlaces(spots)
+    spots.garden.center.x += 0.3
+    forgetMovedRoute(p.r, p.m, was, routePlaces(spots), 0)
+    expect(p.r.routine).toBe('relieving')
+  })
+
+  it('rolling in the mud, it finishes there and trots out instead of standing in it', () => {
+    const p = pup(0.12, -0.12)
+    p.r.mudAgo = MUD_EVERY
+    const ctx = { curious: 1, random: () => 0 }
+    for (let n = 0; n < 60 / DT && p.m.pose !== 'roll'; n++)
+      run([p], DT, at(12), SPOTS, undefined, undefined, ctx)
+    expect(wallowing(p.r, p.m)).toBe('roll')
+    p.seen.length = 0
+    forgetRoute(p.r, p.m)
+    run([p], 8, at(12), SPOTS, undefined, undefined, ctx)
+    expect(p.seen).toEqual(['splashing', 'none'])
+    expect(inMud(SPOTS, p.m.pos.x, p.m.pos.z)).toBe(0)
   })
 })
 
