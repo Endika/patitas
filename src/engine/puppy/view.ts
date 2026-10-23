@@ -919,15 +919,16 @@ export function tickPuppies(
     stepPoses(M, dt)
     return { ev, body: stepLocomotion(M, view.legs, dt) }
   })
-  if (views.length === 2)
-    pursueBall(
-      views.map((v) => v.fetch),
-      views.map((v) => v.motion),
-      views.map((v) => v.persona.energy),
-      ball,
-      room.cam,
-      ctx.random ?? Math.random,
-    )
+  // Always, so one left after the ball as the other leaves the room gives up
+  pursueBall(
+    views.map((v) => v.fetch),
+    views.map((v) => v.motion),
+    views.map((v) => v.persona.energy),
+    views.map((v) => !v.routine.held && v.routine.routine !== 'sleeping'),
+    ball,
+    room.cam,
+    ctx.random ?? Math.random,
+  )
   if (room.furniture) showBowls(room.furniture, views)
   const motions = crowd
   motions.length = 0

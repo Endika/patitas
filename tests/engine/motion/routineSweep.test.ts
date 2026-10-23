@@ -472,8 +472,15 @@ describe('two puppies from random starts', () => {
         () => false,
         () => {
           const [x, y] = pups as [Pup, Pup]
+          // From the other's middle or its head, the nearer
+          const hx = x.m.pos.x + Math.sin(x.m.heading) * 0.41,
+            hz = x.m.pos.z + Math.cos(x.m.heading) * 0.41
           if (y.r.routine === 'settling' || y.r.routine === 'sleeping')
-            lay = Math.min(lay, Math.hypot(x.m.pos.x - y.m.pos.x, x.m.pos.z - y.m.pos.z))
+            lay = Math.min(
+              lay,
+              Math.hypot(x.m.pos.x - y.m.pos.x, x.m.pos.z - y.m.pos.z),
+              Math.hypot(hx - y.m.pos.x, hz - y.m.pos.z),
+            )
         },
       )
       if (lay < 0.6) failed.push(`naps ${aspect} ${seed} lay=${lay.toFixed(2)}`)
