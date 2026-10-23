@@ -7,6 +7,7 @@ import { createWallet, PAY, START_COINS } from '@/domain/wallet'
 import { adoptPuppy } from '@/application/adoption'
 import { BREEDS } from '@/domain/breeds'
 import { createCare, health } from '@/domain/care'
+import { knows, TREAT_LESSON } from '@/domain/puppy'
 import type { GameStorage } from '@/infrastructure/storage'
 import { fakeHistory, type FakeHistory } from './fakeHistory'
 import { createFakePreview, createFakeStage, needs, savingStorage } from './fakeStage'
@@ -465,6 +466,39 @@ describe('RoomScreen', () => {
     await user.click(screen.getByRole('button', { name: 'Cuidar' }))
     expect(screen.queryByRole('button', { name: /Pienso premium/ })).not.toBeInTheDocument()
     await waitFor(async () => expect((await storage.loadWallet())?.stock.premium).toBe(0))
+  })
+
+  it('gives a treat from «Trucos» while there are any, and keeps the trick it taught', async () => {
+    const user = userEvent.setup()
+    const storage = await adopted(['Kuma'])
+    const kuma = (await ids(storage)).get('Kuma')!
+    await storage.saveWallet({ ...createWallet(0), stock: { treat: 2 } })
+    const stage = start(storage)
+    await roster()
+    act(() => stage.emit({ needs: [needs(kuma, 'Kuma')] }))
+    const tricks = () => user.click(screen.getByRole('button', { name: 'Trucos' }))
+
+    stage.teaches('sit')
+    await tricks()
+    await user.click(screen.getByRole('button', { name: 'Chuche, quedan 2' }))
+    expect(stage.calls).toContain('treat:0')
+    expect(screen.getByText('Kuma aprende «Sentado»')).toBeInTheDocument()
+    await waitFor(async () => {
+      const [saved] = await storage.listPuppies()
+      expect(knows(saved!, 'sit')).toBe(TREAT_LESSON)
+    })
+
+    // Asleep, it does not take the last one
+    stage.teaches(undefined)
+    await tricks()
+    await user.click(screen.getByRole('button', { name: 'Chuche, quedan 1' }))
+    expect((await storage.loadWallet())?.stock.treat).toBe(1)
+
+    stage.teaches(null)
+    await tricks()
+    await user.click(screen.getByRole('button', { name: 'Chuche, quedan 1' }))
+    await tricks()
+    expect(screen.queryByRole('button', { name: /Chuche/ })).not.toBeInTheDocument()
   })
 
   it('lets «+5» go after a while', async () => {

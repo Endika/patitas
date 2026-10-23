@@ -1,6 +1,6 @@
 import { BREEDS } from '@/domain/breeds'
-import { cleanMess, createCare, health, isNight, type Care } from '@/domain/care'
-import type { Puppy } from '@/domain/puppy'
+import { cleanMess, createCare, eatTreat, health, isNight, type Care } from '@/domain/care'
+import { knows, teach, type Puppy, type Trick } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
 import { ROOM_CAPACITY } from '@/domain/room'
 import type { Vec3 } from '@/engine/math'
@@ -73,6 +73,12 @@ import {
 const ASLEEP_AWAY = 10 * 60_000
 /** Seconds «¡Limpio!» stays up after a mess is cleaned. */
 const CLEANED_TIME = 1.2
+/** Seconds a trick it has yet to learn takes to come, after a puzzled look. */
+const TRICK_DOUBT = 1.2
+/** Seconds after a trick a treat still teaches it. */
+const TREAT_AFTER = 6
+/** Happiness a treat brings at once. */
+const TREAT_JOY = 0.15
 /** Shine a brushing must add to earn coins. */
 const BRUSHED_SHINE = 0.2
 
@@ -178,6 +184,7 @@ export function createThreeStage(
       takeBall() {},
       stowBall() {},
       trick() {},
+      treat: () => null,
       select() {},
       feed: () => false,
       bath() {},
@@ -220,6 +227,15 @@ export function createThreeStage(
   }
   /** The shine of the puppy being brushed when the brush came out. */
   let shineWas = 0
+  /** Tricks asked of puppies that do not know them well yet, with the seconds left to come. */
+  const asked = new Map<PuppyView, { pose: Trick; left: number }>()
+  /** Each puppy's last trick, and when, on the pointer clock. */
+  const lastTrick = new Map<PuppyView, { pose: Trick; at: number }>()
+  const doTrick = (v: PuppyView, pose: Trick) => {
+    if (!askTrick(v, pose)) return
+    lastTrick.set(v, { pose, at: now() })
+    did('trick')
+  }
   const now = () => performance.now() / 1000
   const free = () => views.every((v) => v.fetch.task === 'free')
   /** The puppy in its bath, if any: one at a time. */
@@ -380,6 +396,12 @@ export function createThreeStage(
   room.start((dt, t) => {
     stepBall(ball, room.cam, dt)
     syncBallMesh(room, ball)
+    for (const [v, ask] of asked) {
+      ask.left -= dt
+      if (ask.left > 0) continue
+      asked.delete(v)
+      if (views.includes(v)) doTrick(v, ask.pose)
+    }
     tickPuppies(
       views,
       { room, ball, now: now(), petting: petView, clock: clock(), underfoot: messes.underfoot },
@@ -459,6 +481,8 @@ export function createThreeStage(
         if (view.fetch.holding) ball.state = 'none'
         if (view === petView) petView = null
         view.dispose()
+        asked.delete(view)
+        lastTrick.delete(view)
         mounted.delete(id)
         bedAt.delete(view)
       }
@@ -509,7 +533,25 @@ export function createThreeStage(
     },
     trick(index, pose) {
       const v = views[index]
-      if (v && askTrick(v, pose)) did('trick')
+      if (!v) return
+      const doubt = TRICK_DOUBT * (1 - knows(v.puppy, pose))
+      if (doubt <= 0) return doTrick(v, pose)
+      if (!asleep(v)) puzzle(v.behaviour)
+      asked.set(v, { pose, left: doubt })
+    },
+    treat(index) {
+      const v = views[index]
+      if (!v || asleep(v) || v.routine.held) return null
+      v.care = eatTreat(v.care, v.breed)
+      v.behaviour.happy = Math.min(1, v.behaviour.happy + TREAT_JOY)
+      v.behaviour.perk = 1
+      const at = headWorld(v)
+      for (let n = 0; n < 2; n++) room.emitHeart(at)
+      const last = lastTrick.get(v)
+      if (!last || now() - last.at > TREAT_AFTER) return { taught: null }
+      lastTrick.delete(v)
+      v.puppy = teach(v.puppy, last.pose)
+      return { taught: last.pose }
     },
     select(index) {
       chosen = index

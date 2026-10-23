@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { adoptPuppy, type Adoption } from '@/application/adoption'
 import type { BreedId } from '@/domain/breeds'
 import type { Care } from '@/domain/care'
-import type { Puppy } from '@/domain/puppy'
+import { teach, type Puppy, type Trick } from '@/domain/puppy'
 import { buy, spendOne, type Consumable, type ItemId } from '@/domain/shop'
 import { createWallet, earn, withWalletDefaults, type Deed, type Wallet } from '@/domain/wallet'
 import { enterRoom, leaveRoom, RoomFull, type Room } from '@/domain/room'
@@ -32,6 +32,8 @@ export interface Game {
   buy(id: ItemId): boolean
   /** Uses one up; false when there is none left. */
   spend(id: Consumable): boolean
+  /** A treat taught the puppy a little more of `trick`. */
+  teach(id: string, trick: Trick): Promise<void>
 }
 
 /** The adopted puppies and who is in the room, kept in step with the storage. */
@@ -122,5 +124,27 @@ export function useGame(
     [change, now],
   )
 
-  return { state, adopt, enter, leave, loadCare, saveCare, earn: earnFor, buy: buyItem, spend }
+  const teachTrick = useCallback(async (id: string, trick: Trick) => {
+    const s = storage.current!
+    const puppy = (await s.listPuppies()).find((p) => p.id === id)
+    if (!puppy) return
+    const taught = teach(puppy, trick)
+    await s.savePuppy(taught)
+    setState(
+      (prev) => prev && { ...prev, puppies: prev.puppies.map((p) => (p.id === id ? taught : p)) },
+    )
+  }, [])
+
+  return {
+    state,
+    adopt,
+    enter,
+    leave,
+    loadCare,
+    saveCare,
+    earn: earnFor,
+    buy: buyItem,
+    spend,
+    teach: teachTrick,
+  }
 }

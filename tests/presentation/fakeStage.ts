@@ -1,7 +1,7 @@
 import type { Care, PlaceAccident } from '@/domain/care'
 import type { Puppy } from '@/domain/puppy'
 import type { Deed } from '@/domain/wallet'
-import type { PuppyNeeds, RoomStage, StageStatus } from '@/presentation/roomStage'
+import type { PuppyNeeds, RoomStage, StageStatus, TrickPose } from '@/presentation/roomStage'
 import type { PreviewStage, PreviewStatus } from '@/presentation/previewStage'
 import { createMemoryStorage } from '@/infrastructure/memoryStorage'
 import type { GameStorage } from '@/infrastructure/storage'
@@ -43,6 +43,8 @@ export function createFakeStage(place?: PlaceAccident) {
   const held = new Map<string, Care>()
   const listeners = new Set<(s: StageStatus) => void>()
   const deedListeners = new Set<(d: Deed) => void>()
+  /** What the next treat teaches: undefined when the puppy cannot take it. */
+  let treatTeaches: TrickPose | null | undefined = null
   let status: StageStatus = {
     hint: 'Toca el suelo y irá hacia allí.',
     ball: { inHand: false, disabled: false },
@@ -71,6 +73,10 @@ export function createFakeStage(place?: PlaceAccident) {
     takeBall: () => void calls.push('takeBall'),
     stowBall: () => void calls.push('stowBall'),
     trick: (index, pose) => void calls.push(`trick:${index}:${pose}`),
+    treat(index) {
+      calls.push(`treat:${index}`)
+      return treatTeaches === undefined ? null : { taught: treatTeaches }
+    },
     select: (index) => void selected.push(index),
     feed(index, food) {
       calls.push(food ? `feed:${index}:${food}` : `feed:${index}`)
@@ -108,6 +114,8 @@ export function createFakeStage(place?: PlaceAccident) {
       status = { ...status, ...next }
       for (const l of listeners) l(status)
     },
+    /** What the next treats teach, or undefined for a puppy that cannot take one. */
+    teaches: (trick: TrickPose | null | undefined) => void (treatTeaches = trick),
     /** The player does something in the room that earns coins. */
     deed: (d: Deed) => {
       for (const l of deedListeners) l(d)

@@ -4,11 +4,11 @@ import type { Wallet } from './wallet'
 export type FoodId = 'premium' | 'light' | 'energy'
 
 /** What goes once used. */
-export type Consumable = FoodId
+export type Consumable = FoodId | 'treat'
 
 export type ItemId = Consumable
 
-export type Aisle = 'food'
+export type Aisle = 'food' | 'treat'
 
 export interface Item {
   id: ItemId
@@ -21,7 +21,10 @@ export interface Item {
   blurb: string
 }
 
-export const AISLES: { id: Aisle; name: string }[] = [{ id: 'food', name: 'Comida' }]
+export const AISLES: { id: Aisle; name: string }[] = [
+  { id: 'food', name: 'Comida' },
+  { id: 'treat', name: 'Chuches' },
+]
 
 export const SHOP: Item[] = [
   {
@@ -47,6 +50,14 @@ export const SHOP: Item[] = [
     short: 'Energética',
     price: 12,
     blurb: 'Le devuelve energía para jugar.',
+  },
+  {
+    id: 'treat',
+    aisle: 'treat',
+    name: 'Chuche',
+    short: 'Chuche',
+    price: 4,
+    blurb: 'Dásela justo después de un truco y lo aprenderá antes.',
   },
 ]
 

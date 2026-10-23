@@ -253,6 +253,16 @@ export function savour(care: Care, food: FoodId, breed: Breed): Care {
   return { ...care, weightKg: clampWeight(care.weightKg - MEAL_WEIGHT_KG / 2, breed) }
 }
 
+/** A treat: a little happiness and a little weight. */
+export const TREAT_HAPPY = 0.1,
+  TREAT_WEIGHT_KG = 0.005
+
+export const eatTreat = (care: Care, breed: Breed): Care => ({
+  ...care,
+  happiness: delight(care.happiness, TREAT_HAPPY),
+  weightKg: clampWeight(care.weightKg + TREAT_WEIGHT_KG, breed),
+})
+
 export function exercise(care: Care, seconds: number, breed: Breed): Care {
   return {
     ...care,

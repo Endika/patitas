@@ -10,7 +10,7 @@ import {
 } from 'react'
 import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
-import { traits, type Puppy } from '@/domain/puppy'
+import { knows, traits, TREAT_LESSON, type Puppy, type Trick } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
 import { SHOP, type Consumable, type FoodId, type ItemId } from '@/domain/shop'
 import type { Deed, Wallet } from '@/domain/wallet'
@@ -24,6 +24,7 @@ import UnsavedNotice from '../components/UnsavedNotice'
 import { useDismiss, type Closable, type Dismissal } from '../components/useDismiss'
 import type { RoomStage, StageStatus } from '../roomStage'
 import { createThreeStage } from '../threeStage'
+import { TRICKS } from '../tricks'
 import { useFleeting } from '../useFleeting'
 import { useRoomStage } from '../useRoomStage'
 import '../room.css'
@@ -61,6 +62,7 @@ export default function RoomScreen({
   onDeed,
   onBuy,
   onSpend,
+  onTeach,
   now = Date.now,
   createStage = createThreeStage,
   exitAsked = false,
@@ -85,6 +87,8 @@ export default function RoomScreen({
   onBuy(id: ItemId): boolean
   /** Uses one up. */
   onSpend(id: Consumable): boolean
+  /** A treat taught a puppy a little more of a trick. */
+  onTeach(id: string, trick: Trick): Promise<void>
   now?: () => number
   createStage?: (canvas: HTMLCanvasElement) => RoomStage
   /** A back with nothing open: one more leaves. */
@@ -119,6 +123,9 @@ export default function RoomScreen({
     [onDeed],
   )
   const gained = useFleeting(gain, GAIN_MS)
+  // Counts the lessons, so the same one twice shows again
+  const [lesson, setLesson] = useState<{ text: string; n: number } | null>(null)
+  const learnt = useFleeting(lesson, NOTICE_MS)
   const { hostRef, stageRef, status: reported } = useRoomStage(createStage, keep, deed)
   const status = reported ?? WAITING
   // Counts the refusals, so each one says so again
@@ -265,6 +272,22 @@ export default function RoomScreen({
     return puppy ? traits(puppy.persona) : []
   }
   const stage = () => stageRef.current
+  const treats = wallet.stock.treat ?? 0
+  const giveTreat = () => {
+    const given = stageRef.current?.treat(selected)
+    if (!given) return
+    onSpend('treat')
+    const who = status.needs[selected]
+    const puppy = who && puppies.find((p) => p.id === who.id)
+    if (!given.taught || !puppy) return
+    const label = TRICKS.find(([pose]) => pose === given.taught)![1]
+    const known = knows(puppy, given.taught) + TREAT_LESSON >= 1
+    setLesson((l) => ({
+      text: known ? `${puppy.name} ya sabe «${label}»` : `${puppy.name} aprende «${label}»`,
+      n: (l?.n ?? 0) + 1,
+    }))
+    onTeach(puppy.id, given.taught).catch(() => {})
+  }
   const foods = SHOP.flatMap((item) => {
     const left = item.aisle === 'food' ? (wallet.stock[item.id] ?? 0) : 0
     return left ? [{ id: item.id as FoodId, left }] : []
@@ -386,6 +409,11 @@ export default function RoomScreen({
           </p>
         )}
       </header>
+      {learnt && (
+        <p key={learnt.n} role="status" className="room-toast">
+          {learnt.text}
+        </p>
+      )}
       {status.cleaned && (
         <p role="status" className="room-toast">
           ¡Limpio!
@@ -397,6 +425,13 @@ export default function RoomScreen({
         idle={empty}
         onBall={(inHand) => (inHand ? stageRef.current?.stowBall() : stageRef.current?.takeBall())}
         onTrick={(pose) => stageRef.current?.trick(selected, pose)}
+        treats={
+          treats > 0 && (
+            <button type="button" aria-label={`Chuche, quedan ${treats}`} onClick={giveTreat}>
+              Chuche · {treats}
+            </button>
+          )
+        }
         care={
           <CareActions
             selected={selected}

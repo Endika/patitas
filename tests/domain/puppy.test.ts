@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Persona } from '@/domain/breeds'
-import { createPuppy, InvalidPuppyName, traits, withPersonaDefaults } from '@/domain/puppy'
+import {
+  createPuppy,
+  InvalidPuppyName,
+  knows,
+  teach,
+  traits,
+  TREAT_LESSON,
+  withPersonaDefaults,
+} from '@/domain/puppy'
 
 const make = (name: string, random: () => number = () => 0.5) =>
   createPuppy({ name, breedId: 'beagle', now: 1000, random })
@@ -106,5 +114,22 @@ describe('traits', () => {
   it('names three at most', () => {
     const all = persona({ energy: 1, cuddly: 0, curious: 0.95, bath: 1, social: 0.1 })
     expect(traits(all)).toEqual(['Juguetón', 'Independiente', 'Le encanta el baño'])
+  })
+})
+
+describe('teach', () => {
+  const puppy = createPuppy({ name: 'Kuma', breedId: 'shiba', now: 1, random: () => 0.5 })
+
+  it('knows no trick to begin with, and a treat after one teaches a quarter of it', () => {
+    expect(knows(puppy, 'sit')).toBe(0)
+    const once = teach(puppy, 'sit')
+    expect(knows(once, 'sit')).toBe(TREAT_LESSON)
+    expect(knows(once, 'lie')).toBe(0)
+  })
+
+  it('never knows a trick more than fully', () => {
+    let p = puppy
+    for (let i = 0; i < 6; i++) p = teach(p, 'belly')
+    expect(knows(p, 'belly')).toBe(1)
   })
 })
