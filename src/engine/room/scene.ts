@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { ToyId } from '@/domain/shop'
 import { MAX_DT } from '@/engine/math'
 import { goTo, type MotionState } from '@/engine/motion/locomotion'
 import { createBackdrop } from './backdrop'
@@ -80,7 +81,8 @@ export interface RoomScene {
   camera: THREE.PerspectiveCamera
   cam: FixedCamera
   quality: Quality
-  ballMesh: THREE.Mesh
+  /** One mesh per toy; only the one in play shows. */
+  toys: Record<ToyId, THREE.Object3D>
   /** A bed and a bowl per puppy, the scale and the garden; none in the adoption preview. */
   furniture: Furniture | null
   /**
@@ -169,8 +171,64 @@ function tennisBall(): THREE.Mesh {
     new THREE.MeshStandardMaterial({ map, roughness: 0.95 }),
   )
   mesh.castShadow = true
-  mesh.visible = false
   return mesh
+}
+
+/** A chew bone lying flat, long across x: a shaft with two knobs at each end. */
+function chewBone(): THREE.Group {
+  const mat = new THREE.MeshStandardMaterial({ color: '#efe3cb', roughness: 0.8 })
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.15, 14), mat)
+  shaft.rotation.z = Math.PI / 2
+  const knob = new THREE.SphereGeometry(0.027, 16, 12)
+  const g = new THREE.Group()
+  g.add(shaft)
+  for (const x of [-0.078, 0.078])
+    for (const z of [-0.02, 0.02]) {
+      const k = new THREE.Mesh(knob, mat)
+      k.position.set(x, 0, z)
+      g.add(k)
+    }
+  return g
+}
+
+/** A small pink plush bear sitting up: body, head, ears and a pale snout. */
+function plushBear(): THREE.Group {
+  const fur = new THREE.MeshStandardMaterial({ color: '#e7a1b3', roughness: 1 })
+  const pale = new THREE.MeshStandardMaterial({ color: '#f6dde3', roughness: 1 })
+  const ink = new THREE.MeshStandardMaterial({ color: '#2b2427', roughness: 0.4 })
+  const ball = (r: number, mat: THREE.Material, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat)
+    m.position.set(x, y, z)
+    return m
+  }
+  const body = ball(0.045, fur, 0, 0, 0)
+  body.scale.set(1, 0.95, 0.85)
+  const g = new THREE.Group()
+  g.add(
+    body,
+    ball(0.034, fur, 0, 0.055, 0.008),
+    ball(0.013, fur, -0.026, 0.083, 0.004),
+    ball(0.013, fur, 0.026, 0.083, 0.004),
+    ball(0.014, pale, 0, 0.05, 0.036),
+    ball(0.005, ink, 0, 0.055, 0.049),
+    ball(0.005, ink, -0.013, 0.066, 0.036),
+    ball(0.005, ink, 0.013, 0.066, 0.036),
+    ball(0.016, fur, -0.03, -0.035, 0.03),
+    ball(0.016, fur, 0.03, -0.035, 0.03),
+  )
+  return g
+}
+
+/** How far below each toy's middle the floor is when it lies there. */
+const TOY_REST: Record<ToyId, number> = { ball: BALL_R, bone: 0.027, plush: 0.05 }
+
+function toyMeshes(): Record<ToyId, THREE.Object3D> {
+  const toys = { ball: tennisBall(), bone: chewBone(), plush: plushBear() }
+  for (const t of Object.values(toys)) {
+    t.traverse((o) => void (o.castShadow = true))
+    t.visible = false
+  }
+  return toys
 }
 
 function heartTexture(): THREE.CanvasTexture {
@@ -310,8 +368,8 @@ export function createRoomScene(
   scene.add(rim)
   const backdrop = createBackdrop(cam)
   scene.add(backdrop.group)
-  const ballMesh = tennisBall()
-  scene.add(ballMesh)
+  const toys = toyMeshes()
+  for (const t of Object.values(toys)) scene.add(t)
 
   const fpsReadout = fpsOverlay(canvas)
   const views = new Set<SceneView>()
@@ -413,7 +471,7 @@ export function createRoomScene(
     camera,
     cam,
     quality,
-    ballMesh,
+    toys,
     furniture: withFurniture ? addFurniture(scene, cam, 1) : null,
     furnish(puppies) {
       if (!room.furniture || room.furniture.puppies === puppies) return false
@@ -487,13 +545,17 @@ export function createRoomScene(
   return room
 }
 
-/** Puts the ball mesh where the ball is: in front of the camera when in hand. */
+/** Shows the toy in play where the ball is: in front of the camera when in hand. */
 export function syncBallMesh(room: RoomScene, ball: BallState): void {
-  const mesh = room.ballMesh
-  mesh.visible = ball.state !== 'none'
+  for (const [id, t] of Object.entries(room.toys))
+    t.visible = id === ball.toy && ball.state !== 'none'
+  const mesh = room.toys[ball.toy]
   if (ball.state === 'hand') ball.pos.set(0, -0.26, -1).applyMatrix4(room.camera.matrixWorld)
   mesh.position.copy(ball.pos)
-  mesh.rotation.set(ball.rot.x, 0, ball.rot.z)
+  if (ball.toy === 'ball') return void mesh.rotation.set(ball.rot.x, 0, ball.rot.z)
+  // Lying or flying it sits on the floor, not on the ball's height; in a mouth, held by its middle
+  if (ball.state === 'air') mesh.position.y -= BALL_R - TOY_REST[ball.toy]
+  mesh.rotation.set(0, ball.yaw, 0)
 }
 
 /**

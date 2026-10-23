@@ -1,3 +1,4 @@
+import type { ToyId } from '@/domain/shop'
 // @vitest-environment node
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
@@ -268,6 +269,26 @@ describe('fetch games', () => {
     },
   )
 
+  it.each(SEEDS.flatMap((seed) => (['bone', 'plush'] as const).map((toy) => [toy, seed] as const)))(
+    'plays as well with the %s, which bounces less and slides (seed %i)',
+    (toy, seed) => {
+      const { worst, throws, grabbed, longest, step, gaveUp, overlapFor } = play(
+        10,
+        false,
+        seed,
+        toy,
+      )
+      expect(worst).toBeGreaterThanOrEqual(-OVERLAP)
+      expect(step).toBeLessThanOrEqual(APART_STEP + 1e-9)
+      // A toy that stops where it lands, against a puppy, is given up on a little more often
+      expect(gaveUp).toBeLessThanOrEqual(2)
+      expect(overlapFor).toBeLessThanOrEqual(OVERLAP_FRAMES)
+      expect(longest).toBeLessThan(STUCK)
+      expect(throws).toBeGreaterThan(40)
+      expect(grabbed).toBeGreaterThan(throws * 0.8)
+    },
+  )
+
   it.each(SEEDS)(
     'never moves a sleeper the chase goes past, nor lets the chaser into it or stick (seed %i)',
     (seed) => {
@@ -299,7 +320,7 @@ const STUCK = 30
  * between throws or with a chaser busy; `step` the most `separate` moved a puppy in a frame;
  * `gaveUp` the chases given up; `overlapFor` the most frames in a row any two bodies overlapped.
  */
-function play(minutes: number, sleeper: boolean, seed: number) {
+function play(minutes: number, sleeper: boolean, seed: number, toy: ToyId = 'ball') {
   const cam = fitCamera(createCamera(), 0.46)
   const clamp = (x: number, z: number) => clampPlay(cam, x, z)
   const clampTo: ClampTo = (p) => clampPlayTo(cam, p)
@@ -311,7 +332,7 @@ function play(minutes: number, sleeper: boolean, seed: number) {
   if (sleeper) setPose(dogs[1]!.m, 'sleep')
   const motions = dogs.map((p) => p.m),
     bodies = dogs.map((p) => placed(p.m))
-  const ball = createBall()
+  const ball = { ...createBall(), toy }
   let worst = Infinity,
     grabbed = 0,
     throws = 0,

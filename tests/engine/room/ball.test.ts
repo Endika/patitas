@@ -92,6 +92,35 @@ describe('stepBall', () => {
     expect(ball.rot.z).toBeLessThan(0)
   })
 
+  it.each(['bone', 'plush'] as const)(
+    'lets the %s bounce less than the ball and slide to a stop sooner, turning instead of rolling',
+    (toy) => {
+      const cam = fitCamera(createCamera(), 1)
+      const drop = (which: BallState['toy']) => {
+        const ball: BallState = { ...createBall(), toy: which, state: 'air', spin: 5 }
+        placeLocal(cam, ball, 0, 0)
+        ball.pos.y = 0.5
+        ball.vel.set(0.8, 0, 0)
+        let bounce = 0,
+          landed = false,
+          still = Infinity
+        for (let n = 0; n < 240; n++) {
+          stepBall(ball, cam, DT)
+          if (ball.pos.y <= BALL_R + 1e-6) landed = true
+          else if (landed) bounce = Math.max(bounce, ball.pos.y - BALL_R)
+          if (still === Infinity && Math.hypot(ball.vel.x, ball.vel.z) < 0.01) still = n
+        }
+        return { ball, bounce, still }
+      }
+      const rolled = drop('ball'),
+        thrown = drop(toy)
+      expect(thrown.bounce).toBeLessThan(rolled.bounce)
+      expect(thrown.still).toBeLessThan(rolled.still)
+      expect(thrown.ball.rot.z).toBe(0)
+      expect(thrown.ball.yaw).not.toBe(0)
+    },
+  )
+
   it('leaves a ball that is not in the air alone', () => {
     const cam = fitCamera(createCamera(), 1)
     const ball = createBall()

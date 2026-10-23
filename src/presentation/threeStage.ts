@@ -182,6 +182,7 @@ export function createThreeStage(
       placeAccidents: () => undefined,
       resume() {},
       takeBall() {},
+      setToy() {},
       stowBall() {},
       trick() {},
       treat: () => null,
@@ -201,6 +202,8 @@ export function createThreeStage(
   }
 
   const ball = createBall()
+  /** The toy the player chose, swapped in once the one in play is back. */
+  let toy = ball.toy
   const messes = createMessLayer(room.scene)
   const baths = createBathLayer(room.scene)
   const brushes = createBrushLayer(room.scene)
@@ -394,6 +397,7 @@ export function createThreeStage(
   })
 
   room.start((dt, t) => {
+    if (ball.toy !== toy && (ball.state === 'none' || ball.state === 'hand')) ball.toy = toy
     stepBall(ball, room.cam, dt)
     syncBallMesh(room, ball)
     for (const [v, ask] of asked) {
@@ -527,6 +531,9 @@ export function createThreeStage(
     },
     takeBall() {
       if (views.length && ball.state !== 'hand' && free()) offerBall(views, ball)
+    },
+    setToy(next) {
+      toy = next
     },
     stowBall() {
       if (ball.state === 'hand') putBallAway(views, ball)

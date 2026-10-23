@@ -26,6 +26,7 @@ export default function Hud({
   idle,
   onBall,
   onTrick,
+  toy = 'la pelota',
   treats,
   care,
   mode,
@@ -37,6 +38,8 @@ export default function Hud({
   idle: boolean
   onBall(inHand: boolean): void
   onTrick(pose: TrickPose): void
+  /** What the ball button takes out and puts away, as «la pelota». */
+  toy?: string
   /** What else the «Trucos» tray holds after the tricks: the treat, when there are any. */
   treats?: ReactNode
   /** The care actions «Cuidar» opens; without them there is no «Cuidar». */
@@ -125,7 +128,7 @@ export default function Hud({
             disabled={idle || status.ball.disabled}
             onClick={() => onBall(status.ball.inHand)}
           >
-            {status.ball.inHand ? 'Guardar la pelota' : 'Sacar la pelota'}
+            {status.ball.inHand ? `Guardar ${toy}` : `Sacar ${toy}`}
           </button>
           <button
             type="button"

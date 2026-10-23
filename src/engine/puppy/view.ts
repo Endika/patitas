@@ -809,6 +809,9 @@ const FED_HAPPY = 0.35,
   PLAY_HAPPY = 0.35,
   GREET_HAPPY = 0.2
 
+/** Radians a second a thrown toy that does not roll turns about the vertical. */
+const TOY_SPIN = 7
+
 /** What each of two puppies in the room sees of the other, kept to fill every frame. */
 const PEERS = [0, 1].map(() => createPeer(BREEDS.dorado.defaultPersona))
 
@@ -1021,7 +1024,10 @@ export function tickPuppies(
     applyPose(view, pose, body, dt, t)
     cheerUp(view)
     view.group.updateMatrixWorld(true)
-    if (view.fetch.holding) mouthWorld(view, ball.pos)
+    if (view.fetch.holding) {
+      mouthWorld(view, ball.pos)
+      ball.yaw = M.heading
+    }
     if (M.pose === 'sleep' && M.sleepW > 0.8) {
       view.snoreT -= dt
       if (view.snoreT <= 0) {
@@ -1210,6 +1216,8 @@ export function throwBall(
   random: () => number = Math.random,
 ): void {
   ball.vel.copy(vel)
+  // A toy that does not roll turns as it flies, the way it was flung
+  ball.spin = vel.x >= 0 ? TOY_SPIN : -TOY_SPIN
   ball.state = 'air'
   ball.stolen = false
   for (const v of views) {
