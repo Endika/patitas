@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2](https://github.com/Endika/patitas/compare/v0.9.1...v0.9.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **room:** let a puppy in the mud finish there, and re-route on a resize only one whose own piece moved ([feb4714](https://github.com/Endika/patitas/commit/feb47145d3a5677af380646d9c071368cf3317fd))
+* **room:** read every need fuller-is-better, coloured by how it stands, and name the health on its chip ([29ca4ec](https://github.com/Endika/patitas/commit/29ca4ecb015b6d4e2300feb028b62e6e6740c8a3))
+
 ## [0.9.1](https://github.com/Endika/patitas/compare/v0.9.0...v0.9.1) (2026-10-22)
 
 
