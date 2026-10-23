@@ -10,7 +10,7 @@ import {
 } from 'react'
 import { BREEDS } from '@/domain/breeds'
 import { comeBack, createCare, type Care } from '@/domain/care'
-import type { Puppy } from '@/domain/puppy'
+import { traits, type Puppy } from '@/domain/puppy'
 import type { Room } from '@/domain/room'
 import { CareActions, CareMode } from '../components/Care'
 import FullscreenButton from '../components/FullscreenButton'
@@ -224,6 +224,10 @@ export default function RoomScreen({
     const puppy = puppies.find((p) => p.id === id)
     return puppy ? BREEDS[puppy.breedId].label : ''
   }
+  const traitsOf = (id: string) => {
+    const puppy = puppies.find((p) => p.id === id)
+    return puppy ? traits(puppy.persona) : []
+  }
   const stage = () => stageRef.current
   const busy = status.needs.find((n) => n.mode === 'bath' || n.mode === 'brush')?.mode
 
@@ -259,6 +263,7 @@ export default function RoomScreen({
             selected={selected}
             onSelect={(id) => setChosen({ id, after: touched?.count ?? 0 })}
             breedOf={breedOf}
+            traitsOf={traitsOf}
             onOpen={onOpen}
           />
           {/* With nobody in the room, who to bring in is the only thing to do */}
