@@ -32,7 +32,13 @@ import { anatomy } from '@/engine/puppy/anatomy'
 import { bodyOf, bodyShape, createBody, type BodyShape } from '@/engine/room/bodies'
 import { clampPlay, createCamera, fitCamera, PLAY, playHalf, playWorld } from '@/engine/room/camera'
 import { separate } from '@/engine/room/crowd'
-import { computeSpots, inMud, inOval, type Spots } from '@/engine/room/furniture'
+import {
+  computeSpots,
+  furnitureObstacles,
+  inMud,
+  inOval,
+  type Spots,
+} from '@/engine/room/furniture'
 import { seeded } from '../seeded'
 
 /**
@@ -80,14 +86,19 @@ function pup(i: number, x: number, z: number, hunger: number, bowl: number): Pup
   }
 }
 
-/** Two spots of open floor half a metre apart, clear of the furniture and the puddle. */
-function starts(cam: ReturnType<typeof fitCamera>, spots: Spots, random: () => number) {
+/** Two spots of open floor `apart` (half a metre) apart, clear of the furniture and the puddle. */
+function starts(
+  cam: ReturnType<typeof fitCamera>,
+  spots: Spots,
+  random: () => number,
+  apart = 0.5,
+) {
   const out: { x: number; z: number }[] = []
   for (let n = 0; out.length < 2 && n < 10000; n++) {
     const d = PLAY.near + 0.1 + random() * (PLAY.far - PLAY.near - 0.2)
     const [x, z] = playWorld(cam, d, (random() * 2 - 1) * 0.9 * playHalf(cam, d))
     if ([...spots.beds, ...spots.bowls, spots.scale].some((s) => inOval(s, x, z, 0.2))) continue
-    if (inMud(spots, x, z) > 0 || out.some((p) => Math.hypot(p.x - x, p.z - z) < 0.5)) continue
+    if (inMud(spots, x, z) > 0 || out.some((p) => Math.hypot(p.x - x, p.z - z) < apart)) continue
     out.push({ x, z })
   }
   return out
@@ -344,6 +355,53 @@ describe('two puppies from random starts', () => {
       if (t == null) failed.push(`greet ${aspect} ${seed} ${pups.map((p) => p.r.routine)}`)
       keptApart()
       expect(t).not.toBeNull()
+    },
+  )
+
+  it.each(cases)(
+    'the two play in place and stay apart at aspect $aspect, seed $seed',
+    ({ aspect, cam, spots, seed }) => {
+      const [a, b] = starts(cam, spots, seeded(seed * 67 + aspect * 100), 1)
+      // No two open spots a body apart in this room: no game to start
+      if (!a || !b) return
+      const pups = [pup(0, a!.x, a!.z, 0.3, 0), pup(1, b!.x, b!.z, 0.3, 0)]
+      for (const p of pups) {
+        p.r.playAgo = 90
+        p.r.alone = 15
+      }
+      const games = new Set(['sparring'])
+      const pieces = furnitureObstacles(spots)
+      let played = false,
+        near = Infinity,
+        trod = 0
+      const t = run(
+        pups,
+        cam,
+        spots,
+        noon,
+        20,
+        () => played && pups.every((p) => p.r.routine === 'none'),
+        () => {
+          played ||= pups.every((p) => games.has(p.r.routine))
+          if (!pups.every((p) => games.has(p.r.routine) && p.r.playT > 1)) return
+          const [x, y] = pups as [Pup, Pup]
+          near = Math.min(near, Math.hypot(x.m.pos.x - y.m.pos.x, x.m.pos.z - y.m.pos.z))
+          for (const p of pups)
+            if (
+              inMud(spots, p.m.pos.x, p.m.pos.z) > 0 ||
+              pieces.some((c) => Math.hypot(p.m.pos.x - c.x, p.m.pos.z - c.z) < c.r)
+            )
+              trod++
+        },
+        // Every die rolls lowest: they ask at once and always join
+        () => 0,
+      )
+      if (t == null || near < 0.85 || trod > 0)
+        failed.push(`play ${aspect} ${seed} t=${t} near=${near.toFixed(2)} trod=${trod}`)
+      keptApart()
+      expect(t).not.toBeNull()
+      expect(near).toBeGreaterThan(0.85)
+      expect(trod).toBe(0)
     },
   )
 

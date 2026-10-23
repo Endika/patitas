@@ -110,8 +110,9 @@ interface Pup {
   left: { kind: MessKind; x: number; z: number }[]
   /** Times it stepped onto the scale. */
   weighed: number
-  /** Times it sniffed noses with the other. */
+  /** Times it sniffed noses with the other, and played a game with it to its end. */
   greeted: number
+  played: number
   /** Its character, as the other sees it and as it greets. */
   persona: Persona
 }
@@ -131,6 +132,7 @@ function pup(x: number, z: number, energy = 0.8, hunger = 0.3, bowl = 0): Pup {
     left: [],
     weighed: 0,
     greeted: 0,
+    played: 0,
     persona: BREEDS.shiba.defaultPersona,
   }
 }
@@ -172,6 +174,7 @@ function run(
       if (ev.fed) p.fed++
       if (ev.weighed) p.weighed++
       if (ev.greeted) p.greeted++
+      if (ev.played) p.played++
       if (ev.mess) {
         p.left.push({ ...ev.mess })
         p.care = addMess(p.care, { ...ev.mess, createdAt: ctx.now })
@@ -1154,6 +1157,90 @@ describe('greeting', () => {
     run([three, four], DT, at(12), SPOTS2, undefined, undefined, { busy: true })
     run([three, four], DT, at(12), SPOTS2)
     expect([three.r.routine, four.r.routine]).toEqual(['none', 'none'])
+  })
+})
+
+describe('playing together', () => {
+  const KEEN = { ...BREEDS.beagle.defaultPersona, energy: 1, social: 0.9 },
+    DULL = { ...BREEDS.shiba.defaultPersona, energy: 0.2, social: 0.1 }
+  const PLAY = new Set(['sparring'])
+  const WIDE = fitCamera(createCamera(), 2.1)
+  const WIDE_SPOTS = computeSpots(WIDE, 2),
+    WIDE_STARTS = startPlaces(WIDE, WIDE_SPOTS, 2)
+  const wideClamp = (x: number, z: number) => clampPlay(WIDE, x, z)
+  /** Two keen to play, left alone long enough, in the portrait room or a wide one. */
+  const ready = (wide: boolean, a = KEEN, b = KEEN) => {
+    const [l, r] = wide ? WIDE_STARTS : STARTS2
+    // A body and more apart, as a game needs
+    const d = Math.hypot(r!.x - l!.x, r!.z - l!.z)
+    const one = pup(l!.x, l!.z),
+      two = pup(l!.x + ((r!.x - l!.x) / d) * 1.1, l!.z + ((r!.z - l!.z) / d) * 1.1)
+    one.persona = a
+    two.persona = b
+    for (const p of [one, two]) {
+      p.r.playAgo = 90
+      p.r.alone = 15
+    }
+    return [one, two] as const
+  }
+  /** Runs them and keeps how near they came, centre to centre. */
+  const play = (
+    pups: readonly [Pup, Pup],
+    secs: number,
+    wide: boolean,
+    more: Partial<RoutineCtx> = {},
+  ) => {
+    let closest = Infinity
+    run(
+      [...pups],
+      secs,
+      at(12),
+      wide ? WIDE_SPOTS : SPOTS2,
+      () => {
+        // From a second into the game: they start where they happened to stand
+        const [a, b] = pups
+        if (Math.min(a.r.playT, b.r.playT) < 1 || !PLAY.has(a.r.routine)) return
+        closest = Math.min(closest, Math.hypot(a.m.pos.x - b.m.pos.x, a.m.pos.z - b.m.pos.z))
+      },
+      undefined,
+      { random: () => 0, ...(wide && { clamp: wideClamp }), ...more },
+    )
+    return closest
+  }
+
+  it('one bows and they play in place, never closer than a body apart, in a room of any shape', () => {
+    for (const wide of [false, true]) {
+      const pups = ready(wide)
+      const start = pups.map((p) => p.m.pos.clone())
+      const closest = play(pups, 12, wide)
+      for (const [i, p] of pups.entries()) {
+        expect(p.seen).toContain('sparring')
+        expect(p.played).toBe(1)
+        // Not a step either way
+        expect(p.m.pos.distanceTo(start[i]!)).toBeLessThan(0.05)
+      }
+      expect(pups.some((p) => p.seen.includes('inviting'))).toBe(true)
+      expect(closest).toBeGreaterThan(0.85)
+    }
+  })
+
+  it('one with no energy nor liking for company says no', () => {
+    const pups = ready(false, KEEN, DULL)
+    play(pups, 5, false, { random: () => 0.99 })
+    for (const p of pups) expect(p.seen).not.toContain('sparring')
+  })
+
+  it('the ball or a touch ends the game for both, unplayed', () => {
+    for (const end of ['ball', 'touch'] as const) {
+      const pups = ready(true)
+      play(pups, 3, true)
+      expect(pups[0].r.routine).toBe('sparring')
+      if (end === 'touch') touch(pups[0].r)
+      play(pups, DT, true, end === 'ball' ? { busy: true } : {})
+      play(pups, 2 * DT, true)
+      expect(pups.map((p) => p.r.routine)).toEqual(['none', 'none'])
+      expect(pups.map((p) => p.played)).toEqual([0, 0])
+    }
   })
 })
 

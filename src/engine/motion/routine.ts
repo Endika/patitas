@@ -45,6 +45,8 @@ export type Routine =
   | 'brushing'
   | 'greeting'
   | 'greeted'
+  | 'inviting'
+  | 'sparring'
 
 /**
  * The piece last walked round and the side taken, kept so the play area's edge is checked once
@@ -90,6 +92,11 @@ export interface RoutineState {
   sniffT: number
   /** Seconds since the player last touched or called it. */
   touchedAgo: number
+  /** Seconds since it last played with the other, and how long this game has gone on. */
+  playAgo: number
+  playT: number
+  /** Asked to play by the other and answered, until the asking is over. */
+  answered: boolean
   /** Where the current routine is headed, and the heading to end up at there. */
   target: Vec3
   /** The point it walks to next on the way there: the target, or a way round the furniture. */
@@ -248,6 +255,8 @@ export interface RoutineEvents {
   weighed?: true
   /** Just sniffed noses with the other, greeting it or greeted. */
   greeted?: true
+  /** Just played a game with the other to its end. */
+  played?: true
   /** Just squatted outside the garden: what it left, and where, in world coordinates. */
   mess?: { kind: MessKind; x: number; z: number }
 }
@@ -273,6 +282,28 @@ const GREET_DUE = 15,
   GREET_TIME = 3,
   GREET_NEAR = 0.2,
   GREET_SLACK = 0.25
+/**
+ * Left alone PLAY_IDLE seconds by day, with energy from PLAY_ENERGY, at most every PLAY_EVERY, one
+ * asks the other to play now and then, the more energetic and sociable the oftener: it bows to it
+ * up to INVITE_TIME, and the other joins as likely as PLAY_CHANCE plus the rest by its energy and
+ * liking for company. They play in place, facing each other, bowing and swinging SPAR_SWING
+ * aside each beat of SPAR_BEAT: a room on a phone has no clear run for two to chase down. Only
+ * two PLAY_APART apart start a game. A game lasts PLAY_TIME, and one the other ends within
+ * PLAY_SLACK of that counts.
+ */
+const PLAY_IDLE = 15,
+  PLAY_ENERGY = 0.5,
+  PLAY_EVERY = 90,
+  PLAY_RATE = 0.08,
+  INVITE_TIME = 2,
+  PLAY_CHANCE = 0.3,
+  SPAR_SWING = 0.6,
+  PLAY_APART = 0.9,
+  SPAR_BEAT = 1.6,
+  PLAY_TIME = 8,
+  PLAY_SLACK = 0.5
+/** The routines of a game, as the other sees them. */
+const PLAYING: ReadonlySet<Routine> = new Set(['inviting', 'sparring'])
 /** Away for a greeting on its return. */
 const AWAY: ReadonlySet<Routine> = new Set(['sleeping', 'stretch', 'bathing', 'brushing'])
 /** Seconds without a touch before a puppy that was woken at night goes back to bed. */
@@ -380,6 +411,9 @@ export function createRoutineState(): RoutineState {
     greetAgo: GREET_EVERY,
     sniffT: -1,
     touchedAgo: GREET_SNUB,
+    playAgo: 0,
+    playT: 0,
+    answered: false,
     target: new THREE.Vector3(),
     via: new THREE.Vector3(),
     heading: 0,
@@ -426,6 +460,8 @@ const NAPPING: ReadonlySet<Routine> = new Set(['toBed', 'settling', 'sleeping', 
 
 function enter(r: RoutineState, next: Routine) {
   if (!NAPPING.has(next)) r.nap = null
+  // A game over however it ended: no asking again for a while
+  if (PLAYING.has(r.routine) && !PLAYING.has(next)) r.playAgo = 0
   r.routine = next
   r.t = 0
   r.turnLeft = null
@@ -453,6 +489,7 @@ export function touch(r: RoutineState): boolean {
     r.routine === 'settling' ||
     r.routine === 'greeting' ||
     r.routine === 'greeted' ||
+    PLAYING.has(r.routine) ||
     r.routine === 'toBed' ||
     r.routine === 'toGarden' ||
     r.routine === 'toMud' ||
@@ -591,6 +628,8 @@ export function forgetMovedRoute(
   now: RoutePlaces | null,
   place: number,
 ): void {
+  // A game's run or room to play in is gone with the old frame
+  if (PLAYING.has(r.routine)) return forgetRoute(r, m)
   const from = was && routeSpot(r, was, place),
     to = now && routeSpot(r, now, place)
   if (!from && !to) return
@@ -912,6 +951,68 @@ const greeted: Step = (r, m, ctx, ev, dt) => {
   m.bowGoal = near && Math.sin(r.t * 5 + 1.5) > 0 ? SNIFF_BOW * 0.5 : 0
 }
 
+/** Over, however it went: no more games for a while. */
+function endPlay(r: RoutineState, m: MotionState, ev: RoutineEvents, played: boolean) {
+  if (played) ev.played = true
+  r.playAgo = 0
+  m.goal = null
+  m.face = null
+  m.bowGoal = 0
+  enter(r, 'none')
+}
+
+/** Whether the game goes on: the other in it too, and nothing more pressing for this one. */
+function playOn(r: RoutineState, ctx: RoutineCtx): boolean {
+  const peer = ctx.peer
+  return (
+    !!peer &&
+    !peer.busy &&
+    PLAYING.has(peer.routine) &&
+    !hungryFor(ctx) &&
+    !sleepy(r, ctx) &&
+    r.playT < PLAY_TIME
+  )
+}
+
+/** Bows to the other, its front low and its rump up, asking it to play. */
+const inviting: Step = (r, m, ctx, ev) => {
+  const peer = ctx.peer
+  if (peer?.routine === 'sparring') return enter(r, 'sparring')
+  if (!standingFree(peer) || r.t > INVITE_TIME || hungryFor(ctx) || sleepy(r, ctx))
+    return endPlay(r, m, ev, false)
+  // Both asked at once: the one in the second place answers instead
+  if (peer.routine === 'inviting' && ctx.place === 1) {
+    m.bowGoal = 0
+    m.face = null
+    const ago = r.playAgo
+    enter(r, 'none')
+    r.playAgo = ago
+    return
+  }
+  faceOther(r, m, peer)
+  m.bowGoal = 1
+}
+
+/**
+ * Plays in place, facing the other, without a step either way: each beat of SPAR_BEAT it bows to
+ * it, then swings its body SPAR_SWING to one side as if to dart off, half a beat after the other.
+ */
+const sparring: Step = (r, m, ctx, ev, dt) => {
+  r.playT += dt
+  const peer = ctx.peer
+  if (!peer || !playOn(r, ctx)) return endPlay(r, m, ev, r.playT >= PLAY_TIME - PLAY_SLACK)
+  m.goal = null
+  const at = r.playT / SPAR_BEAT + ctx.place * 0.5
+  const toOther = Math.atan2(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z)
+  if (at % 1 < 0.5) {
+    m.face = toOther
+    m.bowGoal = 1
+    return
+  }
+  m.bowGoal = 0
+  m.face = toOther + (Math.floor(at) % 2 ? SPAR_SWING : -SPAR_SWING)
+}
+
 const sleeping: Step = (r, m, ctx) => {
   // Night falls on a nap: in its bed it sleeps on as at night, on the floor it gets up for its bed
   if (r.nap && isNight(ctx.now)) {
@@ -1130,6 +1231,8 @@ const STEPS: { [K in Routine]?: Step } = {
   brushing: holding,
   greeting,
   greeted,
+  inviting,
+  sparring,
   toScale,
   onScale,
 }
@@ -1201,6 +1304,33 @@ function choose(r: RoutineState, m: MotionState, ctx: RoutineCtx, dt: number) {
         r.sniffT = -1
         return enter(r, 'greeting')
       }
+    }
+  }
+  if (standingFree(peer) && m.pose === 'stand' && !m.goal && !isNight(ctx.now)) {
+    const random = ctx.random ?? Math.random
+    const keen = (ctx.energy ?? 0.5) * (ctx.social ?? 0.5)
+    // Asked to play: it answers once, by its energy and liking for company
+    if (peer.routine === 'inviting' && !r.answered) {
+      r.answered = true
+      if (
+        ctx.care.energy >= PLAY_ENERGY &&
+        r.playAgo >= PLAY_EVERY &&
+        random() < PLAY_CHANCE + (1 - PLAY_CHANCE) * keen
+      ) {
+        r.playT = 0
+        return enter(r, 'sparring')
+      }
+    }
+    if (
+      peer.routine === 'none' &&
+      Math.hypot(peer.pos.x - m.pos.x, peer.pos.z - m.pos.z) >= PLAY_APART &&
+      ctx.care.energy >= PLAY_ENERGY &&
+      r.playAgo >= PLAY_EVERY &&
+      r.alone >= PLAY_IDLE &&
+      random() < PLAY_RATE * keen * dt
+    ) {
+      r.playT = 0
+      return enter(r, 'inviting')
     }
   }
   if (
@@ -1648,6 +1778,8 @@ export function stepRoutine(
   r.alone += dt
   r.greetAgo += dt
   r.touchedAgo += dt
+  r.playAgo += dt
+  if (ctx.peer?.routine !== 'inviting') r.answered = false
   r.greetDue = Math.max(0, r.greetDue - dt)
   const peer = ctx.peer
   const away = AWAY.has(r.routine),

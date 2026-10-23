@@ -795,8 +795,9 @@ const SNORE = 1.2
 const HELLO = 0.35
 /** Head down to eat it bows less than to pick up a ball, so its mouth meets the floor nearer. */
 const EAT_REACH = 0.7
-/** A full tummy: a burst of wagging; noses sniffed with the other, a smaller one. */
+/** A full tummy or a game with the other: a burst of wagging; noses sniffed, a smaller one. */
 const FED_HAPPY = 0.35,
+  PLAY_HAPPY = 0.35,
   GREET_HAPPY = 0.2
 
 /** What each of two puppies in the room sees of the other, kept to fill every frame. */
@@ -871,8 +872,9 @@ export function tickPuppies(
           ...messLocal(room.cam, r.mess.x, r.mess.z),
           createdAt: ctx.clock,
         })
-      if (r.fed || r.greeted) {
-        view.behaviour.happy = Math.min(1, view.behaviour.happy + (r.fed ? FED_HAPPY : GREET_HAPPY))
+      if (r.fed || r.greeted || r.played) {
+        const gain = r.fed ? FED_HAPPY : r.played ? PLAY_HAPPY : GREET_HAPPY
+        view.behaviour.happy = Math.min(1, view.behaviour.happy + gain)
         view.behaviour.perk = 1
       }
       if (r.weighed)
