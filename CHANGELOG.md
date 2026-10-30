@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/Endika/patitas/compare/v0.23.0...v0.23.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** bump fast-uri to 3.1.9 and serialize-javascript to 7.1.3 ([b1df257](https://github.com/Endika/patitas/commit/b1df257799f7b86f829b441325be44d2197210d8))
+
 ## [0.23.0](https://github.com/Endika/patitas/compare/v0.22.0...v0.23.0) (2026-10-23)
 
 
