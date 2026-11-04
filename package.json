@@ -55,5 +55,8 @@
     "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.0.0"
   },
-  "description": "Mobile PWA puppy game: adopt, play with and look after puppies"
+  "description": "Mobile PWA puppy game: adopt, play with and look after puppies",
+  "overrides": {
+    "minimatch": "^11.0.1"
+  }
 }
