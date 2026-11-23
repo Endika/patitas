@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/check-precache.mjs",
     "preview": "vite preview",
     "lint": "eslint src tests --max-warnings 0",
     "lint:fix": "eslint src tests --fix",
@@ -57,6 +57,9 @@
   },
   "description": "Mobile PWA puppy game: adopt, play with and look after puppies",
   "overrides": {
-    "minimatch": "^11.0.1"
+    "minimatch": "^11.0.1",
+    "workbox-build": {
+      "glob": "^13.0.0"
+    }
   }
 }
