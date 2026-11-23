@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.2](https://github.com/Endika/patitas/compare/v0.23.1...v0.23.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* **pwa:** precache the app again so installed apps update ([026f7f4](https://github.com/Endika/patitas/commit/026f7f49a59dfe1a8699403906786bf342d329fe))
+
 ## [0.23.1](https://github.com/Endika/patitas/compare/v0.23.0...v0.23.1) (2026-10-30)
 
 
